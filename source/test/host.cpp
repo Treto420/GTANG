@@ -229,7 +229,21 @@ int main(int argc, char** argv)
 			else if (!strcmp(c.what, "quit")) quit = true;
 		}
 		sc->Present(0, 0);
-		Sleep(16);
+		{
+			// sandbox fix: FAKE_FRAMEMS=<ms> paces the frames to a fixed period (the e2e scripts count frames but the
+			// fakes run on real time: a faster sandbox shortens every drive). Unset = Sleep(16) as before.
+			static int frameMs = -1;
+			static ULONGLONG nextMs = 0;
+			if (frameMs < 0) { char e[16]; frameMs = GetEnvironmentVariableA("FAKE_FRAMEMS", e, sizeof e) ? atoi(e) : 0; }
+			if (frameMs > 0) {
+				const ULONGLONG nowMs = GetTickCount64();
+				nextMs = nextMs ? nextMs + frameMs : nowMs + frameMs;
+				if (nextMs > nowMs) Sleep(DWORD(nextMs - nowMs));
+				else nextMs = nowMs;
+			} else {
+				Sleep(16);
+			}
+		}
 		if (quit) break;
 	}
 	printf("HOST: done\n");

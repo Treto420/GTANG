@@ -10,9 +10,11 @@ cd $W/test
 python3 check_natives.py $W/src/GtaBeamD1.cpp || exit 1
 cp native_hashes.txt run/ 2>/dev/null || true
 cd $W/src
-$Z -c -o carmodel.o carmodel.cpp 2>&1 | grep -E "error|warning" || true
-$Z -c -o GtaBeamD1.o GtaBeamD1.cpp 2>&1 | grep -E "error|warning" || true
-$Z -shared -o GtaBeamD1.asi GtaBeamD1.o carmodel.o ScriptHookV.lib -luser32 -lws2_32 2>&1 | grep -E "error|warning" || true
+# v2.5: a compile error stops the build (v2.43 hid it and could copy an old .asi)
+rm -f carmodel.o GtaBeamD1.o GtaBeamD1.asi
+$Z -c -o carmodel.o carmodel.cpp 2>&1 | grep -E "error|warning" || true; [ -f carmodel.o ] || { echo "BUILD FAILED: carmodel.cpp"; exit 1; }
+$Z -c -o GtaBeamD1.o GtaBeamD1.cpp 2>&1 | grep -E "error|warning" || true; [ -f GtaBeamD1.o ] || { echo "BUILD FAILED: GtaBeamD1.cpp"; exit 1; }
+$Z -shared -o GtaBeamD1.asi GtaBeamD1.o carmodel.o ScriptHookV.lib -luser32 -lws2_32 2>&1 | grep -E "error|warning" || true; [ -f GtaBeamD1.asi ] || { echo "BUILD FAILED: link"; exit 1; }
 cd $W/test
 mkdir -p run
 cp native_hashes.txt run/

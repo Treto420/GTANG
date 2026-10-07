@@ -7,6 +7,10 @@ cd $W/test/run
 pgrep -x Xvfb >/dev/null || (Xvfb :99 -screen 0 1280x720x24 >/dev/null 2>&1 &) ; sleep 0.5
 rm -f GtaBeamD1_poses.csv GtaBeamD1.log fake_beam_events.txt fake_beam_path.csv fake_beam_tiles.txt fake_puppet.csv fake_hud.txt gtabridge/gtabridge_log.txt GtaBeamD1_materials.txt
 for kv in "$@"; do export "$kv"; done
+# v2.5: FAKE_FRAMEMS paces the fake host's frames (default 60 ms: the scripts count frames, the fakes run on real time);
+# FAKE_PORT runs this scenario on its own UDP port (fake BeamNG + the run folder's ini), so several runs can go side by side
+export FAKE_FRAMEMS=${FAKE_FRAMEMS:-60}
+if [ -n "$FAKE_PORT" ]; then sed -i "s/^BeamNGPort=.*/BeamNGPort=$FAKE_PORT/" GtaBeamD1.ini; fi
 [ -z "$KEEPMAP" ] && rm -rf GtaBeamD1_map   # v2.42: a fresh saved map unless KEEPMAP=1
 python3 ../fake_beam_lua.py $T $W/src/gtaBridge.lua > fake_beam_out.txt 2>&1 &
 BP=$!

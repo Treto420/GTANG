@@ -311,7 +311,12 @@ ge.execute('''
 g.ACTS = to_lua(actions)
 ge.execute('core_input_actions = { getActiveActions = function() return ACTS end }')
 g.extensions = ge.table_from({})
-M = ge.execute(open(SRC).read())
+# v2.5: FAKE_PORT=<n> runs this fake BeamNG on another UDP port (several e2e runs side by side; run_e2e.sh puts the same
+# port into the run folder's GtaBeamD1.ini as BeamNGPort)
+LUA_SRC = open(SRC).read()
+if os.environ.get('FAKE_PORT'):
+    LUA_SRC = LUA_SRC.replace('listenPort = 47011', 'listenPort = %d' % int(os.environ['FAKE_PORT']), 1)
+M = ge.execute(LUA_SRC)
 g.gtaBridge = M
 M.onExtensionLoaded()
 
