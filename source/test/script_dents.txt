@@ -1,0 +1,13 @@
+5 pad 0,0,0,0,0,0,0
+40 key f11
+120 key f10
+121 waitfile fake_drive_on.txt
+124 shot dent_before.ppm
+125 waitfile fake_dent_settled.txt
+130 shot dent_after.ppm
+131 touch do_repair.txt
+132 waitfile fake_repair_done.txt
+140 shot dent_repaired.ppm
+141 waitfile fake_repair_late.txt
+145 key f10
+165 quit

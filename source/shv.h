@@ -17,6 +17,7 @@ SHV_IMPORT void scriptUnregister(HMODULE module);
 SHV_IMPORT void nativeInit(UINT64 hash);
 SHV_IMPORT void nativePush64(UINT64 val);
 SHV_IMPORT PUINT64 nativeCall();
+SHV_IMPORT int worldGetAllObjects(int* arr, int arrSize);  // v2.5: the props around (GTA's object pool)
 #pragma comment(lib, "ScriptHookV.lib")
 
 #else
@@ -31,6 +32,7 @@ SHV_FN(void, scriptUnregister, (HMODULE module), "?scriptUnregister@@YAXPEAUHINS
 SHV_FN(void, nativeInit, (UINT64 hash), "?nativeInit@@YAX_K@Z")
 SHV_FN(void, nativePush64, (UINT64 val), "?nativePush64@@YAX_K@Z")
 SHV_FN(PUINT64, nativeCall, (), "?nativeCall@@YAPEA_KXZ")
+SHV_FN(int, worldGetAllObjects, (int* arr, int arrSize), "?worldGetAllObjects@@YAHPEAHH@Z")
 #undef SHV_FN
 
 #endif

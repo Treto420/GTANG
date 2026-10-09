@@ -1,5 +1,5 @@
 #!/bin/sh
-# v2.43: every end-to-end scenario, one after another (about 25 minutes). Run from test/: sh run_all_e2e.sh
+# v2.43/2.5: every end-to-end scenario, one after another (about 40 minutes). Run from test/: sh run_all_e2e.sh
 W=${W:-/home/claude/w}
 cd $W/test/run
 cp ../script_*.txt . 2>/dev/null
@@ -20,3 +20,12 @@ r script_bridge.txt 130 FAKE_RAYCAP=12 FAKE_BRIDGE=1 KEEPMAP=1;                 
 r script_bridge.txt 130 FAKE_RAYCAP=12 FAKE_BRIDGE=1 FAKE_STARTX=12 KEEPMAP=1;  python3 ../check_v243.py under keep | tail -1
 r script_bridge.txt 130 FAKE_RAYCAP=12 FAKE_BRIDGE=1 FAKE_VMAX=25 FAKE_ACC=5;   python3 ../check_v243.py on | tail -1
 r script_pause.txt 120 FAKE_RAYCAP=12 "FAKE_USERPAUSE=36 41" FAKE_REPAIR_AT=43; python3 ../check_v243.py pause | tail -1
+# v2.5: walls as boxes, double decks, the pad's modifiers, gravity / drive modes, props, the radio wheel's slow motion, dents
+r script_walls.txt 90 FAKE_RAYCAP=12 FAKE_WALLS=1;                python3 ../check_v25.py walls | tail -1
+r script_walls.txt 90 FAKE_RAYCAP=12 FAKE_WALLS=1 FAKE_TWOSIDED=1; python3 ../check_v25.py walls | tail -1
+r script_bridge.txt 130 FAKE_RAYCAP=12 FAKE_BRIDGE=2;             python3 ../check_v25.py deck2 | tail -1
+r script_padcombo.txt 130 FAKE_RAYCAP=12;                         python3 ../check_v25.py padcombo | tail -1
+r script_extras.txt 70 FAKE_RAYCAP=12;                            python3 ../check_v25.py extras | tail -1
+r script_walls.txt 90 FAKE_RAYCAP=12 FAKE_PROPS=1;                python3 ../check_v25.py props | tail -1
+r script_slowmo.txt 90 FAKE_RAYCAP=12 FAKE_VMAX=15;               python3 ../check_v25.py slowmo | tail -1
+r script_dents.txt 200 FAKE_DENT_AFTER=15 FAKE_REPAIR_FILE=do_repair.txt "FAKE_CAM=-4.5 5.5 3.5 -21.5 -140.7"; python3 ../check_v25.py dents | tail -1

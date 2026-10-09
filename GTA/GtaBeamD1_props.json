@@ -1,0 +1,15 @@
+{
+  "about": "GTA x Beam v2.5: GTA's props near BeamNG's car. 'soft' (the default for props not listed): GTA knocks it over or breaks it and BeamNG's car loses a little speed ('bump', m/s; by its size when not given). 'solid': a solid box in BeamNG (big props are solid by default). 'ignore': nothing. 'model' is the prop's model name (or its hash, 0x...). GtaBeamD1_props_seen.txt lists the models your drives met. Ctrl+F11 re-reads this file.",
+  "props": [
+    { "model": "prop_container_01a", "kind": "solid" },
+    { "model": "prop_container_05a", "kind": "solid" },
+    { "model": "prop_bollard_02a", "kind": "solid" },
+    { "model": "prop_bollard_03a", "kind": "solid" },
+    { "model": "prop_streetlight_01", "kind": "soft", "bump": 1.5 },
+    { "model": "prop_streetlight_03", "kind": "soft", "bump": 1.5 },
+    { "model": "prop_traffic_01a", "kind": "soft", "bump": 1.5 },
+    { "model": "prop_fire_hydrant_1", "kind": "soft", "bump": 1.0 },
+    { "model": "prop_bin_01a", "kind": "soft", "bump": 0.6 },
+    { "model": "prop_roadcone02a", "kind": "soft", "bump": 0.1 }
+  ]
+}

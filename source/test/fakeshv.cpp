@@ -45,6 +45,7 @@ static double g_vel[3] = {};
 static bool   g_velSet = false, g_frozen = false, g_collision = true, g_gravity = true;
 static double g_physT = 0;
 static double g_frameT = 0.016;  // v2.0: the real time between script ticks (like GTA's frame time)
+static double g_timeScale = 1.0; // v2.5: host "timescale <x>": GTA's slow motion (radio wheel)
 static FILE*  g_pl = nullptr;
 static LARGE_INTEGER g_qf{};
 // v2.01
@@ -59,7 +60,7 @@ struct FakeRay { int h; float x0, y0, z0, x1, y1, z1; unsigned tick; bool now; }
 static std::vector<FakeRay> g_rays;
 static int      g_rayNext = 1000;
 static unsigned g_tickN = 0;
-static unsigned g_rayStarted = 0, g_rayRefused = 0, g_raySync = 0;
+static unsigned g_rayStarted = 0, g_rayRefused = 0, g_raySync = 0, g_hRays = 0;
 static int      g_freezeMs = 0;       // v2.41: host "freeze <ms>": the next script wait takes this long (GTA paused on alt-tab)
 static int      g_radioIdx = -1;      // v2.41: GTA's radio (255 off, 1 a station); -1 = from FAKE_RADIO at first use
 static int      g_collCalls = 0;      // v2.41: HAS_COLLISION_LOADED_AROUND_ENTITY calls (FAKE_COLLWAIT=N: false for the first N)
@@ -95,15 +96,142 @@ static int BridgeOn() { char e[16]; return GetEnvironmentVariableA("FAKE_BRIDGE"
 static double RampH(double x, double y)
 {
 	const double off = fabs(x + 0.364 * y);
-	if (BridgeOn() != 1 || y <= 90 || y >= 230) return 0;
-	if (y >= 130 && y < 190) return off < 18.0 ? 8.0 : 0.0;
+	if ((BridgeOn() != 1 && BridgeOn() != 2) || y <= 90 || y >= 230) return 0;
+	const double H = BridgeOn() == 2 ? 14.0 : 8.0;  // v2.5: FAKE_BRIDGE=2: a 14 m deck (the ground beside it is out of the rays' reach)
+	if (y >= 130 && y < 190) return off < 18.0 ? H : 0.0;
 	if (off > 5.0) return 0;
-	return y < 130 ? 8.0 * (y - 90) / 40.0 : 8.0 * (230 - y) / 40.0;
+	return y < 130 ? H * (y - 90) / 40.0 : H * (230 - y) / 40.0;
 }
+// v2.5: FAKE_WALLS=1: GTA's walls along the car's line (forward f = (-0.342, 0.940) from the start, right r = (0.940, 0.342)):
+// a jersey barrier 6 m right of it (0.6 m wide, 0.9 m tall, s 20..300), a 2.5 m wall at 45 degrees 12 m left (s 48..72), a
+// building 16 m right (10 x 14 m, 12 m tall, s 113..127), a pillar 5 m left (1 x 1 m, 8 m, s 200). GTA's map collision is
+// one-sided (a ray from inside a box doesn't see it) unless FAKE_TWOSIDED=1.
+struct FakeWall { double cx, cy, ux, uy, hl, ht, h; };
+static std::vector<FakeWall> g_walls;
+static bool g_wallsInit = false;
+static void InitWalls()
+{
+	if (g_wallsInit) return;
+	g_wallsInit = true;
+	if (!Env("FAKE_WALLS")) return;
+	const double fx = -0.34202, fy = 0.93969, rx = 0.93969, ry = 0.34202;
+	auto at = [&](double s, double o, double angDeg, double hl, double ht, double h) {
+		const double a = atan2(fy, fx) + angDeg * 3.14159265358979 / 180.0;
+		g_walls.push_back({ fx * s + rx * o, fy * s + ry * o, cos(a), sin(a), hl, ht, h });
+	};
+	at(160.0, 6.0, 0.0, 140.0, 0.3, 0.9);    // the barrier, along the road
+	at(60.0, -12.0, 45.0, 12.0, 0.5, 2.5);   // a wall at 45 degrees
+	at(120.0, 16.0, 0.0, 7.0, 5.0, 12.0);    // a building
+	at(200.0, -5.0, 0.0, 0.5, 0.5, 8.0);     // a pillar
+}
+// a point inside a wall's footprint: its index (-1 none)
+static int WallAt(double x, double y)
+{
+	InitWalls();
+	for (size_t i = 0; i < g_walls.size(); ++i) {
+		const FakeWall& w = g_walls[i];
+		const double    u = (x - w.cx) * w.ux + (y - w.cy) * w.uy, v = -(x - w.cx) * w.uy + (y - w.cy) * w.ux;
+		if (fabs(u) <= w.hl && fabs(v) <= w.ht) return int(i);
+	}
+	return -1;
+}
+static double FakeGround(double x, double y, bool* hit, unsigned* mat);
+// a flat ray against the walls: the first face it enters (FAKE_TWOSIDED=1: or leaves) between the wall's foot and top
+static bool FakeHRay(double x0, double y0, double z0, double x1, double y1, double z1, double* hp, double* hn)
+{
+	InitWalls();
+	const bool two = Env("FAKE_TWOSIDED");
+	double     best = 2.0;
+	for (const FakeWall& w : g_walls) {
+		// the ray in the wall's frame (u along it, v across)
+		const double au = (x0 - w.cx) * w.ux + (y0 - w.cy) * w.uy, av = -(x0 - w.cx) * w.uy + (y0 - w.cy) * w.ux;
+		const double bu = (x1 - w.cx) * w.ux + (y1 - w.cy) * w.uy, bv = -(x1 - w.cx) * w.uy + (y1 - w.cy) * w.ux;
+		const double du = bu - au, dv = bv - av;
+		double       tin = -1e30, tout = 1e30;
+		int          fin = -1, fout = -1;  // 0 -u, 1 +u, 2 -v, 3 +v
+		bool         miss = false;
+		const double lo[2] = { -w.hl, -w.ht }, hi[2] = { w.hl, w.ht }, o[2] = { au, av }, d[2] = { du, dv };
+		for (int k = 0; k < 2 && !miss; ++k) {
+			if (fabs(d[k]) < 1e-12) {
+				if (o[k] < lo[k] || o[k] > hi[k]) miss = true;
+				continue;
+			}
+			double t0 = (lo[k] - o[k]) / d[k], t1 = (hi[k] - o[k]) / d[k];
+			int    f0 = 2 * k, f1 = 2 * k + 1;
+			if (t0 > t1) { std::swap(t0, t1); std::swap(f0, f1); }
+			if (t0 > tin) { tin = t0; fin = f0; }
+			if (t1 < tout) { tout = t1; fout = f1; }
+		}
+		if (miss || tin > tout) continue;
+		double t = -1;
+		int    face = -1;
+		if (tin >= 0 && tin <= 1) { t = tin; face = fin; }
+		else if (two && tin < 0 && tout >= 0 && tout <= 1) { t = tout; face = fout; }
+		if (t < 0 || t >= best) continue;
+		const double hx = x0 + (x1 - x0) * t, hy = y0 + (y1 - y0) * t, hz = z0 + (z1 - z0) * t;
+		bool         gh;
+		unsigned     m;
+		const double g = FakeGround(hx, hy, &gh, &m);
+		if (hz < g - 0.5 || hz > g + w.h) continue;
+		// the face's outward normal in the world
+		double nu = 0, nv = 0;
+		if (face == 0) nu = -1; else if (face == 1) nu = 1; else if (face == 2) nv = -1; else nv = 1;
+		best = t;
+		hp[0] = hx; hp[1] = hy; hp[2] = hz;
+		hn[0] = nu * w.ux - nv * w.uy;
+		hn[1] = nu * w.uy + nv * w.ux;
+		hn[2] = 0;
+	}
+	return best <= 1.0;
+}
+
+// v2.5: FAKE_PROPS=1: props in GTA's object pool (handles 9000+) along the car's line: lamp posts 4.5 m right of it every
+// 20 m (breakable, 0.4 x 0.4 x 8 m), a bin ON the line at s 45 (0.6 x 0.6 x 1 m), a lamp post ON it at s 80, a container 7 m
+// left at s 100 (6 x 2.4 x 2.6 m: solid), a can (tiny: ignored) and one attached to something (skipped)
+struct FakeProp { int h; double x, y, yaw; unsigned model; bool frag, attached, pushed; };
+static std::vector<FakeProp> g_props;
+static bool g_propsInit = false;
+static const unsigned kMLamp = 0xA1110001u, kMBin = 0xA1110002u, kMCont = 0xA1110003u, kMCan = 0xA1110004u;
+static void InitProps()
+{
+	if (g_propsInit) return;
+	g_propsInit = true;
+	if (!Env("FAKE_PROPS")) return;
+	const double fx = -0.34202, fy = 0.93969, rx = 0.93969, ry = 0.34202;
+	int h = 9000;
+	auto add = [&](double sAl, double o, unsigned m, bool frag, bool att) { g_props.push_back({ h++, fx * sAl + rx * o, fy * sAl + ry * o, 20.0, m, frag, att, false }); };
+	for (int k = 0; k < 10; ++k) add(30.0 + 20.0 * k, 4.5, kMLamp, true, false);
+	add(45.0, 0.0, kMBin, false, false);
+	add(80.0, 0.0, kMLamp, true, false);
+	add(100.0, -7.0, kMCont, false, false);
+	add(60.0, 2.0, kMCan, false, false);
+	add(65.0, 0.0, kMBin, false, true);
+}
+static FakeProp* PropOf(int h)
+{
+	InitProps();
+	for (auto& p : g_props) if (p.h == h) return &p;
+	return nullptr;
+}
+
 static bool FakeRayHit(double x, double y, double z0, double z1, double* z, unsigned* mat)
 {
 	bool         gh;
 	const double g = FakeGround(x, y, &gh, mat);
+	// v2.5: a wall's top (only from above: a ray starting inside one doesn't see it)
+	{
+		const int wi = WallAt(x, y);
+		if (wi >= 0) {
+			const double top = g + g_walls[wi].h;
+			if (z0 >= top && top >= z1) { *z = top; *mat = 0xCDEB5023u; return true; }
+		}
+	}
+	// v2.5: FAKE_BRIDGE=2: an overpass 22 m over the ground across the car's line at y 150..162 (8 m over the 14 m deck): rays
+	// from above it see it; rays starting under it don't
+	if (BridgeOn() == 2 && y > 150 && y < 162) {
+		const double top = g + 22.0;
+		if (z0 >= top && top >= z1) { *z = top; *mat = 0x10DD5498u; return true; }
+	}
 	const double h = RampH(x, y);
 	if (h > 0) {
 		const double top = g + h;
@@ -112,7 +240,7 @@ static bool FakeRayHit(double x, double y, double z0, double z1, double* z, unsi
 		if (z0 > top - 0.6 && z0 < top) { /* inside the deck: not seen */ }
 		else if (top <= z0) { *z = top; return false; }
 	}
-	if (BridgeOn() == 1 && y > 40 && y < 52) {
+	if ((BridgeOn() == 1 || BridgeOn() == 2) && y > 40 && y < 52) {
 		const double top = 1.5 * sin(46.0 / 25.0) + 6.0;
 		if (top <= z0 && top >= z1) { *z = top; *mat = 0x10DD5498u; return true; }
 	}
@@ -195,6 +323,14 @@ EXP void scriptUnregister(HMODULE) __asm__("?scriptUnregister@@YAXPEAUHINSTANCE_
 EXP void nativeInit(UINT64) __asm__("?nativeInit@@YAX_K@Z");
 EXP void nativePush64(UINT64) __asm__("?nativePush64@@YAX_K@Z");
 EXP PUINT64 nativeCall() __asm__("?nativeCall@@YAPEA_KXZ");
+EXP int worldGetAllObjects(int* arr, int arrSize) __asm__("?worldGetAllObjects@@YAHPEAHH@Z");   // v2.5
+int worldGetAllObjects(int* arr, int arrSize)
+{
+	InitProps();
+	int n = 0;
+	for (auto& p : g_props) if (n < arrSize) arr[n++] = p.h;
+	return n;
+}
 
 void presentCallbackRegister(void (*cb)(void*)) { for (auto& p : g_present) if (!p) { p = cb; break; } }
 void presentCallbackUnregister(void (*cb)(void*)) { for (auto& p : g_present) if (p == cb) p = nullptr; }
@@ -215,7 +351,7 @@ void scriptWait(DWORD)
 	const double dt = g_physT > 0 ? fmin(0.1, t - g_physT) : 0.0;
 	g_physT = t;
 	if (dt > 0) g_frameT = dt;
-	if (g_velSet && !g_frozen) for (int k = 0; k < 3; ++k) g_pos[k] += g_vel[k] * dt;
+	if (g_velSet && !g_frozen) for (int k = 0; k < 3; ++k) g_pos[k] += g_vel[k] * dt * g_timeScale;
 }
 void scriptRegister(HMODULE, void (*fn)()) { g_script = fn; }
 void scriptUnregister(HMODULE) {}
@@ -271,8 +407,30 @@ PUINT64 nativeCall()
 	case 0xB6997A7EB3F5C8C0: RetI(100); break;                // GET_PLAYERS_LAST_VEHICLE
 	case 0xF73EB622C4F1689B: RetI(100); break;                // GET_CLOSEST_VEHICLE
 	case 0x7239B21A38F536BA: RetI(1); break;                  // DOES_ENTITY_EXIST
-	case 0x9F47B058362C84B5: RetI(0x1234); break;             // GET_ENTITY_MODEL
-	case 0x3FEF770D40960D5A: RetV(float(g_pos[0]), float(g_pos[1]), float(g_pos[2])); break;  // GET_ENTITY_COORDS
+	case 0x9F47B058362C84B5: { FakeProp* fp = PropOf(int(g_args[0])); RetI(fp ? int(fp->model) : 0x1234); break; }  // GET_ENTITY_MODEL
+	case 0x3FEF770D40960D5A: {                                // GET_ENTITY_COORDS (v2.5: props too)
+		if (FakeProp* fp = PropOf(int(g_args[0]))) { bool gh; unsigned m; RetV(float(fp->x), float(fp->y), float(FakeGround(fp->x, fp->y, &gh, &m))); break; }
+		RetV(float(g_pos[0]), float(g_pos[1]), float(g_pos[2])); break; }
+	case 0xECB2FC7235A7D137: {                                // GET_ENTITY_MATRIX (v2.5: props)
+		FakeProp* fp = PropOf(int(g_args[0]));
+		NV* fw = reinterpret_cast<NV*>(g_args[1]); NV* rt = reinterpret_cast<NV*>(g_args[2]); NV* up = reinterpret_cast<NV*>(g_args[3]); NV* ps = reinterpret_cast<NV*>(g_args[4]);
+		if (fp) {
+			const double a = fp->yaw * 3.14159265358979 / 180.0;
+			bool gh; unsigned m;
+			*fw = NV{ float(-sin(a)), float(cos(a)), 0 }; *rt = NV{ float(cos(a)), float(sin(a)), 0 }; *up = NV{ 0, 0, 1 };
+			*ps = NV{ float(fp->x), float(fp->y), float(FakeGround(fp->x, fp->y, &gh, &m)) };
+		}
+		break; }
+	case 0x0C112765300C7E1E: { FakeProp* fp = PropOf(int(g_args[0])); RetI(fp && fp->frag ? 1 : 0); break; }      // GET_IS_ENTITY_A_FRAG
+	case 0xB346476EF1A64897: { FakeProp* fp = PropOf(int(g_args[0])); RetI(fp && fp->attached ? 1 : 0); break; }  // IS_ENTITY_ATTACHED
+	case 0x47D6F43D77935C75: RetI(1); break;                                                                      // IS_ENTITY_VISIBLE
+	case 0x1718DE8E3F2823CA: { printf("FAKE: entity %d dynamic %d\n", int(g_args[0]), int(g_args[1])); fflush(stdout); break; }  // SET_ENTITY_DYNAMIC
+	case 0x710311ADF0E20730: break;                                                                               // ACTIVATE_PHYSICS
+	case 0xC5F68BE9613E2D18: {                                // APPLY_FORCE_TO_ENTITY: the prop flies off (moved 30 m away)
+		FakeProp* fp = PropOf(int(g_args[0]));
+		printf("FAKE: prop %d pushed (type %d, %.1f %.1f %.1f)\n", int(g_args[0]), int(g_args[1]), F(2), F(3), F(4)); fflush(stdout);
+		if (fp) { fp->pushed = true; fp->x += 100.0; }   // flown off the road
+		break; }
 	case 0x1899F328B0E12848: {                                // GET_OFFSET_FROM_ENTITY_IN_WORLD_COORDS
 		const double l[3] = { F(1), F(2), F(3) };
 		double w[3];
@@ -314,6 +472,11 @@ PUINT64 nativeCall()
 	case 0x03E8D3D5F549087A: {                                // GET_MODEL_DIMENSIONS
 		NV* mn = reinterpret_cast<NV*>(g_args[1]);
 		NV* mx = reinterpret_cast<NV*>(g_args[2]);
+		const unsigned md = unsigned(g_args[0]);
+		if (md == kMLamp) { *mn = NV{ -0.2f, -0.2f, 0.0f }; *mx = NV{ 0.2f, 0.2f, 8.0f }; break; }
+		if (md == kMBin) { *mn = NV{ -0.3f, -0.3f, 0.0f }; *mx = NV{ 0.3f, 0.3f, 1.0f }; break; }
+		if (md == kMCont) { *mn = NV{ -1.2f, -3.0f, 0.0f }; *mx = NV{ 1.2f, 3.0f, 2.6f }; break; }
+		if (md == kMCan) { *mn = NV{ -0.04f, -0.04f, 0.0f }; *mx = NV{ 0.04f, 0.04f, 0.12f }; break; }
 		*mn = NV{ -1.0f, -2.5f, -0.6f };
 		*mx = NV{ 1.0f, 2.5f, 0.8f };
 		break;
@@ -379,7 +542,7 @@ PUINT64 nativeCall()
 	case 0x5B4E4C817FCC2DFB: { float c[5] = { 5.5f, 3.0f, 1.4f, -9.0f, 118.0f }; char e[128]; if (GetEnvironmentVariableA("FAKE_CAM", e, sizeof e)) sscanf(e, "%f %f %f %f %f", c, c + 1, c + 2, c + 3, c + 4); RetV(c[3], 0.0f, c[4]); break; }
 	case 0x14D6F5678D8F1B37: { float c[5] = { 5.5f, 3.0f, 1.4f, -9.0f, 118.0f }; char e[128]; if (GetEnvironmentVariableA("FAKE_CAM", e, sizeof e)) sscanf(e, "%f %f %f %f %f", c, c + 1, c + 2, c + 3, c + 4); RetV(c[0], c[1], c[2]); break; }  // GET_GAMEPLAY_CAM_COORD (v1.9.4)
 	case 0x837765A25378F0BB: { float c[5] = { 5.5f, 3.0f, 1.4f, -9.0f, 118.0f }; char e[128]; if (GetEnvironmentVariableA("FAKE_CAM", e, sizeof e)) sscanf(e, "%f %f %f %f %f", c, c + 1, c + 2, c + 3, c + 4); RetV(c[3], 0.0f, c[4]); break; }  // GET_GAMEPLAY_CAM_ROT
-	case 0x15C40837039FFAF7: RetF(float(g_frameT)); break;    // GET_FRAME_TIME
+	case 0x15C40837039FFAF7: RetF(float(g_frameT * g_timeScale)); break;    // GET_FRAME_TIME (v2.5: x GTA's time scale: slow motion)
 	case 0xFC8202EFC642E6F2: { static int n = 0; RetI(++n); break; }  // GET_FRAME_COUNT (v1.9.5)
 	case 0x9CD27B0045628463: RetI(int(GetTickCount64() & 0x7fffffff)); break;  // GET_GAME_TIMER
 	case 0x80EC114669DAEFF4: RetF(50.0f); break;
@@ -427,11 +590,25 @@ PUINT64 nativeCall()
 		if (g_rays[i].tick == g_tickN && !g_rays[i].now) { RetI(1); break; }   // not ready yet
 		const FakeRay r = g_rays[i];
 		g_rays.erase(g_rays.begin() + i);
+		NV* nrm = reinterpret_cast<NV*>(g_args[3]);
+		if (fabs(r.x1 - r.x0) > 0.05 || fabs(r.y1 - r.y0) > 0.05) {
+			// v2.5: a flat ray (the wall scan)
+			double hp[3], hn[3];
+			const bool h2 = FakeHRay(r.x0, r.y0, r.z0, r.x1, r.y1, r.z1, hp, hn);
+			*hit = h2 ? 1 : 0;
+			*end = h2 ? NV{ float(hp[0]), float(hp[1]), float(hp[2]) } : NV{ r.x1, r.y1, r.z1 };
+			if (nrm) *nrm = h2 ? NV{ float(hn[0]), float(hn[1]), float(hn[2]) } : NV{ 0, 0, 0 };
+			*mat = h2 ? 0xCDEB5023u : 0;
+			++g_hRays;
+			RetI(2);
+			break;
+		}
 		unsigned m = 0;
 		double   gz = 0;
 		const bool inside = FakeRayHit(r.x0, r.y0, r.z0, r.z1, &gz, &m);   // v2.43: bridges
 		*hit = inside ? 1 : 0;
 		*end = NV{ r.x0, r.y0, float(gz) };
+		if (nrm) *nrm = NV{ 0, 0, 1 };
 		*mat = inside ? m : 0;
 		RetI(2);
 		break;
@@ -517,3 +694,4 @@ EXP void FakeSetSpeed(float v) { Advance(); g_speed = v; }
 EXP void FakeSetPaused(int on) { g_paused = on; }
 EXP void FakeRayStats(unsigned* started, unsigned* refused, unsigned* waiting) { *started = g_rayStarted; *refused = g_rayRefused; *waiting = unsigned(g_rays.size()); }
 EXP void FakeFreeze(int ms) { g_freezeMs = ms; }
+EXP void FakeTimeScale(float x) { g_timeScale = x; printf("FAKE: GTA time scale %.2f\n", x); fflush(stdout); }

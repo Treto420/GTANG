@@ -174,6 +174,7 @@ int main(int argc, char** argv)
 	auto setSpeed = (void (*)(float))GetProcAddress(fake, "FakeSetSpeed");
 	auto setPaused = (void (*)(int))GetProcAddress(fake, "FakeSetPaused");
 	auto freeze = (void (*)(int))GetProcAddress(fake, "FakeFreeze");
+	auto timeScale = (void (*)(float))GetProcAddress(fake, "FakeTimeScale");  // v2.5
 	if (!LoadLibraryA("GtaBeamD1.asi")) { printf("HOST: could not load GtaBeamD1.asi (%lu)\n", GetLastError()); return 1; }
 	startScript();
 
@@ -185,8 +186,19 @@ int main(int argc, char** argv)
 		while (sf && fgets(line, sizeof(line), sf)) { Cmd c{}; if (sscanf(line, "%d %31s %63s %63s", &c.frame, c.what, c.a, c.b) >= 2) cmds.push_back(c); }
 		if (sf) fclose(sf);
 	}
+	char waitName[64] = "";  // v2.5: "<frame> waitfile <name>": the script waits (frames still drawn) until the file exists
+	ULONGLONG waitT0 = 0;
 	for (int frame = 1; frame < 100000; ++frame) {
 		MSG msg; while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageA(&msg); }
+		bool holding = false;
+		if (waitName[0]) {
+			if (GetFileAttributesA(waitName) != INVALID_FILE_ATTRIBUTES || GetTickCount64() - waitT0 > 180000) {
+				printf("HOST: %s %s\n", waitName, GetFileAttributesA(waitName) != INVALID_FILE_ATTRIBUTES ? "is there" : "never came (180 s)"); fflush(stdout);
+				waitName[0] = 0;
+			} else {
+				holding = true;
+			}
+		}
 		ID3D11Texture2D* bbt; sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&bbt);
 		ID3D11RenderTargetView* rtv; dev->CreateRenderTargetView(bbt, nullptr, &rtv); bbt->Release();
 		const float sky[4] = { 0.62f, 0.72f, 0.86f, 1 };
@@ -204,7 +216,7 @@ int main(int argc, char** argv)
 		callPresent(sc);
 		bool quit = false;
 		for (auto& c : cmds) {
-			if (c.frame != frame) continue;
+			if (holding || c.frame != frame) continue;
 			if (!strcmp(c.what, "key")) Key(hwnd, c.a);
 			else if (!strcmp(c.what, "keydown")) KeyState(hwnd, int(strtol(c.a, nullptr, 16)), false);
 			else if (!strcmp(c.what, "keyup")) KeyState(hwnd, int(strtol(c.a, nullptr, 16)), true);
@@ -214,6 +226,7 @@ int main(int argc, char** argv)
 			else if (!strcmp(c.what, "ini")) { WritePrivateProfileStringA("D1", c.a, c.b, ".\\GtaBeamD1.ini"); printf("HOST: ini %s=%s\n", c.a, c.b); }
 			else if (!strcmp(c.what, "pause")) { setPaused(atoi(c.a)); printf("HOST: pause %s\n", c.a); fflush(stdout); }
 			else if (!strcmp(c.what, "freeze")) { freeze(atoi(c.a)); printf("HOST: GTA paused for %s ms\n", c.a); fflush(stdout); }
+			else if (!strcmp(c.what, "timescale")) { if (timeScale) timeScale(float(atof(c.a))); printf("HOST: time scale %s\n", c.a); fflush(stdout); }
 			else if (!strcmp(c.what, "pad")) {
 				// the fake pad DLL may have the file open this instant: try again until the new state is in place
 				FILE* pf = fopen("fake_pad.tmp", "w");
@@ -226,11 +239,14 @@ int main(int argc, char** argv)
 				}
 				printf("HOST: pad %s\n", c.a); fflush(stdout);
 			}
+			else if (!strcmp(c.what, "waitfile")) { strncpy(waitName, c.a, sizeof(waitName) - 1); waitT0 = GetTickCount64(); printf("HOST: waiting for %s\n", c.a); fflush(stdout); }
+			else if (!strcmp(c.what, "touch")) { FILE* tf = fopen(c.a, "w"); if (tf) fclose(tf); printf("HOST: touched %s\n", c.a); fflush(stdout); }
 			else if (!strcmp(c.what, "quit")) quit = true;
 		}
 		sc->Present(0, 0);
 		Sleep(16);
 		if (quit) break;
+		if (holding) --frame;  // (the script's frame count stands still while it waits)
 	}
 	printf("HOST: done\n");
 	fflush(stdout);
