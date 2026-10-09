@@ -116,7 +116,7 @@
 #include "carmodel.h"
 #include "shv.h"
 
-#define D1_VERSION "2.43"
+#define D1_VERSION "2.5"
 
 namespace
 {
@@ -132,6 +132,16 @@ namespace
 		constexpr UINT64 GET_OFFSET_FROM_ENTITY_IN_WORLD_COORDS = 0x1899F328B0E12848;
 		constexpr UINT64 DOES_ENTITY_EXIST = 0x7239B21A38F536BA;
 		constexpr UINT64 GET_ENTITY_MODEL = 0x9F47B058362C84B5;
+		// v2.5: props
+		constexpr UINT64 GET_ENTITY_MATRIX = 0xECB2FC7235A7D137;        // entity, &forward, &right, &up, &position
+		constexpr UINT64 GET_IS_ENTITY_A_FRAG = 0x0C112765300C7E1E;     // object: breakable (lamp posts, signs, fences)
+		constexpr UINT64 IS_ENTITY_ATTACHED = 0xB346476EF1A64897;
+		constexpr UINT64 IS_ENTITY_VISIBLE = 0x47D6F43D77935C75;
+		constexpr UINT64 IS_ENTITY_STATIC = 0x1218E6886D3D8327;
+		constexpr UINT64 SET_ENTITY_DYNAMIC = 0x1718DE8E3F2823CA;       // entity, toggle: its physics wakes up (a fixed prop can move)
+		constexpr UINT64 ACTIVATE_PHYSICS = 0x710311ADF0E20730;
+		constexpr UINT64 APPLY_FORCE_TO_ENTITY = 0xC5F68BE9613E2D18;    // entity, type, x y z, offset x y z, bone, dirRel, ignoreUp, forceRel, p12, p13
+		constexpr UINT64 GET_ENTITY_VELOCITY = 0x4805D2B1D8CF94A9;
 		constexpr UINT64 SET_ENTITY_VISIBLE = 0xEA1C610A04DB6BBB;
 		constexpr UINT64 SET_ENTITY_ALPHA = 0x44A0870B7E92D7C0;
 		constexpr UINT64 RESET_ENTITY_ALPHA = 0x9B1E824FFBB7027A;
@@ -472,6 +482,21 @@ namespace
 		bool        pauseSync = true;         // PauseSync: pausing either game pauses the other
 		bool        worldDebug = false;       // WorldDebug: every tile's level decision in the log (big)
 		std::string repairActs;               // BeamNGRepairActions: these BeamNG actions repair the car where it is (comma list)
+		// v2.5
+		float       worldUpM = 4.0f;          // WorldUpM: ground rays start this far over the car's level (never higher: no overpasses)
+		float       worldDownM = 12.0f;       // WorldDownM: ... and look this far under it
+		bool        worldWalls = true;        // WorldWalls: GTA's walls, barriers and pillars as solid boxes in BeamNG
+		float       worldWallProbeM = 0.6f;   // WorldWallProbeM: the wall scan's height over the ground (lower = kerbs count as walls)
+		float       worldWallStepM = 1.0f;    // WorldWallStepM: its lines this far apart
+		float       worldWallMs = 1.0f;       // WorldWallMs: time a frame for wall scans (the road right ahead is always scanned)
+		bool        props = true;             // Props: GTA's props (lamp posts, signs, bins...) react to BeamNG's car
+		float       propRangeM = 40.0f;       // PropRangeM: props this close to the car are watched
+		float       propPush = 1.0f;          // PropPush: how hard a hit prop is pushed in GTA (x)
+		float       propBump = 1.0f;          // PropBump: how much speed BeamNG's car loses on a soft prop (x)
+		bool        propSolid = true;         // PropSolid: big props (and the ones GtaBeamD1_props.json calls solid) are boxes in BeamNG
+		bool        dents = true;             // Dents: BeamNG's dents and bent parts shown on the drawn car
+		float       dentHz = 20.0f;           // DentsPerSecond: how often BeamNG sends its car's shape
+		float       driveGravity = 1.10f;     // DriveGravity: BeamNG's gravity x this while GTA drives (1 = BeamNG's own)
 	} g_cfg;
 
 	const char* kSec = "D1";
@@ -863,6 +888,25 @@ namespace
 			c.worldKeepM = std::clamp(IniFloat(path, "WorldKeepM", 400.0f), 50.0f, 5000.0f);
 			c.worldFillPerS = std::clamp(IniFloat(path, "WorldFillPerS", 4.0f), 0.0f, 60.0f);
 			c.worldDebug = GetPrivateProfileIntA(kSec, "WorldDebug", 0, path) != 0;
+			// v2.5
+			c.worldUpM = std::clamp(IniFloat(path, "WorldUpM", 4.0f), 1.0f, 20.0f);
+			c.worldDownM = std::clamp(IniFloat(path, "WorldDownM", 12.0f), 2.0f, 60.0f);
+			c.worldWalls = GetPrivateProfileIntA(kSec, "WorldWalls", 1, path) != 0;
+			c.worldWallProbeM = std::clamp(IniFloat(path, "WorldWallProbeM", 0.6f), 0.2f, 2.5f);
+			c.worldWallStepM = std::clamp(IniFloat(path, "WorldWallStepM", 1.0f), 0.25f, 4.0f);
+			c.worldWallMs = std::clamp(IniFloat(path, "WorldWallMs", 1.0f), 0.0f, 10.0f);
+			c.props = GetPrivateProfileIntA(kSec, "Props", 1, path) != 0;
+			c.propRangeM = std::clamp(IniFloat(path, "PropRangeM", 40.0f), 10.0f, 150.0f);
+			c.propPush = std::clamp(IniFloat(path, "PropPush", 1.0f), 0.0f, 10.0f);
+			c.propBump = std::clamp(IniFloat(path, "PropBump", 1.0f), 0.0f, 10.0f);
+			c.propSolid = GetPrivateProfileIntA(kSec, "PropSolid", 1, path) != 0;
+			c.dents = GetPrivateProfileIntA(kSec, "Dents", 1, path) != 0;
+			c.dentHz = std::clamp(IniFloat(path, "DentsPerSecond", 20.0f), 1.0f, 60.0f);
+			c.driveGravity = std::clamp(IniFloat(path, "DriveGravity", 1.10f), 0.5f, 3.0f);
+			Log("settings: v2.5: ground rays %.1f m up / %.1f m down from the level; walls %d (scan %.2f m up, lines %.2f m apart, %.2f ms a frame); props %d "
+			    "(within %.0f m, push x%.2f, bump x%.2f, big ones solid %d); dents %d (%.0f a second); BeamNG gravity x%.2f while GTA drives",
+				c.worldUpM, c.worldDownM, int(c.worldWalls), c.worldWallProbeM, c.worldWallStepM, c.worldWallMs, int(c.props), c.propRangeM, c.propPush, c.propBump,
+				int(c.propSolid), int(c.dents), c.dentHz, c.driveGravity);
 			Log("settings: v2.43 GTA ground: levels %.1f m apart (bridges), edges %.1f m high leave the ground below out, static world %d triangles within %.0f m, "
 			    "filled at %.1f tiles a second when standing",
 				c.worldLevelM, c.worldDropM, c.worldKeepTris, c.worldKeepM, c.worldFillPerS);
@@ -1693,6 +1737,8 @@ namespace
 		uint32_t          pzCount = 0;
 		std::string       rep;      // the last "rep" (your repair binding used in BeamNG)
 		uint32_t          repCount = 0;
+		std::vector<std::string> dmQ;  // v2.5: "dm" messages (BeamNG's nodes that moved: dents), oldest first
+		uint32_t          dmCount = 0, dmLost = 0;
 	} g_dnet;
 
 	struct DriveState
@@ -1787,6 +1833,11 @@ namespace
 		uint32_t padModBits = 0;           // the modifier buttons (pmod)
 		bool     modHeld = false;          // a BeamNG modifier button is held now (BeamNG mode)
 		uint32_t modMask = 0;              // which (held, usable, BeamNG's) modifier buttons
+		WORD     sentPm = 0;               // v2.5: the modifier buttons sent as held (XInput bits)
+		double   lastDrawNow = 0, slowS = 0, slowRatio = 1.0;  // v2.5: GTA's slow motion (its frame time under 70 % of real time, smoothed): seconds of it
+		double   carO[3] = {}, carR[3] = {}, carF[3] = {}, carU[3] = {}, carV[3] = {};  // v2.5: the drawn car this tick (GTA world)
+		bool     carPoseOk = false;
+		uint32_t slowTicks = 0;
 		uint32_t ownerPrev = 0;
 		std::string plist;                 // which of your BeamNG pad lists BeamNG uses
 		bool     engineOff = false;        // GTA's engine (sound) switched off for drive mode
@@ -1798,6 +1849,7 @@ namespace
 		double   vsT = 0, laT = 0;
 		double   vThr = -1, vBrk = -1, vStr = 0, vPb = -1, vClu = -1, vRpm = -1, vWs = 0, vLi = -1;  // v2.3 vLi: BeamNG's lights (bits)
 		std::string vGear, vIgn, vEng, vGbm, vLa;
+		std::string vEsc;                  // v2.5: the car's drive mode (ESC configuration / drive mode), "-" none
 		// input stats (10 s) and what went out last
 		float    mxRt = 0, mxLt = 0, mxLx = 0;
 		uint32_t ctlSeen = 0;          // pad controls that moved (bits)
@@ -1860,6 +1912,7 @@ namespace
 		bool     beamPaused = false, beamPausedUser = false;  // BeamNG's physics stand still (you paused it there)
 		bool     beamPauseSeen = false;  // this BeamNG pause already opened GTA's pause menu once
 		bool     menuByBeam = false;     // GTA's pause menu was opened because you paused BeamNG
+		double   gtaPausedT = -1e9;      // v2.5: last tick GTA was paused
 		double   beamPauseT0 = 0;
 		uint32_t clockJumps = 0, repSeen = 0;
 		std::vector<double> fallLog;   // when the falls were (3 in 30 s end drive mode)
@@ -2160,6 +2213,394 @@ namespace
 		return std::string(la) + "\\BeamNG\\BeamNG.drive\\current\\gtabridge\\car.gltf";
 	}
 
+	// ---------------------------------------------------------------------------------------
+	// v2.5 (D2): dents. BeamNG's car sends how far its nodes moved since the drive started, in the car's own frame
+	// (driving and turning don't count, only bending): "dm" messages, each one for a range of node ids. The car
+	// file says which nodes each vertex follows (carmodel.cpp). Here each node also gets a turn (fitted to its
+	// neighbours: the light on a bent panel), and the render thread copies it all to the video card (DentsUpload).
+	// ---------------------------------------------------------------------------------------
+	constexpr double kDentOffM = 1.5;  // a node farther than this from its place came off the car (a part on the road)
+
+	struct DentModel
+	{
+		uint32_t                           gen = 0;   // g_modelGen of the car file
+		std::vector<int>                   cid;       // BeamNG's node id per node
+		std::vector<float>                 rest;      // xyz per node (car space, at export)
+		std::vector<uint8_t>               wheel;     // a wheel's node (turns with the wheel: its moves are left out)
+		std::vector<std::vector<uint16_t>> nbr, rev;  // neighbours (its turn is fitted to them), and who uses it as one
+		std::vector<int>                   order;     // nodes sorted by cid
+		std::vector<int>                   sortedCid;
+		std::vector<int>                   idxOfCid;  // cid -> node (-1: none)
+		int                                skinned = 0;
+		std::string                        note;
+	};
+	std::shared_ptr<DentModel> g_dentModelNew;  // set by LoadCar (under g_modelMx), taken by DentsTick
+
+	struct DentShared  // script thread -> render thread
+	{
+		SRWLOCK            lock = SRWLOCK_INIT;
+		std::vector<float> data;  // per node: how far it moved (xyz, 0), its turn (quaternion xyzw)
+		uint32_t           gen = 0;
+		uint64_t           seq = 0;
+	} g_dentShared;
+	std::atomic<uint32_t> g_dentUploads{ 0 };
+
+	struct DentState
+	{
+		std::shared_ptr<DentModel> m;
+		std::vector<float>         off, q, nv;
+		std::vector<uint32_t>      stamp;
+		uint32_t                   stampNow = 0;
+		std::vector<uint8_t>       dirty;
+		bool                       any = false;      // a node is moved now (published)
+		bool                       pending = false;  // changes not published yet
+		double                     statT = 0;
+		uint32_t                   msgs = 0, entries = 0, unknown = 0, bad = 0, pubs = 0, fits = 0, wrongCar = 0;
+		uint32_t                   lostSeen = 0;
+		bool                       warnedNodes = false, warnedNone = false, firstMove = false;
+		int                        changeLogs = 0, movedLogged = 0, movedNow = 0;
+		double                     mostLogged = 0, mostNow = 0, lastChangeT = 0;
+		bool                       settleCheck = false;
+	} g_dent;
+
+	// the turn (quaternion x y z w) that best turns the vectors a[k] into b[k]: Horn's method (1987), the eigenvector
+	// of the largest eigenvalue of a 4x4 matrix made from their products, found with Jacobi rotations. bias leans it
+	// toward no turn (two neighbours on a line leave one turn open).
+	bool FitTurn(const double (*a)[3], const double (*b)[3], int n, double bias, float q[4])
+	{
+		double S[3][3] = {};
+		for (int k = 0; k < n; ++k)
+			for (int r = 0; r < 3; ++r)
+				for (int c = 0; c < 3; ++c) S[r][c] += a[k][r] * b[k][c];
+		for (int r = 0; r < 3; ++r) S[r][r] += bias;
+		double N[4][4] = { { S[0][0] + S[1][1] + S[2][2], S[1][2] - S[2][1], S[2][0] - S[0][2], S[0][1] - S[1][0] },
+			{ S[1][2] - S[2][1], S[0][0] - S[1][1] - S[2][2], S[0][1] + S[1][0], S[2][0] + S[0][2] },
+			{ S[2][0] - S[0][2], S[0][1] + S[1][0], -S[0][0] + S[1][1] - S[2][2], S[1][2] + S[2][1] },
+			{ S[0][1] - S[1][0], S[2][0] + S[0][2], S[1][2] + S[2][1], -S[0][0] - S[1][1] + S[2][2] } };
+		double V[4][4] = { { 1, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 0, 1, 0 }, { 0, 0, 0, 1 } };
+		double scale = 0;
+		for (int p = 0; p < 4; ++p)
+			for (int r = 0; r < 4; ++r) scale = std::max(scale, fabs(N[p][r]));
+		if (!(scale > 1e-12) || !std::isfinite(scale)) return false;
+		for (int sweep = 0; sweep < 16; ++sweep) {
+			double offd = 0;
+			for (int p = 0; p < 4; ++p)
+				for (int r = p + 1; r < 4; ++r) offd += N[p][r] * N[p][r];
+			if (offd < 1e-24 * scale * scale) break;
+			for (int p = 0; p < 3; ++p) {
+				for (int r = p + 1; r < 4; ++r) {
+					if (fabs(N[p][r]) < 1e-15 * scale) continue;
+					const double th = (N[r][r] - N[p][p]) / (2.0 * N[p][r]);
+					const double t = (th >= 0 ? 1.0 : -1.0) / (fabs(th) + sqrt(th * th + 1.0));
+					const double c = 1.0 / sqrt(t * t + 1.0), s = t * c;
+					for (int k = 0; k < 4; ++k) {
+						const double kp = N[k][p], kr = N[k][r];
+						N[k][p] = c * kp - s * kr;
+						N[k][r] = s * kp + c * kr;
+					}
+					for (int k = 0; k < 4; ++k) {
+						const double pk = N[p][k], rk = N[r][k];
+						N[p][k] = c * pk - s * rk;
+						N[r][k] = s * pk + c * rk;
+					}
+					for (int k = 0; k < 4; ++k) {
+						const double kp = V[k][p], kr = V[k][r];
+						V[k][p] = c * kp - s * kr;
+						V[k][r] = s * kp + c * kr;
+					}
+				}
+			}
+		}
+		int best = 0;
+		for (int k = 1; k < 4; ++k)
+			if (N[k][k] > N[best][best]) best = k;
+		double w = V[0][best], x = V[1][best], y = V[2][best], z = V[3][best];
+		const double l = sqrt(w * w + x * x + y * y + z * z);
+		if (!(l > 1e-9) || !std::isfinite(l)) return false;
+		if (w < 0) w = -w, x = -x, y = -y, z = -z;
+		q[0] = float(x / l), q[1] = float(y / l), q[2] = float(z / l), q[3] = float(w / l);
+		return true;
+	}
+
+	// the dents data of the car file (LoadCar, on the loader thread)
+	std::shared_ptr<DentModel> DentModelOf(const car::Model& model)
+	{
+		auto         dm = std::make_shared<DentModel>();
+		const size_t n = model.nodeCid.size();
+		dm->note = model.skinNote;
+		if (model.skinned <= 0 || n == 0 || model.nodePos.size() != n * 3 || model.nodeNbr.size() != n) return dm;
+		int mx = 0;
+		for (int c : model.nodeCid) mx = std::max(mx, c);
+		if (mx > 4000000) {
+			dm->note = "node ids too large";
+			return dm;
+		}
+		dm->cid = model.nodeCid;
+		dm->rest = model.nodePos;
+		dm->wheel = model.nodeWheel;
+		dm->wheel.resize(n, 0);
+		dm->nbr = model.nodeNbr;
+		dm->rev.assign(n, {});
+		for (size_t i = 0; i < n; ++i)
+			for (uint16_t j : dm->nbr[i])
+				if (j < n) dm->rev[j].push_back(uint16_t(i));
+		dm->idxOfCid.assign(size_t(mx) + 1, -1);
+		for (size_t i = 0; i < n; ++i)
+			if (dm->cid[i] >= 0) dm->idxOfCid[size_t(dm->cid[i])] = int(i);
+		dm->order.resize(n);
+		for (size_t i = 0; i < n; ++i) dm->order[i] = int(i);
+		std::sort(dm->order.begin(), dm->order.end(), [&](int x, int y) { return dm->cid[x] < dm->cid[y]; });
+		dm->sortedCid.resize(n);
+		for (size_t k = 0; k < n; ++k) dm->sortedCid[k] = dm->cid[size_t(dm->order[k])];
+		dm->skinned = model.skinned;
+		return dm;
+	}
+
+	// script thread, every tick: BeamNG's "dm" messages -> node moves and turns -> g_dentShared
+	void DentsTick()
+	{
+		DentState& d = g_dent;
+		{
+			std::shared_ptr<DentModel> nm;
+			{
+				std::lock_guard<std::mutex> lk(g_modelMx);
+				nm = std::move(g_dentModelNew);
+			}
+			if (nm) {
+				// a newly loaded car: nothing moved yet
+				d.m = std::move(nm);
+				const size_t n = d.m->cid.size();
+				d.off.assign(n * 3, 0.0f);
+				d.nv.assign(n * 3, 0.0f);
+				d.q.assign(n * 4, 0.0f);
+				for (size_t i = 0; i < n; ++i) d.q[i * 4 + 3] = 1.0f;
+				d.dirty.assign(n, 0);
+				d.stamp.assign(n, 0);
+				d.stampNow = 0;
+				d.any = false;
+				d.pending = true;
+				d.warnedNodes = d.warnedNone = d.firstMove = false;
+			}
+		}
+		std::vector<std::string> q;
+		uint32_t                 lost = 0;
+		AcquireSRWLockExclusive(&g_dnet.lock);
+		q.swap(g_dnet.dmQ);
+		lost = g_dnet.dmLost;
+		ReleaseSRWLockExclusive(&g_dnet.lock);
+		if (!d.m) return;
+		DentModel&   m = *d.m;
+		const size_t n = m.cid.size();
+		if (n == 0) {
+			if (!q.empty() && !d.warnedNone) {
+				d.warnedNone = true;
+				Log("dents: BeamNG sends the car's dents, but the loaded car file can't show them: %s", m.note.empty() ? "no node data" : m.note.c_str());
+				Notify("D1: export the car again (Shift+F11) to see its dents in GTA");
+			}
+			return;
+		}
+		const double now = NowSeconds();
+		bool         changed = false;
+		if (!g_cfg.dents) {
+			// switched off (ini): the car as drawn
+			if (d.any) {
+				std::fill(d.off.begin(), d.off.end(), 0.0f);
+				for (size_t i = 0; i < n; ++i) d.q[i * 4] = d.q[i * 4 + 1] = d.q[i * 4 + 2] = 0.0f, d.q[i * 4 + 3] = 1.0f;
+				d.any = false;
+				d.pending = true;
+			}
+			q.clear();
+		}
+		for (const std::string& s : q) {
+			++d.msgs;
+			const double nn = JsonNum(s, "nn", -1), a = JsonNum(s, "a", -1), b = JsonNum(s, "b", -1);
+			if (nn != double(n)) {
+				++d.wrongCar;
+				if (!d.warnedNodes) {
+					d.warnedNodes = true;
+					Log("dents: BeamNG's car has %.0f nodes, the car file %zu: it's another car or another setup of it. Export it again (Shift+F11) to see its dents",
+						nn, n);
+					Notify("D1: the BeamNG car isn't the exported one (export again: Shift+F11) - no dents shown");
+				}
+				continue;
+			}
+			if (!(a >= 0) || !(b > a)) {
+				++d.bad;
+				continue;
+			}
+			// the new moves of this range: listed nodes, all others in it back to where they were
+			++d.stampNow;
+			const size_t p0 = s.find("\"d\":\"");
+			if (p0 != std::string::npos) {
+				const char* p = s.c_str() + p0 + 5;
+				while (*p && *p != '"') {
+					char*      e = nullptr;
+					const long c = strtol(p, &e, 10);
+					if (e == p || *e != ',') break;
+					p = e + 1;
+					const long x = strtol(p, &e, 10);
+					if (e == p || *e != ',') break;
+					p = e + 1;
+					const long y = strtol(p, &e, 10);
+					if (e == p || *e != ',') break;
+					p = e + 1;
+					const long z = strtol(p, &e, 10);
+					if (e == p) break;
+					p = e;
+					if (*p == ';') ++p;
+					if (c < long(a) || c >= long(b)) {
+						++d.bad;
+						continue;
+					}
+					const int i = (c >= 0 && size_t(c) < m.idxOfCid.size()) ? m.idxOfCid[size_t(c)] : -1;
+					if (i < 0) {
+						++d.unknown;
+						continue;
+					}
+					if (m.wheel[size_t(i)]) continue;  // (a wheel's node: the wheels are drawn on their own)
+					d.nv[size_t(i) * 3] = float(x) * 0.001f;
+					d.nv[size_t(i) * 3 + 1] = float(y) * 0.001f;
+					d.nv[size_t(i) * 3 + 2] = float(z) * 0.001f;
+					d.stamp[size_t(i)] = d.stampNow;
+					++d.entries;
+				}
+			}
+			const size_t k0 = size_t(std::lower_bound(m.sortedCid.begin(), m.sortedCid.end(), int(a)) - m.sortedCid.begin());
+			const size_t k1 = size_t(std::lower_bound(m.sortedCid.begin(), m.sortedCid.end(), int(b)) - m.sortedCid.begin());
+			for (size_t k = k0; k < k1; ++k) {
+				const size_t i = size_t(m.order[k]);
+				const bool   set = d.stamp[i] == d.stampNow;
+				for (int c = 0; c < 3; ++c) {
+					const float v = set ? d.nv[i * 3 + c] : 0.0f;
+					if (fabsf(v - d.off[i * 3 + c]) > 0.0005f) {
+						d.off[i * 3 + c] = v;
+						d.dirty[i] = 1;
+						changed = true;
+					}
+				}
+			}
+		}
+		if (changed) {
+			// turns: of the nodes that moved, and of the nodes that have them as neighbours
+			std::vector<int> fit;
+			for (size_t i = 0; i < n; ++i) {
+				if (!d.dirty[i]) continue;
+				d.dirty[i] = 0;
+				fit.push_back(int(i));
+				for (uint16_t j : m.rev[i]) fit.push_back(int(j));
+			}
+			std::sort(fit.begin(), fit.end());
+			fit.erase(std::unique(fit.begin(), fit.end()), fit.end());
+			double a[16][3], b[16][3];
+			for (int i : fit) {
+				const std::vector<uint16_t>& nb = m.nbr[size_t(i)];
+				const float*                 oi = &d.off[size_t(i) * 3];
+				bool                         moved = oi[0] != 0 || oi[1] != 0 || oi[2] != 0;
+				int                          k = 0;
+				double                       len2 = 0;
+				for (uint16_t j : nb) {
+					if (k >= 16 || j >= n) break;
+					const float* oj = &d.off[size_t(j) * 3];
+					moved = moved || oj[0] != 0 || oj[1] != 0 || oj[2] != 0;
+					for (int c = 0; c < 3; ++c) {
+						a[k][c] = double(m.rest[size_t(j) * 3 + c]) - m.rest[size_t(i) * 3 + c];
+						b[k][c] = a[k][c] + double(oj[c]) - oi[c];
+					}
+					const double la = sqrt(a[k][0] * a[k][0] + a[k][1] * a[k][1] + a[k][2] * a[k][2]);
+					const double lb = sqrt(b[k][0] * b[k][0] + b[k][1] * b[k][1] + b[k][2] * b[k][2]);
+					if (fabs(lb - la) > 0.5) continue;  // (torn away from this node: no part of its turn)
+					len2 += la * la;
+					++k;
+				}
+				float* qi = &d.q[size_t(i) * 4];
+				if (!moved || k < 2 || !FitTurn(a, b, k, 0.01 * len2, qi)) {
+					qi[0] = qi[1] = qi[2] = 0.0f;
+					qi[3] = 1.0f;
+				} else {
+					++d.fits;
+				}
+			}
+			bool   any = false;
+			int    movedNow = 0;
+			double most = 0;
+			for (size_t i = 0; i < n; ++i) {
+				const float* o = &d.off[i * 3];
+				const double l = sqrt(double(o[0]) * o[0] + double(o[1]) * o[1] + double(o[2]) * o[2]);
+				if (l > 0) {
+					any = true;
+					++movedNow;
+					most = std::max(most, l);
+				}
+			}
+			if (any && !d.firstMove) {
+				d.firstMove = true;
+				Log("dents: the first ones from BeamNG: %d nodes moved, the most %.1f cm", movedNow, most * 100.0);
+			}
+			// (when it changes a lot: a crash, a repair; a few dozen lines at most)
+			if ((any != d.any || movedNow > d.movedLogged * 2 + 10 || most > d.mostLogged + 0.1) && d.changeLogs < 40) {
+				++d.changeLogs;
+				if (any) Log("dents: now %d of %zu nodes moved, the most %.1f cm", movedNow, n, most * 100.0);
+				else Log("dents: none now (the car was repaired)");
+				d.movedLogged = movedNow;
+				d.mostLogged = most;
+			}
+			d.lastChangeT = now;
+			d.settleCheck = true;
+			d.movedNow = movedNow;
+			d.mostNow = most;
+			d.any = any;
+			d.pending = true;
+		}
+		if (d.settleCheck && now - d.lastChangeT > 1.0) {
+			// settled (a second without changes): the final shape, when the last line said otherwise
+			d.settleCheck = false;
+			if (d.any && (d.movedNow != d.movedLogged || fabs(d.mostNow - d.mostLogged) > 0.01) && d.changeLogs < 60) {
+				++d.changeLogs;
+				Log("dents: now %d of %zu nodes moved, the most %.1f cm (settled)", d.movedNow, n, d.mostNow * 100.0);
+				d.movedLogged = d.movedNow;
+				d.mostLogged = d.mostNow;
+			}
+		}
+		if (d.pending) {
+			d.pending = false;
+			AcquireSRWLockExclusive(&g_dentShared.lock);
+			g_dentShared.data.resize(n * 8);
+			float* o = g_dentShared.data.data();
+			for (size_t i = 0; i < n; ++i) {
+				o[i * 8] = d.off[i * 3];
+				o[i * 8 + 1] = d.off[i * 3 + 1];
+				o[i * 8 + 2] = d.off[i * 3 + 2];
+				const double l2 = double(d.off[i * 3]) * d.off[i * 3] + double(d.off[i * 3 + 1]) * d.off[i * 3 + 1] + double(d.off[i * 3 + 2]) * d.off[i * 3 + 2];
+				o[i * 8 + 3] = l2 > kDentOffM * kDentOffM ? 1.0f : 0.0f;  // came off the car (see DentW in the shader)
+				o[i * 8 + 4] = d.q[i * 4];
+				o[i * 8 + 5] = d.q[i * 4 + 1];
+				o[i * 8 + 6] = d.q[i * 4 + 2];
+				o[i * 8 + 7] = d.q[i * 4 + 3];
+			}
+			g_dentShared.gen = m.gen;
+			++g_dentShared.seq;
+			ReleaseSRWLockExclusive(&g_dentShared.lock);
+			++d.pubs;
+		}
+		if (now - d.statT >= 10.0) {
+			if (d.msgs > 0) {
+				int    movedNow = 0;
+				double most = 0;
+				for (size_t i = 0; i < n; ++i) {
+					const float* o = &d.off[i * 3];
+					const double l = sqrt(double(o[0]) * o[0] + double(o[1]) * o[1] + double(o[2]) * o[2]);
+					if (l > 0) ++movedNow, most = std::max(most, l);
+				}
+				Log("dents: %u messages from BeamNG (%u node moves, %u unknown nodes, %u bad, %u for another car, %u lost), %d of %zu nodes moved now (the most %.1f cm), "
+				    "%u turns fitted, %u updates, %u copies to the video card",
+					d.msgs, d.entries, d.unknown, d.bad, d.wrongCar, lost - d.lostSeen, movedNow, n, most * 100.0, d.fits, d.pubs, g_dentUploads.load());
+			}
+			d.statT = now;
+			d.msgs = d.entries = d.unknown = d.bad = d.fits = d.pubs = d.wrongCar = 0;
+			d.lostSeen = lost;
+		}
+	}
+
 	void LoadCar(const std::string& path)
 	{
 		car::Options opt;
@@ -2216,11 +2657,14 @@ namespace
 			dm.radius[i] = std::max(0.1f, w.radius);
 		}
 		if (model->wheels.size() > size_t(kDrvWheels)) Log("drive: the car has %zu wheels; drive mode uses the first %d", model->wheels.size(), kDrvWheels);
+		std::shared_ptr<DentModel> dents = DentModelOf(*model);  // v2.5
 		std::lock_guard<std::mutex> lk(g_modelMx);
 		g_lastCarPath = path;
 		g_pendingModel = std::move(model);
 		g_drvModel = dm;
 		g_modelGen.fetch_add(1);
+		dents->gen = g_modelGen.load();
+		g_dentModelNew = std::move(dents);
 	}
 
 	void ExportAndLoad()
@@ -2631,6 +3075,16 @@ namespace
 					AcquireSRWLockExclusive(&g_dnet.lock);
 					g_dnet.rep = s;
 					++g_dnet.repCount;
+					ReleaseSRWLockExclusive(&g_dnet.lock);
+				} else if (ty == "dm") {
+					// v2.5: each one covers a range of node ids (all of them are kept: one car's dents come in several)
+					AcquireSRWLockExclusive(&g_dnet.lock);
+					if (g_dnet.dmQ.size() >= 256) {
+						g_dnet.dmQ.erase(g_dnet.dmQ.begin());
+						++g_dnet.dmLost;
+					}
+					g_dnet.dmQ.push_back(std::move(s));
+					++g_dnet.dmCount;
 					ReleaseSRWLockExclusive(&g_dnet.lock);
 				} else if (ty == "map_ok") {
 					AcquireSRWLockExclusive(&g_dnet.lock);
@@ -3272,7 +3726,11 @@ namespace
 		snprintf(sq, sizeof(sq), "%.2f", g_cfg.quietVolume);
 		std::string m = std::string("{\"t\":\"drive_start\",\"v\":\"" D1_VERSION "\",\"in\":") + (g_cfg.driveInput ? "1" : "0") + ",\"cats\":\"" + g_cfg.beamCats +
 		                "\",\"deny\":\"" + g_cfg.beamNever + "\",\"also\":\"" + g_cfg.beamAlso + "\",\"ds\":1,\"pb\":\"" + g_cfg.padList + "\",\"snd\":" + snd +
-		                ",\"sq\":" + sq + ",\"bgf\":" + std::to_string(g_cfg.beamBgFps) + ",\"rep\":\"" + g_cfg.repairActs + "\",\"ps\":" + (g_cfg.pauseSync ? "1" : "0") + "}";
+		                ",\"sq\":" + sq + ",\"bgf\":" + std::to_string(g_cfg.beamBgFps) + ",\"rep\":\"" + g_cfg.repairActs + "\",\"ps\":" + (g_cfg.pauseSync ? "1" : "0");
+		// v2.5: gravity x DriveGravity while GTA drives; the car's shape (dents) this often a second (0 = off)
+		char v25[96];
+		snprintf(v25, sizeof(v25), ",\"grav\":%.3f,\"dz\":%.1f}", g_cfg.driveGravity, g_cfg.dents ? g_cfg.dentHz : 0.0f);
+		m += v25;
 		DrvSend(m.c_str());
 	}
 
@@ -3578,6 +4036,22 @@ namespace
 		double                kz = 0, kx = 0, ky = 0;
 		uint32_t              gen = 0;
 		uint32_t              lastUse = 0;
+		// v2.5: where its level came from: the neighbour the car reaches first (fromKey), or the car's own ground (refCar;
+		// carAir: the car was in the air then, so "its ground" was a guess)
+		bool                  hasFrom = false, refCar = false, carAir = false;
+		int64_t               fromKey = 0;
+		bool                  noLevel = false;  // v2.5: nothing at this level here (beside a deck: only the road far below)
+		// v2.5: walls and barriers on it (GTA world, metres): boxes along a face; wallsDone: scanned (or none wanted)
+		struct Wall
+		{
+			float cx, cy, z0, z1;   // centre of the footprint, bottom and top
+			float dx, dy;           // along the wall (unit)
+			float len, thick;       // length along (dx, dy), thickness across it
+			float gs = 0;           // the ground's rise per metre along it (bottom and top follow it)
+		};
+		std::vector<Wall>     walls;
+		bool                  wallsDone = false;
+		int                   wallRays = 0, flat = 0;  // rays the scan took; points flattened under walls (no humps)
 	};
 	struct WRay
 	{
@@ -3619,6 +4093,9 @@ namespace
 		uint32_t drafts = 0, finals = 0, deferred = 0, fromDisk = 0, preDone = 0, preFailed = 0, trisSent = 0;
 		uint32_t syncRays = 0, syncRefused = 0;
 		uint32_t voidPts = 0, voidTiles = 0, swaps = 0, keptRm = 0, idleSent = 0, levelMiss = 0;  // v2.43
+		uint32_t noLevelTiles = 0, levelMoved = 0;                                                // v2.5
+		uint32_t wallTiles = 0, wallBoxes = 0, wallRaysN = 0, wallFlat = 0, wallLate = 0;          // v2.5: walls scanned
+		double   wallUs = 0, wallUsMax = 0;
 		size_t   liveTris = 0;
 		double   fillT = 0;
 		std::set<int64_t> swapLogged;
@@ -3737,6 +4214,15 @@ namespace
 	// from the neighbour the car reaches first on its way there (its path: up a ramp onto a bridge, along the road under
 	// one; v2.42 took the car's ground plane anywhere). anchored = false: that neighbour's level isn't known yet (being
 	// measured): the tile waits for it
+	// v2.5: a level carried to the next tile keeps its slope, but no steeper than a steep hill (your v2.43 log: a plane fitted
+	// through a deck and the road under it had slopes of 1.4 to 1.7 and sent the next tiles 15 to 25 m up)
+	inline WPlane Carried(WPlane p)
+	{
+		p.gx = std::clamp(p.gx, -1.2, 1.2);
+		p.gy = std::clamp(p.gy, -1.2, 1.2);
+		return p;
+	}
+
 	WPlane ExpectPlane(int i, int j, bool* anchored = nullptr, const WTile** from = nullptr)
 	{
 		WorldState&  w = g_world;
@@ -3766,7 +4252,7 @@ namespace
 			WPlane p;
 			if (TilePlane(it->second, p)) {
 				if (from) *from = &it->second;
-				return p;
+				return Carried(p);
 			}
 			if (it->second.state == 1) {  // its level is coming: wait for it
 				if (anchored) *anchored = false;
@@ -3794,7 +4280,7 @@ namespace
 				}
 			if (best) {
 				if (from) *from = best;
-				return bp;
+				return Carried(bp);
 			}
 			return CarPlane();
 		}
@@ -4101,7 +4587,8 @@ namespace
 		// the reference plane for the ray windows: the car's level there (v2.43: carried over from the live neighbour nearest
 		// the car, else the car's own ground plane; v2.42 could take a cached neighbour of another level: a bridge deck's
 		// height for the road under it)
-		const WPlane ref = ExpectPlane(i, j);
+		const WTile* from = nullptr;
+		const WPlane ref = ExpectPlane(i, j, nullptr, &from);
 		t.rcx = ref.cx;
 		t.rcy = ref.cy;
 		t.rz = ref.z;
@@ -4109,6 +4596,11 @@ namespace
 		t.ry = ref.gy;
 		t.lvE = t.lv = PlaneZ(ref, (i + 0.5) * WTileM(), (j + 0.5) * WTileM());
 		t.hasRef = true;
+		// v2.5: where the level came from
+		t.hasFrom = from != nullptr;
+		t.fromKey = from ? WKey(from->i, from->j) : 0;
+		t.refCar = from == nullptr;
+		t.carAir = t.refCar && !w.grounded;
 		// the edges finished neighbours of the same level already have
 		const int nb4[4][2] = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } };
 		for (auto& d : nb4)
@@ -4139,7 +4631,9 @@ namespace
 		bool   useRef = t.hasRef;
 		if (useRef) {
 			// the points within 1.25 m of the level it is measured for (a ramp's points, not the ground beside it), else
-			// within WorldLevelM, else all
+			// within WorldLevelM. v2.5: never all of them (your v2.43 log: a tile measured for the road took the deck 12 m over
+			// it, or the ground 28 m under it), unless its level was the car's own ground while the car was in the air (a jump:
+			// where it lands is its new level)
 			int inT = 0, inW = 0, all = 0;
 			for (int b = 0; b < t.n; ++b)
 				for (int a = 0; a < t.n; ++a) {
@@ -4153,11 +4647,16 @@ namespace
 				}
 			if (inT >= std::max(6, all * 3 / 10)) win = 1.25;
 			useRef = inW >= 3;
+			if (!useRef && !(t.refCar && t.carAir) && !t.disk) return false;
 		}
-		for (int pass = 0; pass < 2; ++pass) {
+		// v2.5: passes 1-3 take the points near the plane found so far (not near the level it was measured for): on a ramp the
+		// plane walks up to the ramp's own slope (a level carried flat up a ramp measured the ground under its top: your falls
+		// at speed onto a bridge)
+		const double walkTol = useRef ? std::min(win, 1.25) : 2.5;
+		for (int pass = 0; pass < 4; ++pass) {
 			const bool   had = planeOk;
 			const double pz0 = ppz, px0 = ppx, py0 = ppy;
-			if (pass == 1 && !had) break;
+			if (pass >= 1 && !had) break;
 			const double cx = (t.i + 0.5) * WTileM(), cy = (t.j + 0.5) * WTileM();
 			double       sxx = 0, syy = 0, sxy = 0, sx = 0, sy = 0, sz = 0, sxz = 0, syz = 0, n = 0;
 			for (int b = 0; b < t.n; ++b)
@@ -4165,8 +4664,9 @@ namespace
 					const float z = t.z[b * t.n + a];
 					if (!std::isfinite(z)) continue;
 					const double x = t.i * WTileM() + a * t.step - cx, y = t.j * WTileM() + b * t.step - cy;
-					if (useRef && fabs(z - (t.rz + t.rx * (x + cx - t.rcx) + t.ry * (y + cy - t.rcy))) > win) continue;
-					if (pass == 1 && fabs(z - (pz0 + px0 * x + py0 * y)) > 2.5) continue;
+					if (pass == 0 && useRef && fabs(z - (t.rz + t.rx * (x + cx - t.rcx) + t.ry * (y + cy - t.rcy))) > win) continue;
+					if (pass >= 1 && useRef && fabs(z - (t.rz + t.rx * (x + cx - t.rcx) + t.ry * (y + cy - t.rcy))) > g_cfg.worldLevelM) continue;
+					if (pass >= 1 && fabs(z - (pz0 + px0 * x + py0 * y)) > walkTol) continue;
 					sxx += x * x;
 					syy += y * y;
 					sxy += x * y;
@@ -4201,6 +4701,7 @@ namespace
 			ppx = std::clamp(A[1][3] / A[1][1], -2.0, 2.0);
 			ppy = std::clamp(A[2][3] / A[2][2], -2.0, 2.0);
 			planeOk = true;
+			if (pass >= 1 && fabs(ppz - pz0) < 0.02 && fabs(ppx - px0) < 0.005 && fabs(ppy - py0) < 0.005) break;  // (settled)
 		}
 		if (planeOk) {
 			opz = ppz;
@@ -4306,6 +4807,20 @@ namespace
 		}
 		msg += "],\"m\":\"" + cells + "\"";
 		if (anyLeaf) msg += ",\"lf\":\"" + leaves + "\"";  // v2.42: flat cells as one (the BeamNG mod draws 2 triangles for each)
+		// v2.5: its walls (boxes): centre x y (from the tile's corner), bottom, top (from z0, at the centre), along x y, length,
+		// thickness, rise per metre along it
+		if (!draft && !t.walls.empty()) {
+			msg += ",\"w\":[";
+			bool first = true;
+			for (const WTile::Wall& wl : t.walls) {
+				snprintf(buf, sizeof(buf), "%s%.3f,%.3f,%.3f,%.3f,%.4f,%.4f,%.3f,%.3f,%.4f", first ? "" : ",", wl.cx - t.i * WTileM(), wl.cy - t.j * WTileM(),
+					double(wl.z0) - zmin, double(wl.z1) - zmin, wl.dx, wl.dy, wl.len, wl.thick, wl.gs);
+				msg += buf;
+				first = false;
+				tris += 10;
+			}
+			msg += "]";
+		}
 		msg += "}";
 		DrvSend(msg.c_str());
 		t.acked = false;
@@ -4477,6 +4992,37 @@ namespace
 		return false;
 	}
 
+	// v2.5: does this tile's own ground meet the neighbour its level came from along their shared side (the same road going
+	// on, its level carried a little wrong), or not (beside a deck: only the road far under it)? The median step between the
+	// neighbour's edge points and this tile's first measured points within 1 m of that edge, under 1 m
+	bool MeetsFrom(const WTile& t)
+	{
+		if (!t.hasFrom) return false;
+		auto it = g_world.tiles.find(t.fromKey);
+		if (it == g_world.tiles.end()) return false;
+		const WTile& nb = it->second;
+		const int    n = t.n, di = nb.i - t.i, dj = nb.j - t.j;
+		if (nb.n != n || int(nb.z.size()) < n * n || (di && dj) || (!di && !dj) || abs(di) > 1 || abs(dj) > 1) return false;
+		std::vector<double> d;
+		const int           reach = std::max(1, int(1.0 / t.step + 1e-6));
+		for (int s = 0; s < n; ++s) {
+			const int   nbk = di == -1 ? s * n + (n - 1) : di == 1 ? s * n : dj == -1 ? (n - 1) * n + s : s;
+			const float zn = nb.z[nbk];
+			if (!std::isfinite(zn)) continue;
+			for (int r = 1; r <= reach; ++r) {
+				const int a = di == -1 ? r : di == 1 ? n - 1 - r : s;
+				const int b = di ? s : dj == -1 ? r : n - 1 - r;
+				const int k = b * n + a;
+				if (t.ps[k] != 2 || t.src[k] != 0 || !std::isfinite(t.z[k])) continue;
+				d.push_back(fabs(double(t.z[k]) - zn));
+				break;
+			}
+		}
+		if (d.size() < 3) return false;
+		std::nth_element(d.begin(), d.begin() + d.size() / 2, d.end());
+		return d[d.size() / 2] < 1.0;
+	}
+
 	// all points of a pass answered: the next finer pass where it's needed, or done (holes filled from neighbours / left
 	// out / tried again)
 	void WorldFinish(int64_t key)
@@ -4538,6 +5084,56 @@ namespace
 			}
 		// v2.43: another level's ground next to an edge left out (a bridge deck's edge: no wall down to the road below)
 		if (VoidBelow(t)) w.voidPts += uint32_t(t.voids);
+		// v2.5: nothing at this level here: every point it measured is another level's ground (beside a deck: the road far
+		// below; your v2.43 log: such tiles became this level's ground, then were swapped and measured again and again).
+		// Left empty, unless that ground meets the tile the level came from: then it is the same road and its level was
+		// carried a little wrong: it is moved onto its own ground. (A jump: the car's own level was a guess: kept as it is.)
+		if (t.hasRef && !(t.refCar && t.carAir)) {
+			int    meas = 0, at = 0;
+			double nearest = 1e9;
+			for (int b = 0; b < t.n; ++b)
+				for (int a = 0; a < t.n; ++a) {
+					const int k = b * t.n + a;
+					if (t.ps[k] != 2 || t.src[k] != 0 || !std::isfinite(t.z[k])) continue;
+					const double x = t.i * WTileM() + a * t.step, y = t.j * WTileM() + b * t.step;
+					const double d = fabs(t.z[k] - (t.rz + t.rx * (x - t.rcx) + t.ry * (y - t.rcy)));
+					++meas;
+					at += d <= g_cfg.worldLevelM;
+					nearest = std::min(nearest, d);
+				}
+			if (meas >= 4 && at < 3) {
+				if (MeetsFrom(t)) {
+					const bool hr = t.hasRef;
+					t.hasRef = false;
+					double pz = 0, px = 0, py = 0;
+					const bool ok = FitPlaneCalc(t, pz, px, py);
+					t.hasRef = hr;
+					if (ok) {
+						t.rcx = (t.i + 0.5) * WTileM();
+						t.rcy = (t.j + 0.5) * WTileM();
+						t.rz = pz;
+						t.rx = px;
+						t.ry = py;
+						t.lvE = pz;
+						++w.levelMoved;
+						if (g_cfg.worldDebug) Log("ground dbg: %d,%d level moved onto its own ground %.2f (made for %.2f: it meets the tile before it)", t.i, t.j, pz, t.lv);
+					}
+				} else {
+					int cnt = 0;
+					for (int k = 0; k < np; ++k)
+						if (t.ps[k] != 5) {
+							t.z[k] = NAN;
+							t.ps[k] = 5;
+							++cnt;
+						}
+					t.voids = cnt;
+					t.noLevel = true;
+					++w.noLevelTiles;
+					if (g_cfg.worldDebug)
+						Log("ground dbg: %d,%d nothing at level %.2f here (%d points measured, the nearest %.1f m off): left empty", t.i, t.j, t.lv, meas, nearest);
+				}
+			}
+		}
 		for (int b = 0; b < t.n - 1; ++b)
 			for (int a = 0; a < t.n - 1; ++a) {
 				const int s = t.leaf[b * (t.n - 1) + a];
@@ -4639,7 +5235,9 @@ namespace
 		if (g_cfg.worldDebug) Log("ground dbg: %d,%d finished: level %.2f (made for %.2f), %d points left out%s", t.i, t.j, t.lv, t.lvE, t.voids, t.pre ? " (ring)" : "");
 		++w.tilesDone;
 		w.raysDone += t.rays;
-		if (t.partial == 0) MapPut(t);
+		// v2.5: saved once its walls are known (WorldWallsTick); without the wall scan, now
+		if (t.partial == 0 && !g_cfg.worldWalls) MapPut(t);
+		t.wallsDone = !g_cfg.worldWalls;
 		if (t.pre) ++w.preDone;
 		// WorldTick sends it (or keeps it for later: the ring, a car standing on its draft)
 	}
@@ -4676,12 +5274,8 @@ namespace
 					return;
 				}
 			}
-			// no ground in the window: once more with a wider one, then give up on this point
-			if (++t.tries[r.pt] < 2) {
-				t.ps[r.pt] = 4;
-				t.next = std::min(t.next, r.pt);
-				return;
-			}
+			// no ground in the window: none at this level here (v2.5: no second, wider try: it found other levels' ground)
+			++t.tries[r.pt];
 			++t.rays;
 			t.ps[r.pt] = 3;
 			--t.left;
@@ -4730,9 +5324,10 @@ namespace
 		x = float(t.i * WTileM() + a * t.step);
 		y = float(t.j * WTileM() + b * t.step);
 		const double ref = RefZ(t, k);
-		const bool   wide = t.tries[k] > 0;
-		z0 = float(ref + (wide ? 20.0 : 4.0));
-		z1 = float(ref - (wide ? 50.0 : 12.0));
+		// v2.5: never higher than WorldUpM over the level (v2.43 looked 20 m up on a second try: an overpass, a lamp post or a
+		// sign over the road became ground: the big walls in your screenshots), down WorldDownM (a ramp's slope, a deck's edge)
+		z0 = float(ref + g_cfg.worldUpM);
+		z1 = float(ref - g_cfg.worldDownM);
 	}
 
 	// rays for the tiles being measured, the soonest needed first. v2.42: GTA's immediate rays first (your v2.41 log: they
@@ -4984,7 +5579,7 @@ namespace
 	} g_map;
 
 	constexpr uint32_t kMapMagic = 0x314D4247;  // "GBM1"
-	constexpr uint32_t kMapVersion = 2;         // v2.43: records with their level (v2.42's files are measured again: no levels)
+	constexpr uint32_t kMapVersion = 3;         // v2.5: walls (v2.43's files are measured again: barriers were humps in the ground)
 	inline int64_t MapRegionOf(int i, int j) { return WKey(int(floor(i / 16.0)), int(floor(j / 16.0))); }
 
 	std::string MapPath(int64_t rk)
@@ -5155,6 +5750,16 @@ namespace
 		const uint8_t hr = t.hasRef ? 1 : 0;
 		put(rf, sizeof(rf));
 		put(&hr, 1);
+		// v2.5: its walls (scanned): count, then 9 floats each
+		const uint16_t nw = uint16_t(std::min<size_t>(t.walls.size(), 4000));
+		const uint8_t  wd = t.wallsDone ? 1 : 0;
+		put(&wd, 1);
+		put(&nw, 2);
+		for (uint16_t q = 0; q < nw; ++q) {
+			const WTile::Wall& wl = t.walls[q];
+			const float        f[9] = { wl.cx, wl.cy, wl.z0, wl.z1, wl.dx, wl.dy, wl.len, wl.thick, wl.gs };
+			put(f, sizeof(f));
+		}
 		return s;
 	}
 
@@ -5210,6 +5815,29 @@ namespace
 			t.rz = rf[0];
 			t.rx = rf[1];
 			t.ry = rf[2];
+		}
+		// v2.5: walls
+		uint8_t  wd = 0;
+		uint16_t nw = 0;
+		if (get(&wd, 1) && get(&nw, 2)) {
+			for (uint16_t q = 0; q < nw; ++q) {
+				float f[9];
+				if (!get(f, sizeof(f))) break;
+				WTile::Wall wl;
+				wl.cx = f[0];
+				wl.cy = f[1];
+				wl.z0 = f[2];
+				wl.z1 = f[3];
+				wl.dx = f[4];
+				wl.dy = f[5];
+				wl.len = f[6];
+				wl.thick = f[7];
+				wl.gs = f[8];
+				t.walls.push_back(wl);
+			}
+			t.wallsDone = wd == 1 || !g_cfg.worldWalls;
+		} else {
+			t.wallsDone = !g_cfg.worldWalls;
 		}
 		FitPlane(t);
 		t.lv = t.planeOk ? t.pz : double(zmin);
@@ -5348,7 +5976,7 @@ namespace
 				} else if (j.path == "!old") {
 					if (!m.oldLogged) {
 						m.oldLogged = true;
-						Log("ground: the saved map from v2.42 isn't used (it couldn't tell a bridge deck from the road under it): those roads are measured again once");
+						Log("ground: the saved map from v2.43 or older isn't used (no walls; barriers were humps in the ground): those roads are measured again once");
 					}
 				}
 				for (auto& rec : j.recs) MapRecPut(r.recs[rec.first], std::move(rec.second), false);  // what was measured meanwhile wins
@@ -5435,7 +6063,7 @@ namespace
 			size_t mine = 0;
 			for (auto& kv : w.tiles) mine += kv.second.sent || kv.second.draft;
 			Log("ground: BeamNG mod %s took the mapping (tile set %.0f, it has %.0f tiles; tile mode %s: %s)", v.c_str(), epoch, n, mode.c_str(), check.c_str());
-			if (v.empty() || v < std::string("2.43")) Log("ground: WARNING: the BeamNG mod is %s, not 2.43: copy the new gtaBridge.lua (bridges, pause, repair need it)", v.empty() ? "old" : v.c_str());
+			if (v.empty() || v < std::string("2.5")) Log("ground: WARNING: the BeamNG mod is %s, not 2.5: copy the new gtaBridge.lua (walls, dents, props need it)", v.empty() ? "old" : v.c_str());
 			if (n == 0 && mine > 0) {
 				Log("ground: BeamNG has none of the %zu tiles sent before (restarted or the map loaded again?): sending them again from the cache", mine);
 				for (auto it = w.tiles.begin(); it != w.tiles.end();) {
@@ -5530,9 +6158,16 @@ namespace
 			g_map.wroteTiles, g_map.regions.size(), g_map.pending, g_map.errors, ms.empty() ? "none yet" : ms.c_str());
 		g_map.readTiles = g_map.regionsRead = g_map.wroteTiles = 0;
 		Log("ground: levels: %u tiles swapped for the car's level, %u wanted tiles known only at another level (measured), %u points left out under edges (%u tiles "
-		    "all another level's); static world: %u far tiles taken out of BeamNG (budget %d triangles), %u sent while standing",
-			w.swaps, w.levelMiss, w.voidPts, w.voidTiles, w.keptRm, g_cfg.worldKeepTris, w.idleSent);
-		w.swaps = w.levelMiss = w.voidPts = w.voidTiles = w.keptRm = w.idleSent = 0;
+		    "all another level's); static world: %u far tiles taken out of BeamNG (budget %d triangles), %u sent while standing; v2.5: %u tiles with nothing at "
+		    "the car's level (left empty), %u levels moved onto their own ground",
+			w.swaps, w.levelMiss, w.voidPts, w.voidTiles, w.keptRm, g_cfg.worldKeepTris, w.idleSent, w.noLevelTiles, w.levelMoved);
+		w.swaps = w.levelMiss = w.voidPts = w.voidTiles = w.keptRm = w.idleSent = w.noLevelTiles = w.levelMoved = 0;
+		if (g_cfg.worldWalls)
+			Log("ground: walls (v2.5): %u tiles scanned, %u wall boxes, %u rays (%.0f us a tile, max %.0f), %u ground points under walls flattened, %u tiles "
+			    "sent before their scan (the car was close)",
+				w.wallTiles, w.wallBoxes, w.wallRaysN, w.wallTiles ? w.wallUs / w.wallTiles : 0.0, w.wallUsMax, w.wallFlat, w.wallLate);
+		w.wallTiles = w.wallBoxes = w.wallRaysN = w.wallFlat = w.wallLate = 0;
+		w.wallUs = w.wallUsMax = 0;
 		if (!w.ws.empty()) {
 			double n = 0, b = 0, bms = 0, bmx = 0, rn = 0, rms = 0, rmx = 0, fp95 = 0, fmx = 0, q = 0, tris = 0;
 			JsonNumC(w.ws.c_str(), "n", n);
@@ -5674,6 +6309,360 @@ namespace
 		w.liveTris = tris;
 	}
 
+
+	// ---------------------------------------------------------------------------------------
+	// v2.5: walls and barriers (T3b). GTA's walls, barriers, pillars and building sides are found with flat rays across each
+	// finished tile, WorldWallProbeM over its ground (rows and columns 1 m apart, both ways): where a ray meets a steep face
+	// (its normal under 60 degrees from flat) something solid starts. The faces are joined into straight pieces and go to
+	// BeamNG with the tile as boxes, so BeamNG's car hits them like GTA's car does (v2.43 drew a barrier as humps: your
+	// screenshots 1 and 2). Ground points on a thin wall's top are put back on the road (no humps). GTA's map only: parked
+	// cars and props are not walls.
+	// ---------------------------------------------------------------------------------------
+	struct WallHit
+	{
+		double x, y;    // where a ray met the face
+		double nx, ny;  // the face's normal (flat, unit), pointing out of the solid
+		double thick;   // how far the solid goes on behind the face, along the normal (0 = not known)
+		bool   paired;  // the other side of the same solid was seen too (a thin wall, a barrier)
+	};
+
+	// one immediate ray of GTA's map: 1 hit (p, n), 0 nothing, -1 GTA didn't answer at once
+	int WallRay(const double a[3], const double b[3], double p[3], double n[3])
+	{
+		const int h = Call<int>(N::START_EXPENSIVE_SYNCHRONOUS_SHAPE_TEST_LOS_PROBE, float(a[0]), float(a[1]), float(a[2]), float(b[0]), float(b[1]), float(b[2]), 1,
+			g_drv.veh, 7);
+		if (!h) return -1;
+		int       hit = 0, ent = 0;
+		NVec3     end{}, nrm{};
+		uint64_t  mat = 0;
+		const int st = Call<int>(N::GET_SHAPE_TEST_RESULT_INCLUDING_MATERIAL, h, &hit, &end, &nrm, &mat, &ent);
+		if (st != 2) return -1;
+		++g_world.wallRaysN;
+		if (!hit) return 0;
+		p[0] = end.x;
+		p[1] = end.y;
+		p[2] = end.z;
+		const double l = sqrt(double(nrm.x) * nrm.x + double(nrm.y) * nrm.y + double(nrm.z) * nrm.z);
+		n[0] = l > 1e-6 ? nrm.x / l : 0.0;
+		n[1] = l > 1e-6 ? nrm.y / l : 0.0;
+		n[2] = l > 1e-6 ? nrm.z / l : 1.0;
+		return 1;
+	}
+
+	// one line across the tile (a to b): the solid stretches on it from both ways. A face whose normal looks against the
+	// direction from a to b opens a stretch, one that looks along it closes one (GTA only reports the side a ray comes
+	// from: the far side of a wall is found by the ray coming back). A sloped face is the ground going up: the line ends there.
+	void WallLine(const double a[3], const double b[3], const WTile& t, std::vector<WallHit>& out, int& rays)
+	{
+		const double dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+		const double L = sqrt(dx * dx + dy * dy);
+		if (L < 0.5) return;
+		const double ux = dx / L, uy = dy / L;
+		struct E { double u, nx, ny; int type; };
+		std::vector<E> ev;
+		auto march = [&](bool fwd) {
+			double u = fwd ? 0.0 : L;  // where the next ray starts (metres from a)
+			for (int it = 0; it < 6; ++it) {
+				const double s0 = u, s1 = fwd ? L : 0.0;
+				if (fwd ? s0 >= L - 0.02 : s0 <= 0.02) return true;
+				const double A[3] = { a[0] + ux * s0, a[1] + uy * s0, a[2] + dz * s0 / L }, B[3] = { a[0] + ux * s1, a[1] + uy * s1, a[2] + dz * s1 / L };
+				double       p[3], n[3];
+				++rays;
+				const int r = WallRay(A, B, p, n);
+				if (r < 0) return false;
+				if (r == 0) return true;
+				const double uh = std::clamp((p[0] - a[0]) * ux + (p[1] - a[1]) * uy, 0.0, L);
+				if (fabs(n[2]) >= 0.5) return true;  // the ground going up: nothing more on this line that way
+				const double fl = sqrt(n[0] * n[0] + n[1] * n[1]);
+				const double nx = n[0] / fl, ny = n[1] / fl;
+				ev.push_back({ uh, nx, ny, (nx * ux + ny * uy) < 0 ? 1 : -1 });
+				u = fwd ? uh + 0.04 : uh - 0.04;
+			}
+			return true;
+		};
+		if (!march(true)) return;
+		if (ev.empty()) return;  // nothing solid on it
+		// the backward march only when the forward one ended inside something (GTA's collision has no back faces)
+		int bal = 0;
+		for (const E& e : ev) bal += e.type;
+		if (bal != 0 || ev.back().type == 1) march(false);
+		std::sort(ev.begin(), ev.end(), [](const E& p, const E& q) { return p.u < q.u; });
+		std::vector<E> m;
+		for (const E& e : ev)
+			if (m.empty() || fabs(e.u - m.back().u) > 0.03 || e.type != m.back().type) m.push_back(e);
+		// stretches: enter ... leave
+		bool         inside = false;
+		const E*     open = nullptr;
+		auto add = [&](const E* e0, const E* e1, double u0, double u1) {
+			if (u1 - u0 < 0.03) u1 = u0 + 0.08;  // a wall drawn as one flat sheet (both its sides at once): 8 cm thick
+			const double T = WTileM(), x0 = t.i * T, y0 = t.j * T;
+			auto inTile = [&](double x, double y) { return x >= x0 && x < x0 + T && y >= y0 && y < y0 + T; };
+			if (e0) {
+				const double x = a[0] + ux * u0, y = a[1] + uy * u0;
+				const double th = e1 ? (u1 - u0) * fabs(ux * e0->nx + uy * e0->ny) : 0.0;
+				if (inTile(x, y)) out.push_back({ x, y, e0->nx, e0->ny, th, e1 != nullptr });
+			}
+			if (e1) {
+				const double x = a[0] + ux * u1, y = a[1] + uy * u1;
+				const double th = e0 ? (u1 - u0) * fabs(ux * e1->nx + uy * e1->ny) : 0.0;
+				if (inTile(x, y)) out.push_back({ x, y, e1->nx, e1->ny, th, e0 != nullptr });
+			}
+		};
+		for (const E& e : m) {
+			if (e.type == 1) {
+				if (!inside) {
+					inside = true;
+					open = &e;
+				}
+			} else {
+				if (inside) add(open, &e, open->u, e.u);
+				else add(nullptr, &e, 0.0, e.u);  // the line began inside it
+				inside = false;
+				open = nullptr;
+			}
+		}
+		if (inside && open) add(open, nullptr, open->u, L);
+	}
+
+	// the tile's ground plane at (x, y) (its own; the level it was measured for when it has none)
+	double TileGroundZ(const WTile& t, double x, double y)
+	{
+		const double cx = (t.i + 0.5) * WTileM(), cy = (t.j + 0.5) * WTileM();
+		if (t.planeOk) return t.pz + t.px * (x - cx) + t.py * (y - cy);
+		return t.rz + t.rx * (x - t.rcx) + t.ry * (y - t.rcy);
+	}
+
+	// faces -> straight pieces -> boxes; a thin wall seen from both sides is one box between its two faces
+	void WallBoxes(WTile& t, std::vector<WallHit>& hits)
+	{
+		struct Seg { double nx, ny, d, t0, t1, thick; bool paired, used; };
+		std::vector<Seg> segs;
+		std::vector<uint8_t> used(hits.size(), 0);
+		const double cosTol = cos(20.0 * kPi / 180.0);
+		for (size_t h0 = 0; h0 < hits.size(); ++h0) {
+			if (used[h0]) continue;
+			std::vector<size_t> c{ h0 };
+			used[h0] = 1;
+			const WallHit& H = hits[h0];
+			for (size_t h = h0 + 1; h < hits.size(); ++h) {
+				if (used[h]) continue;
+				const WallHit& o = hits[h];
+				if (o.nx * H.nx + o.ny * H.ny < cosTol) continue;
+				if (fabs((o.x - H.x) * H.nx + (o.y - H.y) * H.ny) > 0.2) continue;
+				c.push_back(h);
+				used[h] = 1;
+			}
+			double nx = 0, ny = 0;
+			for (size_t q : c) {
+				nx += hits[q].nx;
+				ny += hits[q].ny;
+			}
+			const double nl = sqrt(nx * nx + ny * ny);
+			if (nl < 1e-6) continue;
+			nx /= nl;
+			ny /= nl;
+			const double tx = -ny, ty = nx;
+			std::vector<std::pair<double, size_t>> along;
+			double d = 0;
+			for (size_t q : c) {
+				along.push_back({ hits[q].x * tx + hits[q].y * ty, q });
+				d += hits[q].x * nx + hits[q].y * ny;
+			}
+			d /= double(c.size());
+			std::sort(along.begin(), along.end());
+			size_t       r0 = 0;
+			const double gapM = std::max(1.6, 1.6 * double(g_cfg.worldWallStepM));  // (lines farther apart: hits farther apart)
+			for (size_t r = 1; r <= along.size(); ++r) {
+				if (r < along.size() && along[r].first - along[r - 1].first <= gapM) continue;
+				// one run: along[r0 .. r-1]
+				std::vector<double> th;
+				int                 pairedN = 0;
+				for (size_t q = r0; q < r; ++q) {
+					const WallHit& w = hits[along[q].second];
+					if (w.thick > 0.02) th.push_back(w.thick);
+					pairedN += w.paired;
+				}
+				double thick = 0.5;
+				if (!th.empty()) {
+					std::nth_element(th.begin(), th.begin() + th.size() / 2, th.end());
+					thick = th[th.size() / 2];
+				}
+				const bool   paired = pairedN * 2 > int(r - r0);
+				// past the last line that met it, up to half the gap to the next line (the next tile's piece starts where this ends)
+				const double ext = r - r0 == 1 ? std::clamp(thick, 0.3, 0.8) * 0.5 : 0.5 * std::clamp(double(g_cfg.worldWallStepM), 0.25, 4.0);
+				segs.push_back({ nx, ny, d, along[r0].first - ext, along[r - 1].first + ext, std::clamp(thick, 0.1, paired ? 2.5 : 1.5), paired, false });
+				r0 = r;
+			}
+		}
+		// boxes: two opposite faces of one thin solid -> one box between them; others -> a box behind the face
+		struct Box { double cx, cy, nx, ny, t0, t1, thick; bool thin; };
+		std::vector<Box> boxes;
+		for (size_t a = 0; a < segs.size(); ++a) {
+			Seg& A = segs[a];
+			if (A.used) continue;
+			int    best = -1;
+			double bestOv = 0;
+			for (size_t b = 0; b < segs.size(); ++b) {
+				if (b == a || segs[b].used) continue;
+				const Seg& B = segs[b];
+				if (A.nx * B.nx + A.ny * B.ny > -0.9) continue;
+				const double th = A.d + B.d;  // A's face at n.p = d, B's (opposite normal) at n.p = -B.d
+				if (th < 0.05 || th > 2.5) continue;
+				// B's along-axis is reversed (its tangent is -A's)
+				const double b0 = -B.t1, b1 = -B.t0;
+				const double ov = std::min(A.t1, b1) - std::max(A.t0, b0);
+				if (ov > 0.5 * std::min(A.t1 - A.t0, b1 - b0) && ov > bestOv) {
+					bestOv = ov;
+					best = int(b);
+				}
+			}
+			const double tx = -A.ny, ty = A.nx;
+			if (best >= 0) {
+				Seg&         B = segs[best];
+				const double th = A.d + B.d, mid = A.d - th * 0.5;
+				const double t0 = std::min(A.t0, -B.t1), t1 = std::max(A.t1, -B.t0);
+				const double tm = (t0 + t1) * 0.5;
+				boxes.push_back({ A.nx * mid + tx * tm, A.ny * mid + ty * tm, A.nx, A.ny, t0 - tm, t1 - tm, th, true });
+				A.used = B.used = true;
+			} else {
+				const double mid = A.d - A.thick * 0.5, tm = (A.t0 + A.t1) * 0.5;
+				boxes.push_back({ A.nx * mid + tx * tm, A.ny * mid + ty * tm, A.nx, A.ny, A.t0 - tm, A.t1 - tm, A.thick, A.paired });
+				A.used = true;
+			}
+		}
+		// heights: the top from the tile's own points on it, else one ray down from WorldUpM; the bottom 0.5 m into the ground.
+		// A thin wall's ground points (its top, measured as ground) go back onto the road.
+		const int    n = t.n;
+		const double T = WTileM(), X0 = t.i * T, Y0 = t.j * T;
+		for (const Box& bx : boxes) {
+			const double tx = -bx.ny, ty = bx.nx;
+			const double g = TileGroundZ(t, bx.cx, bx.cy);
+			auto inside = [&](double x, double y, double m) {
+				const double ax = (x - bx.cx) * tx + (y - bx.cy) * ty, ac = (x - bx.cx) * bx.nx + (y - bx.cy) * bx.ny;
+				return ax >= bx.t0 - m && ax <= bx.t1 + m && fabs(ac) <= bx.thick * 0.5 + m;
+			};
+			double hTop = -1e9;  // its height over the ground
+			for (int b = 0; b < n; ++b)
+				for (int a = 0; a < n; ++a) {
+					const int k = b * n + a;
+					if (!std::isfinite(t.z[k]) || t.src[k] == 2) continue;
+					const double x = X0 + a * t.step, y = Y0 + b * t.step;
+					if (inside(x, y, 0.05)) hTop = std::max(hTop, double(t.z[k]) - TileGroundZ(t, x, y));
+				}
+			if (hTop < 0.3) {
+				const double A[3] = { bx.cx, bx.cy, g + g_cfg.worldUpM }, B[3] = { bx.cx, bx.cy, g + 0.1 };
+				double       p[3], nn[3];
+				const int    r = WallRay(A, B, p, nn);
+				hTop = (r == 1 && p[2] > g + 0.3) ? p[2] - g : 4.0;
+			}
+			hTop = std::min(hTop, 8.0);
+			WTile::Wall wl;
+			wl.cx = float(bx.cx);
+			wl.cy = float(bx.cy);
+			wl.z0 = float(g - 0.5);
+			wl.z1 = float(g + hTop);
+			wl.gs = float(t.planeOk ? t.px * tx + t.py * ty : t.rx * tx + t.ry * ty);
+			wl.dx = float(tx);
+			wl.dy = float(ty);
+			wl.len = float(bx.t1 - bx.t0);
+			wl.thick = float(bx.thick);
+			// (cx, cy) is the middle of the along-range only when t0 = -t1; put it there
+			const double tm = (bx.t0 + bx.t1) * 0.5;
+			wl.cx = float(bx.cx + tx * tm);
+			wl.cy = float(bx.cy + ty * tm);
+			if (wl.len < 0.1f || wl.thick < 0.05f) continue;
+			t.walls.push_back(wl);
+			// the ground points measured on it go back onto the road: inside it, and up to 0.3 m past its faces and ends (a
+			// wall seen from one side only (cut by the tile's edge, a building): not past its back, where the ground may be high)
+			const double mBack = bx.thin ? 0.3 : 0.05;
+			for (int b = 0; b < n; ++b)
+				for (int a = 0; a < n; ++a) {
+					const int k = b * n + a;
+					if (!std::isfinite(t.z[k])) continue;
+					const double x = X0 + a * t.step, y = Y0 + b * t.step;
+					const double ax = (x - bx.cx) * tx + (y - bx.cy) * ty, ac = (x - bx.cx) * bx.nx + (y - bx.cy) * bx.ny;
+					if (ax < bx.t0 - 0.3 || ax > bx.t1 + 0.3 || ac > bx.thick * 0.5 + 0.3 || ac < -bx.thick * 0.5 - mBack) continue;
+					const double gz = TileGroundZ(t, x, y);
+					if (t.z[k] <= gz + 0.2) continue;
+					t.z[k] = float(gz);
+					t.src[k] = 3;  // flattened (under a wall)
+					++t.flat;
+				}
+		}
+	}
+
+	// the wall scan of one finished tile
+	void WallScan(WTile& t)
+	{
+		const double t0 = NowSeconds();
+		t.walls.clear();
+		t.flat = 0;
+		int rays = 0;
+		if (AnyCell(t)) {
+			std::vector<WallHit> hits;
+			const double T = WTileM(), X0 = t.i * T, Y0 = t.j * T, sp = std::clamp(double(g_cfg.worldWallStepM), 0.25, 4.0), h = g_cfg.worldWallProbeM;
+			const int    nl = std::max(1, int(T / sp + 0.5));
+			for (int k = 0; k < nl; ++k) {
+				const double o = (k + 0.5) * T / nl;
+				// (from 1.5 m outside the tile: a barrier across its edge is met from outside, so its far face inside the tile is
+				// found too; faces outside the tile are the next tile's)
+				{
+					const double y = Y0 + o, xa = X0 - 1.5, xb = X0 + T + 1.5;
+					const double A[3] = { xa, y, TileGroundZ(t, xa, y) + h }, B[3] = { xb, y, TileGroundZ(t, xb, y) + h };
+					WallLine(A, B, t, hits, rays);
+				}
+				{
+					const double x = X0 + o, ya = Y0 - 1.5, yb = Y0 + T + 1.5;
+					const double A[3] = { x, ya, TileGroundZ(t, x, ya) + h }, B[3] = { x, yb, TileGroundZ(t, x, yb) + h };
+					WallLine(A, B, t, hits, rays);
+				}
+			}
+			if (!hits.empty()) WallBoxes(t, hits);
+		}
+		t.wallsDone = true;
+		t.wallRays = rays;
+		WorldState& w = g_world;
+		++w.wallTiles;
+		w.wallBoxes += uint32_t(t.walls.size());
+		w.wallFlat += uint32_t(t.flat);
+		const double us = (NowSeconds() - t0) * 1e6;
+		w.wallUs += us;
+		w.wallUsMax = std::max(w.wallUsMax, us);
+		if (g_cfg.worldDebug && !t.walls.empty()) {
+			std::string s;
+			for (const WTile::Wall& wl : t.walls) {
+				char b[96];
+				snprintf(b, sizeof(b), " [%.1f %.1f %.1fx%.2f m, %.1f m tall]", wl.cx, wl.cy, wl.len, wl.thick, wl.z1 - wl.z0 - 0.5f);
+				if (s.size() < 600) s += b;
+			}
+			Log("ground dbg: %d,%d walls: %zu (%d rays, %d points flattened):%s", t.i, t.j, t.walls.size(), rays, t.flat, s.c_str());
+		}
+		if (t.partial == 0) MapPut(t);
+	}
+
+	// every tick: finished tiles without their wall scan, the soonest needed first, within WorldWallMs (the car's next
+	// few tiles always)
+	void WorldWallsTick(const std::function<double(int64_t)>& costOf)
+	{
+		WorldState& w = g_world;
+		if (!g_cfg.worldWalls) return;
+		std::vector<std::pair<double, int64_t>> todo;
+		for (auto& kv : w.tiles) {
+			const WTile& t = kv.second;
+			if (t.state != 2 || t.wallsDone) continue;
+			todo.push_back({ t.pre ? 1e5 + hypot((t.i + 0.5) * WTileM() - w.cx, (t.j + 0.5) * WTileM() - w.cy) : costOf(kv.first), kv.first });
+		}
+		if (todo.empty()) return;
+		std::sort(todo.begin(), todo.end());
+		const double t0 = NowSeconds(), limit = g_cfg.worldWallMs / 1000.0;
+		for (const auto& td : todo) {
+			if (td.first > w.urgentM && NowSeconds() - t0 > limit) break;
+			auto it = w.tiles.find(td.second);
+			if (it == w.tiles.end()) continue;
+			WallScan(it->second);
+		}
+	}
+
 	// every script tick (drive mode or not: rays still out are always collected)
 	void WorldTick()
 	{
@@ -5758,12 +6747,18 @@ namespace
 			if (g_cfg.worldKeepTris > 0 && w.tick % 10 == 0) WorldKeepBudget(rm, nrm);
 			if (nrm) DrvSend(("{\"t\":\"rm\",\"ids\":[" + rm + "]}").c_str());
 			const double now = NowSeconds();
+			// v2.5: the wall scan of finished tiles (before they go to BeamNG)
+			WorldWallsTick(costOf);
 			// finished tiles: to BeamNG (a finished tile replacing a draft waits while the car is on it); ring tiles that are
 			// finished go to the cache; drafts for tiles the car reaches soon whose first pass is done
 			for (auto it = w.tiles.begin(); it != w.tiles.end();) {
 				WTile& t = it->second;
 				if (t.state == 2 && t.pre) {
 					++it;  // v2.43: the ring's finished tiles stay here (the next ring tile's level comes from them); sent when wanted
+					continue;
+				}
+				if (t.state == 2 && !t.sent && !t.wallsDone) {
+					++it;  // v2.5: its wall scan comes first (next tick at the latest for the road right ahead)
 					continue;
 				}
 				if (t.state == 2 && !t.sent) {
@@ -5806,7 +6801,7 @@ namespace
 						if (g_cfg.worldDebug) Log("ground dbg: %d,%d from the cache: level %.2f (made for %.2f), the car's there %.2f (from %s)", i, j, t.lv, t.lvE, E, from ? "a neighbour" : "the car");
 						auto& slot = w.tiles[k];
 						slot = std::move(t);
-						WorldSendTile(slot, false);
+						if (slot.wallsDone) WorldSendTile(slot, false);  // (v2.5: else after its wall scan)
 						++w.fromCache;
 						++fromStore;
 						continue;
@@ -5816,7 +6811,7 @@ namespace
 						if (g_cfg.worldDebug) Log("ground dbg: %d,%d from the saved map: level %.2f, the car's there %.2f (from %s)", i, j, t.lv, E, from ? "a neighbour" : "the car");
 						auto& slot = w.tiles[k];
 						slot = std::move(t);
-						WorldSendTile(slot, false);
+						if (slot.wallsDone) WorldSendTile(slot, false);  // (v2.5: else after its wall scan)
 						++w.fromDisk;
 						++fromStore;
 						continue;
@@ -5838,7 +6833,8 @@ namespace
 				if (it != w.tiles.end()) {
 					// a gap: its empty points again, all passes (v2.43: for the car's level there now)
 					WTile&       t = it->second;
-					const WPlane ref = ExpectPlane(i, j);
+					const WTile* from = nullptr;
+					const WPlane ref = ExpectPlane(i, j, nullptr, &from);
 					t.rcx = ref.cx;
 					t.rcy = ref.cy;
 					t.rz = ref.z;
@@ -5846,6 +6842,13 @@ namespace
 					t.ry = ref.gy;
 					t.lvE = t.lv = PlaneZ(ref, (i + 0.5) * WTileM(), (j + 0.5) * WTileM());
 					t.hasRef = true;
+					t.hasFrom = from != nullptr;
+					t.fromKey = from ? WKey(from->i, from->j) : 0;
+					t.refCar = from == nullptr;
+					t.carAir = t.refCar && !w.grounded;
+					t.noLevel = false;
+					t.walls.clear();
+					t.wallsDone = false;
 					t.kKey = -1;
 					t.gen = ++w.gen;
 					t.state = 1;
@@ -5887,7 +6890,7 @@ namespace
 						const int64_t k = WKey(ci + di, cj + dj);
 						auto          lt = w.tiles.find(k);
 						if (lt != w.tiles.end()) {
-							if (lt->second.state == 2 && !lt->second.sent) {
+							if (lt->second.state == 2 && !lt->second.sent && lt->second.wallsDone) {
 								best = d;  // a ring tile measured, not in BeamNG yet
 								bestK = k;
 								live = true;
@@ -5920,7 +6923,7 @@ namespace
 					if (CacheTake(bestK, bestE, t, &pl, from) || MapGet(bestK, bestE, t, &pl, from) == 1) {
 						auto& slot = w.tiles[bestK];
 						slot = std::move(t);
-						WorldSendTile(slot, false);
+						if (slot.wallsDone) WorldSendTile(slot, false);  // (v2.5: else after its wall scan)
 						++w.idleSent;
 					}
 				}
@@ -6073,6 +7076,443 @@ namespace
 		b[0] = g[0] - g_world.ox;
 		b[1] = g[1] - g_world.oy;
 		b[2] = g[2] + g_cfg.worldZLift;
+	}
+
+	// ---------------------------------------------------------------------------------------
+	// v2.5: GTA's props (lamp posts, signs, bins, fences, hydrants...) and BeamNG's car. GTA keeps them in its object pool
+	// (Script Hook V's worldGetAllObjects): the ones near the car are boxes (their model's size, turned like them). BeamNG's car
+	// hitting a soft one (most of them: they break or fly in GTA too) knocks it over in GTA and costs BeamNG's car a little
+	// speed (a bump); a solid one (big ones, and the ones GtaBeamD1_props.json calls solid) is a solid box in BeamNG.
+	// GtaBeamD1_props_seen.txt lists every model met, how it was treated and why, so the json can be tuned.
+	// ---------------------------------------------------------------------------------------
+	uint32_t Joaat(const char* s)  // GTA's name hash (Jenkins one-at-a-time, lower case)
+	{
+		uint32_t h = 0;
+		for (; *s; ++s) {
+			h += uint32_t(tolower((unsigned char)*s));
+			h += h << 10;
+			h ^= h >> 6;
+		}
+		h += h << 3;
+		h ^= h >> 11;
+		h += h << 15;
+		return h;
+	}
+
+	enum PropKind { kPropSoft = 0, kPropSolid = 1, kPropIgnore = 2 };
+	const char* PropKindName(int k) { return k == kPropSoft ? "soft" : k == kPropSolid ? "solid" : "ignored"; }
+
+	struct PropModel
+	{
+		bool        init = false, dimsOk = false, frag = false, listed = false;
+		float       mn[3] = {}, mx[3] = {};
+		int         kind = kPropSoft;
+		std::string why, name;
+		float       bump = -1, push = -1;  // from the json (-1: by its size)
+		uint32_t    seen = 0, hits = 0;
+	};
+	struct PropLive
+	{
+		int      ent = 0;
+		uint32_t model = 0;
+		double   c[3] = {}, ax[3][3] = {}, he[3] = {};  // box centre, axes (right, forward, up), half sizes along them
+		double   lastHit = -100;
+		bool     sent = false;     // a solid box of it is in BeamNG
+		double   sentC[3] = {}, sentYaw = 0;
+		uint32_t scan = 0;
+	};
+	struct PropCfg
+	{
+		int   kind = kPropSoft;
+		float bump = -1, push = -1;
+		std::string name;
+	};
+	struct PropState
+	{
+		bool                          cfgLoaded = false;
+		std::map<uint32_t, PropCfg>   cfg;
+		std::string                   cfgSource;
+		std::map<uint32_t, PropModel> models;
+		std::map<int, PropLive>       live;
+		std::vector<int>              buf;
+		double                        scanT = 0;
+		uint32_t                      scan = 0;
+		bool                          seenDirty = false;
+		ULONGLONG                     seenMs = 0, logMs = 0;
+		// stats (10 s)
+		uint32_t pool = 0, nearN = 0, hits = 0, bumps = 0, sentN = 0, rmN = 0, scans = 0;
+		double   bumpSum = 0, scanUs = 0, scanUsMax = 0;
+	} g_props;
+
+	const char* kPropsDefault = R"JSON({
+  "about": "GTA x Beam v2.5: GTA's props near BeamNG's car. 'soft' (the default for props not listed): GTA knocks it over or breaks it and BeamNG's car loses a little speed ('bump', m/s; by its size when not given). 'solid': a solid box in BeamNG (big props are solid by default). 'ignore': nothing. 'model' is the prop's model name (or its hash, 0x...). GtaBeamD1_props_seen.txt lists the models your drives met. Ctrl+F11 re-reads this file.",
+  "props": [
+    { "model": "prop_container_01a", "kind": "solid" },
+    { "model": "prop_container_05a", "kind": "solid" },
+    { "model": "prop_bollard_02a", "kind": "solid" },
+    { "model": "prop_bollard_03a", "kind": "solid" },
+    { "model": "prop_streetlight_01", "kind": "soft", "bump": 1.5 },
+    { "model": "prop_streetlight_03", "kind": "soft", "bump": 1.5 },
+    { "model": "prop_traffic_01a", "kind": "soft", "bump": 1.5 },
+    { "model": "prop_fire_hydrant_1", "kind": "soft", "bump": 1.0 },
+    { "model": "prop_bin_01a", "kind": "soft", "bump": 0.6 },
+    { "model": "prop_roadcone02a", "kind": "soft", "bump": 0.1 }
+  ]
+})JSON";
+
+	bool ParseProps(const std::string& js, std::map<uint32_t, PropCfg>& out, int& bad)
+	{
+		out.clear();
+		bad = 0;
+		const size_t a = js.find("\"props\"");
+		if (a == std::string::npos) return false;
+		size_t p = js.find('[', a);
+		while (p != std::string::npos) {
+			const size_t o = js.find('{', p);
+			const size_t close = js.find(']', p);
+			if (o == std::string::npos || (close != std::string::npos && close < o)) break;
+			const size_t e = js.find('}', o);
+			if (e == std::string::npos) break;
+			const std::string obj = js.substr(o, e - o + 1);
+			p = e + 1;
+			std::string model, kind;
+			JsonStr(obj, "model", model);
+			JsonStr(obj, "kind", kind);
+			for (char& ch : kind) ch = char(tolower((unsigned char)ch));
+			if (model.empty() || (kind != "soft" && kind != "solid" && kind != "ignore")) {
+				++bad;
+				continue;
+			}
+			uint32_t h = 0;
+			if (model.size() > 2 && model[0] == '0' && (model[1] == 'x' || model[1] == 'X')) h = uint32_t(strtoul(model.c_str(), nullptr, 16));
+			else h = Joaat(model.c_str());
+			PropCfg c;
+			c.kind = kind == "soft" ? kPropSoft : kind == "solid" ? kPropSolid : kPropIgnore;
+			double v = 0;
+			if (JsonNumC(obj.c_str(), "bump", v)) c.bump = float(v);
+			if (JsonNumC(obj.c_str(), "push", v)) c.push = float(v);
+			c.name = model;
+			out[h] = c;
+		}
+		return true;
+	}
+
+	void LoadProps()
+	{
+		PropState& P = g_props;
+		char       path[MAX_PATH + 16];
+		PathNextToModule("_props.json", path, sizeof(path));
+		std::string js;
+		bool        fromFile = false;
+		if (FILE* f = fopen(path, "rb")) {
+			char   b[4096];
+			size_t n;
+			while ((n = fread(b, 1, sizeof(b), f)) > 0) js.append(b, n);
+			fclose(f);
+			fromFile = true;
+		}
+		int bad = 0;
+		if (fromFile && ParseProps(js, P.cfg, bad)) {
+			P.cfgSource = path;
+		} else {
+			if (fromFile) Log("props: GtaBeamD1_props.json not usable (no \"props\" list): the built-in list is used");
+			ParseProps(kPropsDefault, P.cfg, bad);
+			P.cfgSource = "built-in list";
+			if (!fromFile) {
+				if (FILE* f = fopen(path, "wb")) {
+					fputs(kPropsDefault, f);
+					fclose(f);
+					P.cfgSource = std::string("built-in list (written to ") + path + ")";
+				}
+			}
+		}
+		if (bad) Log("props: %d entries in GtaBeamD1_props.json not understood (each needs \"model\" and \"kind\": soft, solid or ignore)", bad);
+		P.models.clear();  // classified again with the new list
+		P.cfgLoaded = true;
+		Log("props: %zu models listed (%s)", P.cfg.size(), P.cfgSource.c_str());
+	}
+
+	// a model's size and treatment (once per model)
+	PropModel& PropModelOf(uint32_t model, int ent)
+	{
+		PropModel& m = g_props.models[model];
+		if (m.init) return m;
+		m.init = true;
+		NVec3 mn{}, mx{};
+		CallVoid(N::GET_MODEL_DIMENSIONS, model, &mn, &mx);
+		m.mn[0] = mn.x;
+		m.mn[1] = mn.y;
+		m.mn[2] = mn.z;
+		m.mx[0] = mx.x;
+		m.mx[1] = mx.y;
+		m.mx[2] = mx.z;
+		const float sx = mx.x - mn.x, sy = mx.y - mn.y, sz = mx.z - mn.z;
+		m.dimsOk = std::isfinite(sx) && std::isfinite(sy) && std::isfinite(sz) && sx > 0.01f && sy > 0.01f && sz > 0.01f;
+		m.frag = Call<int>(N::GET_IS_ENTITY_A_FRAG, ent) != 0;
+		auto it = g_props.cfg.find(model);
+		if (it != g_props.cfg.end()) {
+			m.listed = true;
+			m.kind = it->second.kind;
+			m.bump = it->second.bump;
+			m.push = it->second.push;
+			m.name = it->second.name;
+			m.why = "listed";
+		} else if (!m.dimsOk) {
+			m.kind = kPropIgnore;
+			m.why = "no size";
+		} else if (std::max({ sx, sy, sz }) > 15.0f) {
+			m.kind = kPropIgnore;
+			m.why = "huge (part of the map)";
+		} else if (std::max({ sx, sy, sz }) < 0.25f) {
+			m.kind = kPropIgnore;
+			m.why = "tiny";
+		} else if (m.frag) {
+			m.kind = kPropSoft;
+			m.why = "breakable";
+		} else if (std::min(sx, sy) >= 1.5f && std::max(sx, sy) >= 2.5f && sz >= 1.0f) {
+			m.kind = kPropSolid;
+			m.why = "big";
+		} else {
+			m.kind = kPropSoft;
+			m.why = "small";
+		}
+		g_props.seenDirty = true;
+		return m;
+	}
+
+	// BeamNG's box of a solid prop: id, centre x y, bottom, top, along x y (its forward), length, thickness, slope 0
+	void PropBoxMsg(std::string& out, const PropLive& L)
+	{
+		double c[3];
+		GtaToBeam(L.c, c);
+		double fx = L.ax[1][0], fy = L.ax[1][1];
+		const double fl = sqrt(fx * fx + fy * fy);
+		if (fl < 1e-6) {
+			fx = 1;
+			fy = 0;
+		} else {
+			fx /= fl;
+			fy /= fl;
+		}
+		char b[200];
+		snprintf(b, sizeof(b), "%s%d,%.3f,%.3f,%.3f,%.3f,%.4f,%.4f,%.3f,%.3f,0", out.empty() ? "" : ",", L.ent, c[0], c[1], c[2] - L.he[2] - 0.2, c[2] + L.he[2], fx, fy,
+			2.0 * L.he[1], 2.0 * L.he[0]);
+		out += b;
+	}
+
+	void PropsSeenWrite();
+	void PropsRemoveAll(const char* why)
+	{
+		PropState& P = g_props;
+		if (P.seenDirty) PropsSeenWrite();
+		std::string ids;
+		int         n = 0;
+		for (auto& kv : P.live)
+			if (kv.second.sent) {
+				ids += (n ? "," : "") + std::to_string(kv.first);
+				++n;
+			}
+		if (n) {
+			DrvSend(("{\"t\":\"prm\",\"ids\":[" + ids + "]}").c_str());
+			Log("props: %d solid prop boxes taken out of BeamNG (%s)", n, why);
+		}
+		P.live.clear();
+	}
+
+	// the car's box against a prop's, seen from above (separating axes), and their heights
+	bool PropTouch(const DriveState& d, const PropLive& L, double w, double l, double h)
+	{
+		const double cz0 = d.carO[2], cz1 = d.carO[2] + h;
+		const double pz0 = L.c[2] - L.he[2], pz1 = L.c[2] + L.he[2];
+		if (pz1 < cz0 + 0.05 || pz0 > cz1) return false;
+		double ca[2][2], pa[2][2];
+		auto flat = [](const double* v, double* o) {
+			const double l2 = sqrt(v[0] * v[0] + v[1] * v[1]);
+			o[0] = l2 > 1e-6 ? v[0] / l2 : 1.0;
+			o[1] = l2 > 1e-6 ? v[1] / l2 : 0.0;
+		};
+		flat(d.carR, ca[0]);
+		flat(d.carF, ca[1]);
+		flat(L.ax[0], pa[0]);
+		flat(L.ax[1], pa[1]);
+		const double ch[2] = { w * 0.5 * 0.95, l * 0.5 * 0.97 }, ph[2] = { L.he[0], L.he[1] };
+		const double cc[2] = { d.carO[0] + d.carU[0] * h * 0.5, d.carO[1] + d.carU[1] * h * 0.5 };
+		const double dx = L.c[0] - cc[0], dy = L.c[1] - cc[1];
+		const double* axes[4] = { ca[0], ca[1], pa[0], pa[1] };
+		for (const double* a : axes) {
+			const double dist = fabs(dx * a[0] + dy * a[1]);
+			const double rc = ch[0] * fabs(ca[0][0] * a[0] + ca[0][1] * a[1]) + ch[1] * fabs(ca[1][0] * a[0] + ca[1][1] * a[1]);
+			const double rp = ph[0] * fabs(pa[0][0] * a[0] + pa[0][1] * a[1]) + ph[1] * fabs(pa[1][0] * a[0] + pa[1][1] * a[1]);
+			if (dist > rc + rp) return false;
+		}
+		return true;
+	}
+
+	void PropsSeenWrite()
+	{
+		PropState& P = g_props;
+		char       path[MAX_PATH + 16];
+		PathNextToModule("_props_seen.txt", path, sizeof(path));
+		FILE* f = fopen(path, "wb");
+		if (!f) return;
+		fprintf(f, "GTA props your drives met (GtaBeamD1 %s): model (hash; name when GtaBeamD1_props.json lists it), how it was treated and why, its size (m), breakable, "
+		           "times seen near the car, times BeamNG's car hit it. Copy a line's model into GtaBeamD1_props.json to change it.\r\n\r\n",
+			D1_VERSION);
+		std::vector<std::pair<uint32_t, uint32_t>> order;
+		for (auto& kv : P.models) order.push_back({ kv.second.seen, kv.first });
+		std::sort(order.rbegin(), order.rend());
+		for (auto& o : order) {
+			const PropModel& m = P.models[o.second];
+			fprintf(f, "0x%08X  %-24s %-7s (%s)  %.2f x %.2f x %.2f m  breakable %d  seen %u  hit %u\r\n", o.second, m.name.empty() ? "-" : m.name.c_str(), PropKindName(m.kind),
+				m.why.c_str(), m.mx[0] - m.mn[0], m.mx[1] - m.mn[1], m.mx[2] - m.mn[2], int(m.frag), m.seen, m.hits);
+		}
+		fclose(f);
+		P.seenDirty = false;
+	}
+
+	// every tick (drive mode): the pool scanned 4 times a second; hits with the drawn car every tick
+	void PropsTick(bool paused)
+	{
+		PropState&  P = g_props;
+		DriveState& d = g_drv;
+		const ULONGLONG ms = GetTickCount64();
+		if (!g_cfg.props || d.state != 2 || !d.fixedMap || !d.carPoseOk) {
+			if (!P.live.empty()) PropsRemoveAll(d.state != 2 ? "drive mode off" : "props off");
+			return;
+		}
+		if (!P.cfgLoaded) LoadProps();
+		const double now = NowSeconds();
+		const double w = std::max(1.0f, g_modelSize[0].load()), l = std::max(2.0f, g_modelSize[1].load()), h = std::max(0.8f, g_modelSize[2].load());
+		// ---- the pool, 4 times a second
+		if (now - P.scanT >= 0.25) {
+			P.scanT = now;
+			const double t0 = NowSeconds();
+			++P.scan;
+			++P.scans;
+			if (P.buf.empty()) P.buf.resize(4096);
+			const int n = std::clamp(worldGetAllObjects(P.buf.data(), int(P.buf.size())), 0, int(P.buf.size()));
+			P.pool = uint32_t(n);
+			const double R = g_cfg.propRangeM;
+			std::string  add;
+			int          nAdd = 0;
+			for (int q = 0; q < n; ++q) {
+				const int e = P.buf[q];
+				if (!e || !Call<int>(N::DOES_ENTITY_EXIST, e)) continue;
+				const NVec3 p = Call<NVec3>(N::GET_ENTITY_COORDS, e, 0);
+				const double dx = p.x - d.carO[0], dy = p.y - d.carO[1];
+				if (dx * dx + dy * dy > R * R || fabs(p.z - d.carO[2]) > 30.0) continue;
+				const uint32_t model = uint32_t(Call<int>(N::GET_ENTITY_MODEL, e));
+				PropModel&     m = PropModelOf(model, e);
+				if (m.kind == kPropIgnore) continue;
+				if (Call<int>(N::IS_ENTITY_ATTACHED, e) || !Call<int>(N::IS_ENTITY_VISIBLE, e)) continue;
+				NVec3 fw{}, rt{}, up{}, ps{};
+				CallVoid(N::GET_ENTITY_MATRIX, e, &fw, &rt, &up, &ps);
+				PropLive& L = P.live[e];
+				if (L.scan == 0) ++m.seen, P.seenDirty = true;
+				L.ent = e;
+				L.model = model;
+				L.scan = P.scan;
+				const double ax[3][3] = { { rt.x, rt.y, rt.z }, { fw.x, fw.y, fw.z }, { up.x, up.y, up.z } };
+				memcpy(L.ax, ax, sizeof(ax));
+				// the box: the model's size, centred where it is (its corners in the model's frame, turned by the matrix)
+				const double mc[3] = { (m.mn[0] + m.mx[0]) * 0.5, (m.mn[1] + m.mx[1]) * 0.5, (m.mn[2] + m.mx[2]) * 0.5 };
+				for (int k = 0; k < 3; ++k) {
+					L.c[k] = (k == 0 ? ps.x : k == 1 ? ps.y : ps.z) + ax[0][k] * mc[0] + ax[1][k] * mc[1] + ax[2][k] * mc[2];
+					L.he[k] = (m.mx[k] - m.mn[k]) * 0.5;
+				}
+				if (m.kind == kPropSolid && g_cfg.propSolid) {
+					const double yaw = atan2(fw.y, fw.x);
+					const double mv = sqrt((L.c[0] - L.sentC[0]) * (L.c[0] - L.sentC[0]) + (L.c[1] - L.sentC[1]) * (L.c[1] - L.sentC[1]) + (L.c[2] - L.sentC[2]) * (L.c[2] - L.sentC[2]));
+					double       dyaw = fabs(yaw - L.sentYaw);
+					dyaw = std::min(dyaw, 2 * kPi - dyaw);
+					if (!L.sent || mv > 0.2 || dyaw > 0.09) {
+						PropBoxMsg(add, L);
+						L.sent = true;
+						memcpy(L.sentC, L.c, sizeof(L.sentC));
+						L.sentYaw = yaw;
+						++nAdd;
+						++P.sentN;
+						if (nAdd >= 40) {
+							DrvSend(("{\"t\":\"pr\",\"b\":[" + add + "]}").c_str());
+							add.clear();
+							nAdd = 0;
+						}
+					}
+				}
+			}
+			if (nAdd) DrvSend(("{\"t\":\"pr\",\"b\":[" + add + "]}").c_str());
+			// gone or out of range: forgotten (solid boxes out of BeamNG)
+			std::string ids;
+			int         nRm = 0;
+			for (auto it = P.live.begin(); it != P.live.end();) {
+				if (it->second.scan == P.scan) {
+					++it;
+					continue;
+				}
+				if (it->second.sent) {
+					ids += (nRm ? "," : "") + std::to_string(it->first);
+					++nRm;
+					++P.rmN;
+				}
+				it = P.live.erase(it);
+			}
+			if (nRm) DrvSend(("{\"t\":\"prm\",\"ids\":[" + ids + "]}").c_str());
+			P.nearN = uint32_t(P.live.size());
+			const double us = (NowSeconds() - t0) * 1e6;
+			P.scanUs += us;
+			P.scanUsMax = std::max(P.scanUsMax, us);
+		}
+		// ---- hits: the drawn car against the soft props near it
+		const double spd = sqrt(d.carV[0] * d.carV[0] + d.carV[1] * d.carV[1] + d.carV[2] * d.carV[2]);
+		if (!paused && spd > 1.5) {
+			for (auto& kv : P.live) {
+				PropLive& L = kv.second;
+				auto      mi = P.models.find(L.model);
+				if (mi == P.models.end()) continue;  // (not classified yet: GtaBeamD1_props.json was just read again)
+				PropModel& m = mi->second;
+				if (m.kind != kPropSoft) continue;
+				if (now - L.lastHit < 2.0) continue;
+				const double dx = L.c[0] - d.carO[0], dy = L.c[1] - d.carO[1];
+				if (dx * dx + dy * dy > (l + 4.0) * (l + 4.0)) continue;
+				if (!PropTouch(d, L, w, l, h)) continue;
+				L.lastHit = now;
+				++m.hits;
+				++P.hits;
+				P.seenDirty = true;
+				// GTA: its physics woken up, pushed along the car's way (a little up, high on it so it tips over)
+				const double vx = d.carV[0] / spd, vy = d.carV[1] / spd;
+				const double k = g_cfg.propPush * (m.push >= 0 ? m.push : 1.0);
+				CallVoid(N::SET_ENTITY_DYNAMIC, L.ent, 1);
+				CallVoid(N::ACTIVATE_PHYSICS, L.ent);
+				CallVoid(N::APPLY_FORCE_TO_ENTITY, L.ent, 1, float(vx * spd * 0.8 * k), float(vy * spd * 0.8 * k), float((1.0 + 0.1 * spd) * k), 0.0f, 0.0f,
+					float(L.he[2] * 0.5), 0, 0, 1, 1, 0, 1);
+				// BeamNG: a little speed lost (a bump), by its size unless the json says
+				const double vol = 8.0 * L.he[0] * L.he[1] * L.he[2];
+				double       dv = (m.bump >= 0 ? m.bump : std::clamp(0.3 + vol * 1.2, 0.3, 3.0)) * g_cfg.propBump;
+				dv = std::min(dv, spd * 0.5);
+				if (dv > 0.01) {
+					char b[96];
+					snprintf(b, sizeof(b), "{\"t\":\"bump\",\"dv\":%.2f,\"m\":\"%08X\"}", dv, L.model);
+					DrvSend(b);
+					++P.bumps;
+					P.bumpSum += dv;
+				}
+				if (P.hits <= 30)
+					Log("props: BeamNG's car hit a %s prop (model 0x%08X %s, %.1f x %.1f x %.1f m, %s) at %.0f km/h: pushed in GTA, BeamNG's car slowed by %.1f km/h", PropKindName(m.kind),
+						L.model, m.name.empty() ? "" : m.name.c_str(), 2 * L.he[0], 2 * L.he[1], 2 * L.he[2], m.why.c_str(), spd * 3.6, dv * 3.6);
+			}
+		}
+		if (ms - P.logMs >= 10000) {
+			P.logMs = ms;
+			Log("props: %u in GTA's pool, %u near the car, %u hits (%u bumps, %.1f km/h lost in all), %u solid boxes sent to BeamNG (%u taken out); pool scans %u (%.0f us each, max %.0f)",
+				P.pool, P.nearN, P.hits, P.bumps, P.bumpSum * 3.6, P.sentN, P.rmN, P.scans, P.scans ? P.scanUs / P.scans : 0.0, P.scanUsMax);
+			P.hits = P.bumps = P.sentN = P.rmN = P.scans = 0;
+			P.bumpSum = P.scanUs = P.scanUsMax = 0;
+		}
+		if (P.seenDirty && ms - P.seenMs >= 30000) {
+			P.seenMs = ms;
+			PropsSeenWrite();
+		}
 	}
 
 	void SoundWake(const char* when);  // v2.3 (below)
@@ -6232,6 +7672,8 @@ namespace
 		// (v2.4: not in session mode: the option stays off, BeamNG's volume goes down instead)
 		if (d.sw && g_cfg.soundWake != 3 && strncmp(why, "no ", 3) != 0) SoundWake("drive end");
 		WorldEnd(why);  // v2.4: GTA's ground stops streaming (the tiles stay in BeamNG, the car on them)
+		PropsRemoveAll(why);  // v2.5: solid prop boxes out of BeamNG
+		d.carPoseOk = false;
 		if (d.puppet && d.veh && Call<int>(N::DOES_ENTITY_EXIST, d.veh)) {
 			// back to a normal GTA car, standing on GTA's ground (v2.41: also when the drive ends while BeamNG's car is being
 			// put on GTA's ground: v2.4 left the car without collision and gravity then)
@@ -6946,6 +8388,7 @@ namespace
 			if (d.tickT > 0 && now - d.tickT > 1.0) {
 				Log("drive: GTA didn't run for %.1f s (paused or alt-tabbed); %u hold message(s) kept BeamNG's drive going (its car braked)", now - d.tickT, holds - d.holdsSeen);
 				d.lastArrival = std::max(d.lastArrival, now);  // BeamNG's car data gets a fresh 5 s
+				d.gtaPausedT = now;                            // v2.5: (for the pause sync below)
 			}
 			d.tickT = now;
 			d.holdsSeen = holds;
@@ -6960,6 +8403,7 @@ namespace
 			pzUser = g_dnet.pzUser;
 			ReleaseSRWLockShared(&g_dnet.lock);
 			const bool bp = pzT > 0 && now - pzT < 0.6;
+			if (paused) d.gtaPausedT = now;
 			if (bp && !d.beamPaused) {
 				d.beamPauseT0 = now;
 				Log("drive: BeamNG is paused (%s)", pzUser ? "by you, in BeamNG" : "because GTA is");
@@ -6970,9 +8414,10 @@ namespace
 			d.beamPausedUser = bp && pzUser;
 			if (!d.beamPausedUser) {
 				d.beamPauseSeen = false;
-			} else if (!d.beamPauseSeen) {
+			} else if (!d.beamPauseSeen && !paused && now - d.gtaPausedT > 1.0) {
+				// (v2.5: not in the first second after GTA itself was paused: BeamNG may still report the pause the mod made)
 				d.beamPauseSeen = true;
-				if (g_cfg.pauseSync && !paused) {
+				if (g_cfg.pauseSync) {
 					CallVoid(N::ACTIVATE_FRONTEND_MENU, uint32_t(0xD528C7E2) /* FE_MENU_VERSION_SP_PAUSE */, 1, -1);
 					d.menuByBeam = true;
 					Log("drive: you paused BeamNG: GTA's pause menu opened");
@@ -7040,8 +8485,10 @@ namespace
 		ReadPad(now);
 		const PadNow&  pad = g_in.pad;
 		const uint32_t held = PadHeld(pad);
-		// held modifier buttons that are BeamNG's now (not waiting to be let go after a switch, not always GTA's)
-		d.modMask = (rawIn && !d.padGta) ? (held & d.padModBits & ~d.padSupp & ~g_cfg.padAlwaysGta) : 0u;
+		// held modifier buttons that are BeamNG's now (not always GTA's). v2.5: also when held across a switch (your v2.43 test:
+		// RB + LB held while the pad mode changed stayed dead, so RB + LB + D-pad down switched the mode again instead of doing
+		// your BeamNG combination). Their own BeamNG actions still wait until they're let go; as modifiers they count at once.
+		d.modMask = (rawIn && !d.padGta) ? (held & d.padModBits & ~g_cfg.padAlwaysGta) : 0u;
 		d.modHeld = d.modMask != 0;
 		if (rawIn && pad.ok && g_cfg.padToggle >= 0 && g_cfg.padToggle < 14) {
 			const bool t = (pad.btn & kPadBit[g_cfg.padToggle]) != 0;
@@ -7168,7 +8615,12 @@ namespace
 				WORD        btn = 0;
 				for (int c = 0; c < 14; ++c)
 					if (on(c) && (pad.btn & kPadBit[c])) btn |= kPadBit[c];
-				snprintf(padStr, sizeof(padStr), "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%u", lx, ly, rx, ry, lt, rt, unsigned(btn));
+				// v2.5: the BeamNG modifier buttons held (BeamNG mode), for your combinations, even while their own actions wait
+				WORD pm = 0;
+				for (int c = 0; c < 14; ++c)
+					if ((d.modMask >> c & 1u) && (pad.btn & kPadBit[c])) pm |= kPadBit[c];
+				snprintf(padStr, sizeof(padStr), "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u", lx, ly, rx, ry, lt, rt, unsigned(btn), unsigned(pm));
+				d.sentPm = pm;
 				thr = rt;
 				brk = lt;
 				lr = fabsf(lx) > 0.12f ? lx : 0.0f;
@@ -7246,6 +8698,7 @@ namespace
 				JsonStr(vs, "ign", d.vIgn);
 				JsonStr(vs, "eng", d.vEng);
 				JsonStr(vs, "gbm", d.vGbm);
+				JsonStr(vs, "esc", d.vEsc);  // v2.5
 				std::string la;
 				if (JsonStr(vs, "la", la) && !la.empty()) {
 					d.vLa = la;
@@ -7395,8 +8848,24 @@ namespace
 		}
 
 		// ---- BeamNG time to draw now: on GTA's frame clock (the car moves in the same steps as GTA's world,
-		// whenever in the frame this script runs)
-		const double ft = std::clamp(double(Call<float>(N::GET_FRAME_TIME)), 0.0, 0.1);
+		// whenever in the frame this script runs). v2.5: GTA in slow motion (the radio or weapon wheel, a special ability):
+		// GTA's frame time runs slow but BeamNG doesn't (its speed follows GTA's in a later version): the car is drawn on the
+		// real clock then (your v2.43 test: on GTA's slowed clock it fell behind and was put back in step every few frames:
+		// the desync with the radio wheel open)
+		const double ftRaw = std::clamp(double(Call<float>(N::GET_FRAME_TIME)), 0.0, 0.1);
+		const double realDt = d.lastDrawNow > 0 ? std::clamp(now - d.lastDrawNow, 0.0, 0.1) : ftRaw;
+		d.lastDrawNow = now;
+		// (GTA's time against the real time, smoothed over about a quarter second: slow motion lasts, a hitch is one frame)
+		if (!paused && realDt > 0.004) {
+			const double a = std::min(1.0, realDt / 0.25);
+			d.slowRatio += (std::clamp(ftRaw / realDt, 0.0, 2.0) - d.slowRatio) * a;
+		}
+		const bool   slowMo = !paused && realDt > 0.004 && d.slowRatio < 0.7;
+		const double ft = slowMo ? realDt : ftRaw;
+		if (slowMo) {
+			d.slowS += realDt;
+			++d.slowTicks;
+		}
 		if (!d.gameInit) {
 			d.gameInit = true;
 			d.gameT = now;
@@ -7521,6 +8990,13 @@ namespace
 			memcpy(d.lastV, Vw, sizeof(d.lastV));
 			d.lastVOk = true;
 			if (d.fixedMap) WorldCar(O, Vw, U);
+			// v2.5: for the props it hits
+			memcpy(d.carO, O, sizeof(d.carO));
+			memcpy(d.carR, R, sizeof(d.carR));
+			memcpy(d.carF, F, sizeof(d.carF));
+			memcpy(d.carU, U, sizeof(d.carU));
+			memcpy(d.carV, Vw, sizeof(d.carV));
+			d.carPoseOk = true;
 		}
 		// v2.4: fall-through safety: BeamNG's car well under GTA's ground (a gap in the tiles) -> back on the last good spot
 		if (d.fixedMap) {
@@ -7670,6 +9146,13 @@ namespace
 				d.rx, secs, d.rx / secs, d.ivLast * 1000.0, d.ticks ? d.delaySum / d.ticks * 1000.0 : 0.0, d.ticks, d.interp, d.extrap, d.held, d.early, bad, dropped, d.gameResets, d.clockJumps, d.thr,
 				d.brk, d.str, d.hb, d.flt, d.sign, d.signLocked ? (g_cfg.driveSteerSign != 0 ? "ini" : "learned") : "learning", d.rotMode ? "quaternion" : "Euler", d.rotErrMax,
 				d.speed, O[0], O[1], O[2]);
+			if (d.slowTicks) {
+				// v2.5
+				Log("drive: GTA ran in slow motion for %.1f s of these (radio or weapon wheel, special ability): the car kept BeamNG's real time; drive mode %s",
+					d.slowS, d.vEsc.empty() ? "-" : d.vEsc.c_str());
+				d.slowS = 0;
+				d.slowTicks = 0;
+			}
 			// v2.01: what went to BeamNG and what the BeamNG car did
 			{
 				std::string seen, owned;
@@ -7795,6 +9278,15 @@ namespace
 			const int li = int(d.vLi);
 			if (li & 3) GaugeText(0.0f, yb - h + 0.050f, 0.26f, 4, 2, xr - 0.006f, (li & 2) ? "HIGH" : "LIGHTS", (li & 2) ? 120 : 140, (li & 2) ? 170 : 230, 255);
 		}
+		// v2.5: the car's drive mode above the box, on the right (your ESC modes: Comfort, Sport, ESC & TC off...)
+		if (live && !d.vEsc.empty() && d.vEsc != "-" && d.vEsc != "nil") {
+			std::string m = d.vEsc.substr(0, 16);
+			for (char& ch : m) ch = char(toupper((unsigned char)ch));
+			for (char& ch : m)
+				if (ch == '_') ch = ' ';
+			const bool off = m.find("OFF") != std::string::npos, sport = m.find("SPORT") != std::string::npos || m.find("RACE") != std::string::npos;
+			GaugeText(0.0f, yb - h - 0.024f, 0.28f, 4, 2, xr, m.c_str(), 255, off ? 90 : sport ? 170 : 255, off ? 70 : sport ? 40 : 255);
+		}
 		// pad mode above the box (the D-pad switch)
 		if (g_cfg.driveInput && g_in.pad.ok) {
 			const bool beam = !d.padGta;
@@ -7827,6 +9319,7 @@ namespace
 		} else if (ctrl) {
 			LoadConfig();  // placement/look/shadow/hide settings can be tuned in the ini, then Ctrl+F11
 			LoadSurfaces();  // v2.4: GtaBeamD1_surfaces.json (tiles sent from now on use it)
+			g_props.cfgLoaded = false;  // v2.5: GtaBeamD1_props.json read again
 			if (g_tgt.mode == 1) {
 				SetVisible(g_tgt.veh, false);  // the hide mode may have changed
 			}
@@ -8259,6 +9752,8 @@ namespace
 		LandTick();            // v2.41: GTA's car back on GTA's ground after F10 off (waits for GTA's collision)
 		RadioAfterTick();      // v2.41: the car's radio follows what played in drive mode
 		WorldTick();           // v2.4: GTA's ground for BeamNG (rays out are collected even when not driving)
+		PropsTick(paused);     // v2.5: GTA's props and BeamNG's car
+		DentsTick();           // v2.5: BeamNG's dents on the drawn car
 		DriveHud(paused);      // v2.01
 		DriveGauge(paused);    // v2.1
 		PairCar(c);  // v1.9.6
@@ -8989,7 +10484,37 @@ SamplerState clampSamp : register(s2);
 SamplerComparisonState cmpSamp : register(s3);
 SamplerState llSamp : register(s4);
 
-struct VSIn { float3 p : POSITION; float3 n : NORMAL; float2 uv0 : TEXCOORD0; float2 uv1 : TEXCOORD1; };
+// v2.5 (dents): each vertex follows up to 4 of BeamNG's nodes (si: which, sw: how much; all 0 = it stays as drawn)
+struct VSIn { float3 p : POSITION; float3 n : NORMAL; float2 uv0 : TEXCOORD0; float2 uv1 : TEXCOORD1; uint4 si : BLENDINDICES; float4 sw : BLENDWEIGHT; };
+Texture2D<float4> nodeTex : register(t35);  // v2.5: per node 2 texels: xyz how far it moved (car space), then its turn (quaternion)
+float4 NodeD(uint k) { return nodeTex.Load(int3(k % 1024, k / 1024, 0)); }  // (a texture, 1024 wide: every shader compiler reads it)
+float3 QRot(float4 q, float3 v) { float3 t = 2.0 * cross(q.xyz, v); return v + q.w * t + cross(q.xyz, t); }
+// a node more than 1.5 m from its place came off the car (w = 1; a bumper on the road): a vertex that also follows nodes
+// still on the car follows only those (no long spikes); one that follows only nodes that came off goes with them
+float4 DentW(uint4 si, float4 sw)
+{
+	float4 off = float4(NodeD(si.x * 2).w, NodeD(si.y * 2).w, NodeD(si.z * 2).w, NodeD(si.w * 2).w);
+	float4 on = sw * (1.0 - off);
+	float  s = on.x + on.y + on.z + on.w;
+	return s > 0.001 ? on * ((sw.x + sw.y + sw.z + sw.w) / s) : sw;
+}
+float3 SkinPos(float3 p, uint4 si, float4 sw)
+{
+	[branch] if (sw.x + sw.y + sw.z + sw.w < 0.001)
+		return p;
+	sw = DentW(si, sw);
+	return p + sw.x * NodeD(si.x * 2).xyz + sw.y * NodeD(si.y * 2).xyz + sw.z * NodeD(si.z * 2).xyz + sw.w * NodeD(si.w * 2).xyz;
+}
+float3 SkinNrm(float3 n, uint4 si, float4 sw)
+{
+	[branch] if (sw.x + sw.y + sw.z + sw.w < 0.001)
+		return n;
+	sw = DentW(si, sw);
+	float4 q0 = NodeD(si.x * 2 + 1), q1 = NodeD(si.y * 2 + 1), q2 = NodeD(si.z * 2 + 1), q3 = NodeD(si.w * 2 + 1);
+	float4 q = sw.x * q0 + sw.y * (dot(q0, q1) < 0 ? -q1 : q1) + sw.z * (dot(q0, q2) < 0 ? -q2 : q2) + sw.w * (dot(q0, q3) < 0 ? -q3 : q3);
+	float l = length(q);
+	return l > 1e-5 ? QRot(q / l, n) : n;
+}
 struct VSOut { float4 pos : SV_Position; float viewZ : TEXCOORD0; float3 n : TEXCOORD1; float4 uv : TEXCOORD2; float3 rel : TEXCOORD3; };
 
 float4 Project(float3 rel, out float viewZ)
@@ -9005,8 +10530,9 @@ float3 PartPos(float3 p) { return float3(dot(pm0.xyz, p) + pm0.w, dot(pm1.xyz, p
 VSOut VSCar(VSIn i)
 {
 	VSOut o;
-	float3 p = PartPos(i.p);
-	float3 n = float3(dot(pm0.xyz, i.n), dot(pm1.xyz, i.n), dot(pm2.xyz, i.n));
+	float3 p = PartPos(SkinPos(i.p, i.si, i.sw));
+	float3 n0 = SkinNrm(i.n, i.si, i.sw);
+	float3 n = float3(dot(pm0.xyz, n0), dot(pm1.xyz, n0), dot(pm2.xyz, n0));
 	float3 rel = carPos.xyz + carRight.xyz * p.x + carFwd.xyz * p.y + carUp.xyz * p.z;
 	o.pos = Project(rel, o.viewZ);
 	o.n = carRight.xyz * n.x + carFwd.xyz * n.y + carUp.xyz * n.z;
@@ -9541,7 +11067,7 @@ PickOut PSPick(VSOut i)
 // ---- depth maps of the car along a direction (sun self-shadow, ambient occlusion)
 float4 VSDepthDir(VSIn i) : SV_Position
 {
-	float3 q = PartPos(i.p) - sl3.xyz;
+	float3 q = PartPos(SkinPos(i.p, i.si, i.sw)) - sl3.xyz;
 	float rc = sl2.w;
 	return float4(dot(q, sl1.xyz) / rc, dot(q, sl2.xyz) / rc, 0.5 - dot(q, sl0.xyz) / (2.0 * rc), 1);
 }
@@ -9551,7 +11077,7 @@ float4 VSDepthDir(VSIn i) : SV_Position
 // car) or along the sun (our sun shadow, every frame), into a small coverage map in car space.
 float4 VSShadowMap(VSIn i) : SV_Position
 {
-	float3 p = PartPos(i.p);
+	float3 p = PartPos(SkinPos(i.p, i.si, i.sw));
 	float2 q = p.xy;
 	if (shadowC.x > 0.5)
 		q = p.xy - shadowB.xy * (max(p.z, 0.0) / min(shadowB.z, -0.05));
@@ -9893,6 +11419,9 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		ID3D11InputLayout*        layout = nullptr;
 		ID3D11Buffer*             vb = nullptr;
 		UINT                      vbStride = 0, vbOffset = 0;
+		ID3D11Buffer*             vb1 = nullptr;  // v2.5: slot 1 (the dents' vertex data) and vertex shader view 35
+		UINT                      vb1Stride = 0, vb1Offset = 0;
+		ID3D11ShaderResourceView* vsSrv35 = nullptr;
 		ID3D11Buffer*             ib = nullptr;
 		DXGI_FORMAT               ibFormat = DXGI_FORMAT_UNKNOWN;
 		UINT                      ibOffset = 0;
@@ -9944,6 +11473,8 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			c->IAGetPrimitiveTopology(&topo);
 			c->IAGetInputLayout(&layout);
 			c->IAGetVertexBuffers(0, 1, &vb, &vbStride, &vbOffset);
+			c->IAGetVertexBuffers(1, 1, &vb1, &vb1Stride, &vb1Offset);
+			c->VSGetShaderResources(35, 1, &vsSrv35);
 			c->IAGetIndexBuffer(&ib, &ibFormat, &ibOffset);
 			c->VSGetShader(&vs, nullptr, nullptr);
 			c->PSGetShader(&ps, nullptr, nullptr);
@@ -9990,6 +11521,8 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			c->IASetPrimitiveTopology(topo);
 			c->IASetInputLayout(layout);
 			c->IASetVertexBuffers(0, 1, &vb, &vbStride, &vbOffset);
+			c->IASetVertexBuffers(1, 1, &vb1, &vb1Stride, &vb1Offset);
+			c->VSSetShaderResources(35, 1, &vsSrv35);
 			c->IASetIndexBuffer(ib, ibFormat, ibOffset);
 			c->VSSetShader(vs, nullptr, 0);
 			c->PSSetShader(ps, nullptr, 0);
@@ -10006,6 +11539,8 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			SafeRelease(rs);
 			SafeRelease(layout);
 			SafeRelease(vb);
+			SafeRelease(vb1);
+			SafeRelease(vsSrv35);
 			SafeRelease(ib);
 			SafeRelease(vs);
 			SafeRelease(ps);
@@ -10041,6 +11576,8 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 	};
 
 	// The car on the GPU.
+	constexpr UINT kNodeTexW = 1024;  // v2.5 (dents): width of the node texture (the shader's NodeD uses the same)
+
 	struct GpuCar
 	{
 		ID3D11Buffer*                          vb = nullptr;
@@ -10060,11 +11597,26 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		size_t                                 tris = 0;
 		double                                 centre[3] = {};  // bounding sphere (car space)
 		double                                 radius = 3.0;
+		// v2.5 (dents): the nodes each vertex follows (vertex buffer slot 1) and where the nodes are now (t35)
+		ID3D11Buffer*                          skinVb = nullptr;
+		UINT                                   skinStride = 0;  // 0: one shared entry (the file has no node data)
+		ID3D11Texture2D*                       nodeBuf = nullptr;  // 1024 texels wide, 2 per node (kNodeTexW)
+		ID3D11ShaderResourceView*              nodeSrv = nullptr;
+		UINT                                   nodeN = 0;
+		uint64_t                               nodeSeq = 0;  // the dents data last copied to nodeBuf
+		uint32_t                               gen = 0;      // which loaded car file this is (g_modelGen)
 
 		void Release()
 		{
 			SafeRelease(vb);
 			SafeRelease(ib);
+			SafeRelease(skinVb);
+			SafeRelease(nodeBuf);
+			SafeRelease(nodeSrv);
+			skinStride = 0;
+			nodeN = 0;
+			nodeSeq = 0;
+			gen = 0;
 			for (auto*& t : tex) SafeRelease(t);
 			tex.clear();
 			texSwz.clear();
@@ -10405,8 +11957,12 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 				{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 				{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 				{ "TEXCOORD", 1, DXGI_FORMAT_R32G32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+				// v2.5 (dents): the nodes each vertex follows (a second vertex buffer: 4 x 16-bit indices, 4 x 8-bit weights)
+				{ "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 1, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+				{ "BLENDWEIGHT", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 1, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			};
-			r.dev->CreateInputLayout(il, 4, entries[0].blob->GetBufferPointer(), entries[0].blob->GetBufferSize(), &r.layout);
+			const HRESULT hl = r.dev->CreateInputLayout(il, 6, entries[0].blob->GetBufferPointer(), entries[0].blob->GetBufferSize(), &r.layout);
+			if (FAILED(hl)) Log("renderer: input layout FAILED (0x%08X)", unsigned(hl));
 		}
 		for (Entry& e : entries) SafeRelease(e.blob);
 		if (!ok) {
@@ -10845,7 +12401,7 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		}
 	}
 
-	void UploadCar(std::unique_ptr<car::Model> m)
+	void UploadCar(std::unique_ptr<car::Model> m, uint32_t gen)
 	{
 		Renderer& r = g_r;
 		r.car.Release();
@@ -10874,6 +12430,71 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			return;
 		}
 		uint64_t bytes = uint64_t(m->verts.size()) * sizeof(car::Vtx) + uint64_t(m->indices.size()) * 4;
+		// v2.5 (dents): the nodes each vertex follows (vertex buffer slot 1: 4 node numbers, 4 weights) and where the
+		// nodes are now (t35: per node how far it moved, then its turn). Without node data one zero entry that every
+		// vertex reads (stride 0): the car is drawn as it is.
+		{
+			struct SkinV
+			{
+				uint16_t i[4];
+				uint8_t  w[4];
+			};
+			static_assert(sizeof(SkinV) == 12, "skin vertex size");
+			const bool skin = m->skinned > 0 && m->skinIdx.size() == m->verts.size() * 4 && m->skinW.size() == m->verts.size() * 4 && !m->nodeCid.empty();
+			std::vector<SkinV> sv(skin ? m->verts.size() : 1);
+			memset(sv.data(), 0, sv.size() * sizeof(SkinV));
+			if (skin) {
+				for (size_t v = 0; v < sv.size(); ++v) {
+					for (int k = 0; k < 4; ++k) {
+						sv[v].i[k] = m->skinIdx[v * 4 + k];
+						sv[v].w[k] = m->skinW[v * 4 + k];
+					}
+				}
+			}
+			D3D11_BUFFER_DESC      sb{};
+			D3D11_SUBRESOURCE_DATA si{};
+			sb.Usage = D3D11_USAGE_IMMUTABLE;
+			sb.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+			sb.ByteWidth = UINT(sv.size() * sizeof(SkinV));
+			si.pSysMem = sv.data();
+			if (FAILED(r.dev->CreateBuffer(&sb, &si, &r.car.skinVb))) {
+				Log("car upload: dents vertex buffer FAILED (%u bytes)", sb.ByteWidth);
+				Notify("D1: could not put the car in video memory (dents buffer)");
+				r.car.Release();
+				return;
+			}
+			r.car.skinStride = skin ? UINT(sizeof(SkinV)) : 0;
+			bytes += sb.ByteWidth;
+			const size_t nn = m->nodeCid.size();
+			if (skin && nn > 0) {
+				// a float4 texture, 1024 texels wide (2 per node: 512 nodes a row)
+				const UINT         rows = UINT((nn * 2 + kNodeTexW - 1) / kNodeTexW);
+				std::vector<float> nd(size_t(rows) * kNodeTexW * 4, 0.0f);
+				for (size_t i = 0; i < nn; ++i) nd[i * 8 + 7] = 1.0f;  // no turn
+				D3D11_TEXTURE2D_DESC   nb{};
+				D3D11_SUBRESOURCE_DATA ni{};
+				nb.Width = kNodeTexW;
+				nb.Height = rows;
+				nb.MipLevels = 1;
+				nb.ArraySize = 1;
+				nb.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+				nb.SampleDesc.Count = 1;
+				nb.Usage = D3D11_USAGE_DYNAMIC;
+				nb.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+				nb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+				ni.pSysMem = nd.data();
+				ni.SysMemPitch = kNodeTexW * 16;
+				if (FAILED(r.dev->CreateTexture2D(&nb, &ni, &r.car.nodeBuf)) || FAILED(r.dev->CreateShaderResourceView(r.car.nodeBuf, nullptr, &r.car.nodeSrv))) {
+					Log("car upload: dents node buffer FAILED (%zu nodes): the car is drawn without dents", nn);
+					SafeRelease(r.car.nodeBuf);
+					SafeRelease(r.car.nodeSrv);
+				} else {
+					r.car.nodeN = UINT(nn);
+					bytes += uint64_t(rows) * kNodeTexW * 16;
+				}
+			}
+		}
+		r.car.gen = gen;
 		int      texFailed = 0;
 		r.car.tex.assign(m->textures.size(), nullptr);
 		r.car.texSwz.assign(m->textures.size(), 0);
@@ -12399,6 +14020,28 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		}
 	}
 
+	// v2.5 (dents): the newest node moves (DentsTick, script thread) into the car's node buffer
+	void DentsUpload(GpuCar& c)
+	{
+		if (!c.nodeBuf || !c.nodeN) return;
+		AcquireSRWLockShared(&g_dentShared.lock);
+		if (g_dentShared.seq != c.nodeSeq) {
+			if (g_dentShared.gen == c.gen && g_dentShared.data.size() == size_t(c.nodeN) * 8) {
+				D3D11_MAPPED_SUBRESOURCE ms{};
+				if (SUCCEEDED(g_r.ctx->Map(c.nodeBuf, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+					// row by row (the driver's row pitch can be wider than 1024 texels)
+					const size_t total = g_dentShared.data.size(), perRow = size_t(kNodeTexW) * 4;
+					for (size_t at = 0, row = 0; at < total; at += perRow, ++row)
+						memcpy(static_cast<char*>(ms.pData) + row * ms.RowPitch, g_dentShared.data.data() + at, std::min(perRow, total - at) * sizeof(float));
+					g_r.ctx->Unmap(c.nodeBuf, 0);
+					g_dentUploads.fetch_add(1);
+				}
+			}
+			c.nodeSeq = g_dentShared.seq;  // (data for another car file: skipped)
+		}
+		ReleaseSRWLockShared(&g_dentShared.lock);
+	}
+
 	// Draws the car (maps, environment, the car layer) and puts it on target: GTA's back buffer at
 	// Present, or GTA's HDR scene picture inside its frame (hdr = true, v1.9.3).
 	bool DrawCar(ID3D11RenderTargetView* bbRtv, UINT w, UINT h, ID3D11ShaderResourceView* depthSrv, const CamSample& cam, bool occlusion, bool picking, bool hdr = false)
@@ -12424,6 +14067,11 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		r.ctx->IASetInputLayout(r.layout);
 		r.ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		r.ctx->IASetVertexBuffers(0, 1, &c.vb, &stride, &offset);
+		// v2.5 (dents): the nodes each vertex follows (slot 1) and where they are now (t35; none: drawn as it is)
+		DentsUpload(c);
+		const UINT skinOffset = 0;
+		r.ctx->IASetVertexBuffers(1, 1, &c.skinVb, &c.skinStride, &skinOffset);
+		r.ctx->VSSetShaderResources(35, 1, &c.nodeSrv);
 		r.ctx->IASetIndexBuffer(c.ib, DXGI_FORMAT_R32_UINT, 0);
 		r.ctx->RSSetState(r.raster);
 		r.ctx->OMSetBlendState(r.opaque, zero, 0xFFFFFFFF);
@@ -13407,12 +15055,14 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		// a newly loaded car goes to video memory here
 		if (canDraw) {
 			std::unique_ptr<car::Model> pending;
+			uint32_t                    pendingGen = 0;
 			{
 				std::lock_guard<std::mutex> lk(g_modelMx);
 				pending = std::move(g_pendingModel);
+				pendingGen = g_modelGen.load();  // (set with the model, under the same lock)
 			}
 			if (pending) {
-				UploadCar(std::move(pending));
+				UploadCar(std::move(pending), pendingGen);
 			}
 		}
 

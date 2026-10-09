@@ -49,6 +49,11 @@ vm.execute('''
   controller = { mainController = {
       shiftUp = function() calls[#calls + 1] = 'shiftUp'; gi = math.min(3, gi + 1); electrics.values.gear = GEARS[gi] end,
       shiftDown = function() calls[#calls + 1] = 'shiftDown'; gi = math.max(1, gi - 1); electrics.values.gear = GEARS[gi] end } }
+  -- v2.5: the car's ESC controller (BeamNG's esc.lua: getCurrentConfigData().name)
+  ESCMODES, escI = { 'Comfort', 'Sport', 'ESC & TC Off' }, 1
+  ESC = { getCurrentConfigData = function() return { name = ESCMODES[escI] } end,
+          toggleESCMode = function() escI = escI % #ESCMODES + 1 end }
+  controller.getController = function(n) if n == 'esc' then return ESC end return nil end
   boom = function() error('broken action (Y must never reach BeamNG)') end
 ''')
 vg = vm.globals()
@@ -145,6 +150,9 @@ ge.execute('''
     else local s = math.sqrt(1 + m22 - m00 - m11) * 2; q.w = (m10 - m01) / s; q.x = (m02 + m20) / s; q.y = (m12 + m21) / s; q.z = 0.25 * s end
     return q
   end
+  -- v2.5: BeamNG's environment gravity
+  GRAVITY = -9.81
+  core_environment = { getGravity = function() return GRAVITY end, setGravity = function(g) GRAVITY = g; if GRAVLOG then GRAVLOG(g) end end }
   -- v2.43: BeamNG's pause (current BeamNG: simTimeAuthority)
   SIM_PAUSED = false
   simTimeAuthority = { pause = function(on) SIM_PAUSED = on and true or false; if PAUSELOG then PAUSELOG(SIM_PAUSED) end end,
@@ -202,7 +210,30 @@ def basis():
 def to_world(l):
     r, f, u = basis()
     return tuple(r[i] * l[0] + f[i] * l[1] + u[i] * l[2] for i in range(3))
+# v2.5 (dents): the body's nodes (car space, as make_car_plain.py writes them into the car file), ids 12 and up;
+# FAKE_DENT_AFTER=s: s seconds after the drive starts the front left corner is pushed in (over 0.3 s); a repairing
+# teleport (setPositionRotation, as BeamNG's reset) takes the dents out again
+def body_nodes():
+    out = []
+    for x in (-0.95, 0.0, 0.95):
+        for y in (-2.3, -0.6, 0.0, 0.6, 2.3):
+            for z in (0.4, 1.1):
+                out.append((x, y, z))
+    out += [(-0.95, 1.45, 1.1), (0.95, 1.45, 1.1), (-0.8, -1.2, 1.58), (0.8, -1.2, 1.58), (-0.8, 0.6, 1.58), (0.8, 0.6, 1.58)]
+    return out
+BODY = {12 + i: p for i, p in enumerate(body_nodes())}
+DENT = {}            # cid -> (dx, dy, dz) car frame, now
+DENT_FULL = {c: ((0.25, -0.35, 0.0) if (p[0] == -0.95 and p[1] == 2.3) else (0.0, -0.15, 0.0)) for c, p in BODY.items() if p[1] == 2.3 and p[0] <= 0.0}
+DENT_AFTER = float(os.environ.get('FAKE_DENT_AFTER', '0') or 0)
+REPAIR_FILE = os.environ.get('FAKE_REPAIR_FILE')   # v2.5: your repair binding when the host script touches this file
+for _f in ('fake_dent_done.txt', 'fake_repair_done.txt', 'fake_drive_on.txt', 'fake_dent_settled.txt', 'fake_repair_late.txt', 'fake_past.txt', 'fake_still10.txt') + ((REPAIR_FILE,) if REPAIR_FILE else ()):
+    if os.path.exists(_f): os.remove(_f)
+dent_state = {'t0': None, 'done': False}
 def node_local(cid):
+    if cid in BODY:
+        b = BODY[cid]
+        d = DENT.get(cid, (0.0, 0.0, 0.0))
+        return (b[0] + O_TRUE[0] + d[0], b[1] + O_TRUE[1] + d[1], b[2] + O_TRUE[2] + d[2])
     w, k = divmod(cid, 3)
     name, x, y, front = WH[w]
     hub = (x + O_TRUE[0], y + O_TRUE[1], 0.33 + O_TRUE[2])
@@ -217,6 +248,24 @@ def node_local(cid):
 wheels = [{'name': n, 'node1': i * 3, 'node2': i * 3 + 1, 'radius': 0.33, 'treadNodes': [i * 3 + 2]} for i, (n, x, y, fr) in enumerate(WH)]
 g.core_vehicle_manager = ge.table_from({})
 vdata = to_lua({'vdata': {'wheels': wheels, 'nodes': {}}})
+for c in range(12 + len(BODY)):
+    vdata.vdata.nodes[c] = ge.table_from({'cid': c, 'name': 'n%d' % c, 'group': 'body' if c in BODY else 'wheel'})
+# v2.5 (dents): the car's own Lua sees the same nodes (v.data), positions relative to the car (world axes), its frame
+vm.execute('v = { data = { nodes = {}, wheels = {}, refNodes = {} } }')
+for c in range(12 + len(BODY)):
+    vm.execute('v.data.nodes[%d] = { cid = %d, name = "n%d", group = "%s" }' % (c, c, c, 'body' if c in BODY else 'wheel'))
+for i, w in enumerate(wheels):
+    vm.execute('v.data.wheels[%d] = { name = "%s", node1 = %d, node2 = %d, radius = 0.33, treadNodes = { %d } }' % (i, w['name'], w['node1'], w['node2'], w['treadNodes'][0]))
+_ref = [c for c, p in BODY.items() if p == (0.0, 0.0, 0.4)][0]
+_back = [c for c, p in BODY.items() if p == (0.0, -0.6, 0.4)][0]
+_up = [c for c, p in BODY.items() if p == (0.0, 0.0, 1.1)][0]
+vm.execute('v.data.refNodes[0] = { ref = %d, back = %d, up = %d }' % (_ref, _back, _up))
+def vm_node(self, c):
+    p = to_world(node_local(int(c)))
+    return vm.table_from({'x': p[0], 'y': p[1], 'z': p[2]})
+vg.obj.getNodePosition = vm_node
+vg.obj.getDirectionVector = lambda self: vm.table_from(dict(zip('xyz', basis()[1])))
+vg.obj.getDirectionVectorUp = lambda self: vm.table_from(dict(zip('xyz', basis()[2])))
 g.core_vehicle_manager.getPlayerVehicleData = lambda: vdata
 veh = ge.table_from({})
 g.VEH = veh
@@ -232,6 +281,15 @@ veh.getPosition = lambda self: to_lua(dict(zip('xyz', P())))
 veh.getDirectionVector = lambda self: to_lua(dict(zip('xyz', basis()[1])))
 veh.getVelocity = lambda self: to_lua(dict(zip('xyz', [c * car['v'] for c in basis()[1]])))
 veh.getNodePosition = lambda self, c: to_lua(dict(zip('xyz', to_world(node_local(int(c))))))
+veh.getRefNodeId = lambda self: 0
+def cluster_vel(self, node, scale, ax, ay, az):
+    # v2.5: the car's velocity x scale + (ax, ay, az): this fake car only has a forward speed
+    f = basis()[1]
+    vx, vy = f[0] * car['v'] * scale + ax, f[1] * car['v'] * scale + ay
+    nv = max(0.0, vx * f[0] + vy * f[1])
+    ev.write('%.3f BUMP %.2f -> %.2f m/s\n' % (st, car['v'], nv)); ev.flush()
+    car['v'] = nv
+veh.applyClusterVelocityScaleAdd = cluster_vel
 def veh_cmd(self, code):
     vm.execute(code)
 veh.queueLuaCommand = veh_cmd
@@ -246,6 +304,9 @@ def set_pos_rot(self, x, y, z, qx, qy, qz, qw):
     world_car['on'] = True
     world_car['vz'] = 0.0
     world_car['tps'] += 1
+    if DENT:
+        DENT.clear()
+        ev.write('%.3f DENTS repaired by the teleport (BeamNG\'s reset)\n' % st)
     ev.write('%.3f TELEPORT to %.2f %.2f %.2f heading %.1f deg\n' % (st, x, y, z, math.degrees(car['psi']))); ev.flush()
 veh.setPositionRotation = set_pos_rot
 cast = None
@@ -270,7 +331,7 @@ actions = {
     'parkingbrake': {'cat': 'vehicle', 'ctx': 'vlua', 'onChange': "input.event('parkingbrake', VALUE, FILTERTYPE)"},
     'shiftUp': {'cat': 'vehicle', 'ctx': 'vlua', 'onDown': 'controller.mainController.shiftUp()'},
     'shiftDown': {'cat': 'vehicle', 'ctx': 'vlua', 'onDown': 'controller.mainController.shiftDown()'},
-    'toggleESCMode': {'cat': 'vehicle', 'ctx': 'vlua', 'onDown': "calls[#calls + 1] = 'esc'"},
+    'toggleESCMode': {'cat': 'vehicle', 'ctx': 'vlua', 'onDown': "calls[#calls + 1] = 'esc' ESC.toggleESCMode()"},
     'brokenThing': {'cat': 'vehicle', 'ctx': 'vlua', 'onDown': 'boom()'},
     'toggleNitrousOxide': {'cat': 'vehicle', 'ctx': 'vlua', 'onDown': "calls[#calls + 1] = 'nitrous'"},
     'toggle_headlights': {'cat': 'vehicle', 'ctx': 'vlua', 'onDown': "calls[#calls + 1] = 'headlights'"},
@@ -278,6 +339,7 @@ actions = {
     'customModifier2': {'cat': 'modifier', 'ctx': 'tlua', 'onDown': ''},
     'customModifier3': {'cat': 'modifier', 'ctx': 'tlua', 'onDown': ''},
     'reset_physics': {'cat': 'gameplay', 'ctx': 'tlua', 'onDown': 'RESET_CALLED = true'},
+    'recover_vehicle': {'cat': 'gameplay', 'ctx': 'tlua', 'onDown': 'RESET_CALLED = true'},
     'camera_next': {'cat': 'camera', 'ctx': 'tlua', 'onDown': 'CAM_CALLED = true'},
 }
 kb = [
@@ -299,7 +361,8 @@ dse = [{'control': 'button2', 'action': 'shiftUp'}, {'control': 'button0', 'acti
        {'control': 'button13', 'action': 'customModifier3'}, {'control': 'ryaxis', 'action': 'accelerate'}, {'control': 'rxaxis', 'action': 'brake'},
        {'control': 'xaxis', 'action': 'steering', 'deadzoneResting': 0.1}, {'control': 'modifier1 dpov', 'action': 'toggleNitrousOxide'},
        {'control': 'modifier2 upov', 'action': 'toggleESCMode'}, {'control': 'button10', 'action': 'toggle_headlights'},
-       {'control': 'button3', 'action': 'brokenThing'}]
+       {'control': 'button3', 'action': 'brokenThing'},
+       {'control': 'modifier1-modifier2 dpov', 'action': 'recover_vehicle'}]   # v2.5: the user's repair: RB + LB + D-pad down
 g.core_input_bindings = to_lua({'bindings': [
     {'devname': 'keyboard0', 'contents': {'name': 'Keyboard', 'bindings': kb}},
     {'devname': 'xinput0', 'contents': {'name': 'XBox Controller 1', 'vidpid': 'XIDevice', 'bindings': pad}},
@@ -323,27 +386,74 @@ rep_done = False
 def pauselog(on):
     ev.write('%.3f BeamNG physics %s (by the mod)\n' % (st, 'PAUSED' if on else 'RUNNING')); ev.flush()
 g.PAUSELOG = pauselog
+def gravlog(gv):
+    ev.write('%.3f GRAVITY %.3f\n' % (st, gv)); ev.flush()
+g.GRAVLOG = gravlog
 paused_frames = 0
 # v2.43: walls in BeamNG's GTA ground: triangles more than 2.5 m high (a deck's edge drawn down to the road); written to
 # fake_beam_walls.txt every 5 s (GTA quitting cuts the run)
 def walls_dump():
     walls, big, ntri, ntile, where = 0, 0, 0, 0, []
+    boxes = []   # v2.5: GTA's walls (box sub-meshes): one line each
+    humps = []   # v2.5: ground triangles more than 0.6 m high (a barrier drawn as ground)
+    high = []    # v2.5: ground more than 18 m over the fake GTA's ground (FAKE_BRIDGE=2: the 22 m overpass taken as ground)
     objs = ge.eval('OBJS')
     for name in list(objs.keys()):
         o = objs[name]
+        if o.cls == 'ProceduralMesh' and o.alive and o.meshes and str(name).startswith('gtap_'):
+            # v2.5: a solid prop's box
+            V = o.meshes[1].verts
+            top = [V[17 + q] for q in range(4)]
+            boxes.append('PROPBOX %s %.2f %.2f %.2f %.2f' % (name, sum(v.x for v in top) / 4 + o.pos.x, sum(v.y for v in top) / 4 + o.pos.y, o.pos.z, top[0].z + o.pos.z))
+            continue
         if o.cls != 'ProceduralMesh' or not o.alive or not o.meshes or not str(name).startswith('gtab_g_'): continue
         ntile += 1
         for mi in range(1, len(o.meshes) + 1):
             mesh = o.meshes[mi]
             f, V = mesh.faces, mesh.verts
+            if 'WALL' in str(mesh.material) or 'PROP' in str(mesh.material):
+                for b in range(1, len(V) + 1, 20):
+                    if b + 19 > len(V): break
+                    top = [V[b + 16 + q] for q in range(4)]
+                    side = [V[b + q] for q in range(4)]
+                    cx = sum(v.x for v in top) / 4 + o.pos.x
+                    cy = sum(v.y for v in top) / 4 + o.pos.y
+                    z1 = sum(v.z for v in top) / 4 + o.pos.z
+                    z0 = (side[0].z + side[1].z) / 2 + o.pos.z
+                    l = math.hypot(top[1].x - top[0].x, top[1].y - top[0].y)
+                    t = math.hypot(top[2].x - top[1].x, top[2].y - top[1].y)
+                    ang = math.degrees(math.atan2(top[1].y - top[0].y, top[1].x - top[0].x))
+                    gs = (top[1].z - top[0].z) / l if l > 1e-6 else 0.0
+                    boxes.append('BOX %s %.2f %.2f %.2f %.2f %.2f %.2f %.1f %.4f' % (name, cx, cy, z0, z1, l, t, ang, gs))
+                continue
             for k in range(1, len(f) + 1, 3):
                 zs = [V[f[k + q].v + 1].z for q in range(3)]
                 ntri += 1
+                for q in range(3):
+                    vx, vy, vz = o.pos.x + V[f[k + q].v + 1].x, o.pos.y + V[f[k + q].v + 1].y, V[f[k + q].v + 1].z + o.pos.z
+                    if vz - 200 - (0.03 * vx + 1.5 * math.sin(vy / 25.0)) > 18 and len(high) < 200: high.append((vx, vy, vz))
+                if max(zs) - min(zs) > 0.6:
+                    vv = [(o.pos.x + V[f[k + q].v + 1].x, o.pos.y + V[f[k + q].v + 1].y, V[f[k + q].v + 1].z + o.pos.z) for q in range(3)]
+                    hi = max(vv, key=lambda v: v[2])
+                    humps.append((hi[0], hi[1], max(zs) - min(zs), str(name)))
                 if max(zs) - min(zs) > 4.0: big += 1
                 if max(zs) - min(zs) > 2.5:
                     walls += 1
                     if len(where) < 20: where.append('%s(%.1f,%.1f)' % (name, o.pos.x + V[f[k].v + 1].x, o.pos.y + V[f[k].v + 1].y))
-    open('fake_beam_walls.txt', 'w').write('%.1f WALLS %d of %d triangles in %d tiles, %d over 4 m high %s\n' % (st, walls, ntri, ntile, big, ' '.join(where)))
+    dt_name = os.environ.get('FAKE_DUMPTILE')
+    if dt_name and dt_name in list(objs.keys()):
+        o = objs[dt_name]
+        with open('fake_beam_tile_dump.txt', 'w') as fd:
+            for mi in range(1, len(o.meshes) + 1):
+                mesh = o.meshes[mi]
+                fd.write('MESH %s %d verts %d faces\n' % (mesh.material, len(mesh.verts), len(mesh.faces)))
+                if 'WALL' in str(mesh.material): continue
+                for vi in range(1, len(mesh.verts) + 1):
+                    v = mesh.verts[vi]
+                    fd.write('%.2f %.2f %.3f\n' % (o.pos.x + v.x, o.pos.y + v.y, o.pos.z + v.z))
+                break
+    open('fake_beam_walls.txt', 'w').write('%.1f WALLS %d of %d triangles in %d tiles, %d over 4 m high %s\n' % (st, walls, ntri, ntile, big, ' '.join(where)) +
+                                           ''.join(b + '\n' for b in boxes) + ''.join('HUMP %.2f %.2f %.2f %s\n' % h for h in humps) + ''.join('HIGH %.2f %.2f %.2f\n' % h for h in high))
 # (counted when the run is stopped: GTA quitting ends it with SIGTERM)
 import signal
 def on_term(sig, frm):
@@ -377,10 +487,49 @@ while time.perf_counter() < end:
             ge.execute('SIM_PAUSED = true'); ev.write('%.3f BeamNG physics PAUSED (by you)\n' % st); ev.flush(); UP = [UP[1]]
         elif len(UP) == 1 and st >= UP[0]:
             ge.execute('SIM_PAUSED = false'); ev.write('%.3f BeamNG physics RUNNING (by you)\n' % st); ev.flush(); UP = None
+    # v2.5: for the host scripts' waitfile (frame rates differ a lot between sandboxes): fake_past.txt once the car is past
+    # y 230 (the bridges), fake_still10.txt after it then stood 10 s
+    if M.driveOn() and car['y'] > 230 and not os.path.exists('fake_past.txt'):
+        open('fake_past.txt', 'w').close()
+        ev.write('%.3f PAST y 230\n' % st); ev.flush()
+    if os.path.exists('fake_past.txt') and car['v'] < 0.05:
+        dent_state['still'] = dent_state.get('still', 0.0) + dt
+        if dent_state['still'] > 10.0 and not os.path.exists('fake_still10.txt'):
+            open('fake_still10.txt', 'w').close()
+    else:
+        dent_state['still'] = 0.0
+    # v2.5: the dent (fake_drive_on.txt 4 s into the drive: for the host script's waitfile)
+    if M.driveOn():
+        if dent_state.get('drive_t') is None: dent_state['drive_t'] = st
+        if st > dent_state['drive_t'] + 4 and not dent_state.get('on_file'):
+            dent_state['on_file'] = True
+            open('fake_drive_on.txt', 'w').close()
+    if DENT_AFTER and not dent_state['done']:
+        if M.driveOn() and dent_state['t0'] is None:
+            dent_state['t0'] = st + DENT_AFTER
+        if dent_state['t0'] is not None and st >= dent_state['t0']:
+            k = min(1.0, (st - dent_state['t0']) / 0.3)
+            for c, d in DENT_FULL.items():
+                DENT[c] = (d[0] * k, d[1] * k, d[2] * k)
+            if k >= 1.0:
+                dent_state['done'] = True
+                ev.write('%.3f DENT done: %d nodes pushed in (front left)\n' % (st, len(DENT_FULL))); ev.flush()
+                open('fake_dent_done.txt', 'w').close()
+    if REPAIR_FILE and not rep_done and os.path.exists(REPAIR_FILE):
+        REP_AT = st
     if REP_AT and not rep_done and st >= REP_AT:
         rep_done = True
         M.repairHere('recover_vehicle')
         ev.write('%.3f REPAIR binding pressed\n' % st); ev.flush()
+        rep_file_at = st
+    if rep_done and 'rep_file_at' in globals() and st > rep_file_at + 3.0 and not os.path.exists('fake_repair_done.txt'):
+        open('fake_repair_done.txt', 'w').close()   # (3 s after the repair: the teleport and the new dents reference are done)
+    if rep_done and 'rep_file_at' in globals() and st > rep_file_at + 12.0 and not os.path.exists('fake_repair_late.txt'):
+        open('fake_repair_late.txt', 'w').close()   # (12 s after: GTA's 10 s dents stats line is in its log)
+    if dent_state['done'] and dent_state.get('done_t') is None:
+        dent_state['done_t'] = st
+    if dent_state.get('done_t') is not None and st > dent_state['done_t'] + 3.0 and not os.path.exists('fake_dent_settled.txt'):
+        open('fake_dent_settled.txt', 'w').close()  # (3 s after the dent: GTA logged its settled shape)
     sim_paused = bool(ge.eval('SIM_PAUSED'))
     paused_frames += 1 if sim_paused else 0
     M.onUpdate(dt_raw, 0.0 if sim_paused else dt, dt_raw)

@@ -1,80 +1,102 @@
-# GTA x Beam kit v2.43
+# GTA x Beam kit v2.5
 
-Built 2026-10-06. Copy `Gta x Beam V2.42` to `Gta x Beam V2.43`, then extract this zip over it.
+Built 2026-10-08. Copy `Gta x Beam V2.43` to `Gta x Beam V2.5`, then extract this zip over it.
 
-## What's fixed
-1. **Bridges and highways.**
-   - Every tile is now measured for the level the car is on, carried tile by tile along the way you drive: up a ramp onto a bridge, or along the road under it.
-   - The ground far below a deck's edge is left out. No more big wall hanging under the bridge.
-   - The cache and the saved map keep up to 3 levels of the same spot (a deck and the road under it). The one that fits your level is used.
-   - Your v2.42 saved map is ignored (it mixed decks and roads). Those roads get measured once more, then saved again.
-   - My test: a ramp up onto an 8 m deck. Drove under it, then up the ramp and over it, then under it again. The car stayed on the right surface every time (within 0.6 m), with no walls and no falls.
-2. **Static world.**
-   - Built ground stays in BeamNG after you drive past it, up to 30,000 triangles (fewer at speed) and within 400 m.
-   - Standing still, ground already measured nearby goes to BeamNG too, 4 tiles a second.
-   - Past that budget, the farthest tiles go first. They come back from the saved map later (no rays, but BeamNG rebuilds them).
-3. **Your repair combo (RB+LB+X).**
-   - BeamNG's reset / recover / home actions were blocked on purpose, because they move BeamNG's car away from the GTA world.
-   - Now they repair the car where it is: upright, facing the same way, 0.5 m up.
-4. **Pause.**
-   - GTA paused or alt-tabbed: BeamNG's physics pause.
-   - You pause BeamNG: GTA's pause menu opens. Unpause BeamNG: it closes.
-5. **Map change crash.** The mod now stops all its work while BeamNG changes maps. (I can't confirm this was the cause; see test 6.)
+## What's new
+1. **Crash physics, first pass.**
+   - **Walls and barriers** are solid boxes in BeamNG now (jersey barriers, highway walls, building sides), not humps in the ground.
+   - **Soft props.** Lamp posts, signs, bins, hydrants and small poles fall over in GTA when you hit them, and BeamNG's car loses a little speed. Big props (containers, bollards) are solid boxes in BeamNG.
+   - **Dents.** The drawn car bends where BeamNG's car bends. A repair takes them out again. This needs a new export (Shift+F11).
+2. **Bridges and double decks.**
+   - Found the cause of the walls under bridges and the falls at speed. When a ray found nothing, the mod looked 20 m up and 50 m down. That grabbed the bridge above you or the road far below.
+   - Now it only looks 4 m up and 12 m down from your level.
+   - Up a ramp at speed, the ground ahead now follows the ramp's slope. Before, it was sometimes measured flat, under the ramp's top, and you dropped through.
+   - A tile with nothing at your level stays empty instead of taking another level's ground. That is likely also your weird ground spots (screenshots 3 and 4).
+3. **RB+LB+D-pad down.** GTA now sends the modifier buttons you hold, even ones you held through a pad-mode switch. Your BeamNG combos work in BeamNG pad mode. In GTA pad mode they stay GTA's.
+4. **Gravity x1.1** while GTA drives (`DriveGravity` in the ini). It goes back to normal when the drive ends.
+5. **Drive mode on the gauge:** COMFORT / SPORT / ESC & TC OFF, top right of the gauge.
+6. **Radio wheel.** GTA's slow motion no longer slows the mod's clock, so the car stays in sync. Changing BeamNG's own speed (the radio wheel, Franklin) comes later.
+7. **Pause.** Fixed a rare case where un-pausing GTA opened GTA's pause menu by itself and both games stayed paused.
 
 ## Install
-1. From the zip's `GTA\` folder, copy `GtaBeamD1.asi`, `GtaBeamD1.ini` and `GtaBeamD1_surfaces.json` to `F:\Games\GTA V\Grand Theft Auto V Legacy\` (replace).
+1. From the zip's `GTA\` folder, copy all 4 files to `F:\Games\GTA V\Grand Theft Auto V Legacy\` (replace):
+   - `GtaBeamD1.asi`
+   - `GtaBeamD1.ini`
+   - `GtaBeamD1_surfaces.json`
+   - `GtaBeamD1_props.json` (new)
 2. Copy `BeamNG\gtaBridge.lua` to `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\unpacked\gtabridge\lua\ge\extensions\gtaBridge.lua` (replace).
-3. **Restart BeamNG.** From the main menu, load **Grid, Small, Pure** and spawn your car. (This also turns on the concrete grip: no map reload needed.)
-4. Check the versions:
-   - `GtaBeamD1.log` says 2.43.
-   - BeamNG console (`~`): `gtaBridge.status()` says 2.43.
+3. **Restart BeamNG.** Load **Grid, Small, Pure** and spawn your car.
+4. **Export the car again.** In GTA, press Shift+F11. The dents need the 2.5 export.
+5. Check the versions:
+   - `GtaBeamD1.log` says 2.5.
+   - BeamNG console (`~`): `gtaBridge.status()` says 2.5.
+6. Optional, in the BeamNG console: `gtaBridge.dentsCheck()`. Its line in `gtabridge_log.txt` says how many nodes and flexbody groups the export will write.
+
+Your saved map is measured once more, because walls are part of it now.
 
 ## Test (in this order)
-**1. Bridges** (the main test)
-- Drive up onto the highway bridge that wouldn't let you on. Then drive under a bridge.
-- PASS: you can drive on it, nothing falls through, and BeamNG's window shows no wall under the deck.
+**1. Bridges and double decks** (the main fix)
+- Drive the double-deck spot, then over a bridge fast.
+- PASS: no falls, and BeamNG's window shows no walls under the decks.
 
-**2. Static world**
-- Drive around a block twice.
-- PASS: on the second lap, BeamNG's window shows no tiles being rebuilt around the block.
+**2. Walls**
+- Drive along a highway barrier and scrape it.
+- PASS: BeamNG's window shows boxes along the barrier (not humps), and the car scrapes along them instead of riding over them.
 
-**3. Repair**
-- Damage the car, then RB+LB+X.
-- PASS: the car is repaired where it is and drives on.
-- If nothing happens, send `gtabridge\bindings.txt`. Your binding's line should end with `as REPAIR WHERE IT IS (v2.43)`.
+**3. Soft props**
+- Hit a lamp post, a sign and a bin.
+- PASS: each falls over in GTA, and the car slows a little.
 
-**4. Pause**
-- Esc in GTA: BeamNG's car freezes. Esc again: it runs.
-- Alt-tab out of GTA: same.
-- In BeamNG's window, pause it yourself (J twice: the first J undoes the mod's pause, the second one is yours). Go back to GTA: its pause menu opens. Unpause BeamNG: GTA's menu closes.
-- PASS: all three, and no jump or rubber band when it runs again.
+**4. Dents**
+- Hit a wall at about 50 km/h. Then press RB+LB+D-pad down (repair).
+- PASS: the GTA car shows the dent where BeamNG's car has it, and the repair takes it out.
 
-**5. Concrete**
-- BeamNG console (`~`): `gtaBridge.world()`.
-- PASS: the concrete line says **BeamNG has it (grip x 0.85)**, and sidewalks grip a little less.
+**5. Your repair combo**
+- In BeamNG pad mode, press RB+LB+D-pad down.
+- PASS: the car is repaired, and the pad mode does not switch.
 
-**6. Map change** (optional)
-- In BeamNG, load another map from inside a map.
-- PASS: no crash. If it still crashes, disable the gtabridge mod and try once more. Then tell me if it still crashes without it.
+**6. Gravity and gauge**
+- Drive around: is it less bouncy?
+- Switch ESC modes: the gauge shows the new mode.
+
+**7. Radio wheel**
+- Hold the radio wheel while driving.
+- PASS: no desync or rubber band.
 
 ## If something's off
-- **Wrong ground on a bridge:** set `WorldDebug=1` in the ini, Ctrl+F11, drive there once, and send `GtaBeamD1.log`.
-- **BeamNG stutters with the static world:** lower `WorldKeepTris` (try 15000). More triangles = slower collision rebuilds (~0.2 ms per 1,000 triangles).
-- **Want more of the world kept:** raise `WorldKeepTris` (try 60000).
-- **Pause sync gets in the way:** `PauseSync=0` in the ini, Ctrl+F11.
-- **Repair combo should stay BeamNG's own:** empty `BeamNGRepairActions=` in the ini.
+- **Car snags on walls that aren't there:** set `WorldWalls=0`, then Ctrl+F11. Tell me where it happened.
+- **A prop is handled wrong:**
+  - Find its line in `GtaBeamD1_props_seen.txt`.
+  - Add the model to `GtaBeamD1_props.json` as `soft`, `solid` or `ignore`.
+  - Press Ctrl+F11.
+- **Dents look wrong** (spikes, the wrong part bends): set `Dents=0` and send the logs.
+- **Gravity feels off:** change `DriveGravity` (1.0 is BeamNG's own).
 
 ## Send back
 - `GtaBeamD1.log`
 - BeamNG's `gtabridge\gtabridge_log.txt`
-- a short clip of the bridge
-- one line per test (PASS/FAIL + how it felt)
+- `GtaBeamD1_props_seen.txt` (next to the .asi)
+- one line per test (PASS/FAIL + how it felt), and a short crash clip if you can
+
+## Launcher (your question)
+Yes, it's doable, but later (after crash physics):
+- A `.bat` (or a small launcher) can start BeamNG and GTA.
+- The mod can pause and minimize BeamNG until GTA's F10. The pause part already exists.
 
 ## Not checked yet (can't be tested here)
-- BeamNG's pause function: `simTimeAuthority.pause` (another BeamNG mod uses it). The mod checks that BeamNG's physics clock really stops, and says so in its log.
-- GTA's pause menu open/close from the plugin (`ACTIVATE_FRONTEND_MENU` / `SET_FRONTEND_ACTIVE`).
+- BeamNG's gravity call (`core_environment.setGravity`). The log shows the value read back.
+- The drive-mode name (`esc` controller, `getCurrentConfigData`). The log lists the controllers' functions once.
+- The bump that slows the car (`applyClusterVelocityScaleAdd`).
+- In the car's own Lua:
+  - its direction (`obj:getDirectionVector`; the fallback is the car's ref nodes)
+  - the flexbodies' node group field
+  - Both show in `gtaBridge.dentsCheck()` and in the log.
+- GTA side:
+  - how hard props get pushed (`APPLY_FORCE_TO_ENTITY`)
+  - the prop names in `GtaBeamD1_props.json`. A name that doesn't match is just unused.
 
-## Known gaps (not faked, on purpose)
-- Walls, barriers and props are still ramps in the ground. Breakables come with v2.5.
-- Water has no ground: the car falls in and is put back.
+## Known gaps
 - BeamNG doesn't know about GTA's traffic yet.
+- Dents count from the drive start. Damage the car had before isn't shown.
+- Shading doesn't follow the dents yet.
+- Water has no ground.

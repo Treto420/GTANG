@@ -146,6 +146,16 @@ namespace car
 		float                 vehOrigin[3] = {};
 		bool                  vehFrameOk = false;
 		std::string           vehOriginHow;  // how vehOrigin was decided (for the log)
+		// v2.5 (dents): BeamNG's nodes as exported (car space) and the nodes each vertex follows. Empty: the file has none
+		// (exported before the 2.5 BeamNG mod) or the car's frame isn't usable for driving.
+		std::vector<int>                   nodeCid;    // BeamNG's node id (cid) of each node
+		std::vector<float>                 nodePos;    // x y z per node (car space, at export)
+		std::vector<uint8_t>               nodeWheel;  // 1 = one of a wheel's nodes (nothing follows it: wheels are drawn on their own)
+		std::vector<std::vector<uint16_t>> nodeNbr;    // nodes near each node (of its parts): its turn is fitted to them
+		std::vector<uint16_t>              skinIdx;    // 4 node indices per vertex
+		std::vector<uint8_t>               skinW;      // 4 weights per vertex (sum 255; all 0 = it stays as drawn)
+		int                                skinned = 0;  // vertices that follow nodes
+		std::string                        skinNote;     // for the log
 	};
 
 	struct Options

@@ -82,9 +82,28 @@ for pname, P in parts.items():
     nodes.append(dict(name=pname, mesh=len(meshes) - 1))
 nodes.append(dict(name='car', children=list(range(len(nodes))), extras=dict(BNG_Direction=dict(dir=list(g((0, 1, 0))), up=list(g((0, 0, 1)))))))
 wheels = [dict(name=n, c1=list(g((x - 0.13, y, 0.33))), c2=list(g((x + 0.13, y, 0.33))), r=0.33, width=0.26, driven=n[0] == 'R') for x, y, n in WHEELS]
+# v2.5 (dents): BeamNG's nodes as the 2.5 mod exports them: 3 per wheel (ids 0-11, as fake_beam_lua.py's car), then the body's
+# (fake_beam_lua.py body_nodes()); node groups; the body mesh follows the 'body' group
+def body_nodes():
+    out = []
+    for x in (-0.95, 0.0, 0.95):
+        for y in (-2.3, -0.6, 0.0, 0.6, 2.3):
+            for z in (0.4, 1.1):
+                out.append((x, y, z))
+    out += [(-0.95, 1.45, 1.1), (0.95, 1.45, 1.1), (-0.8, -1.2, 1.58), (0.8, -1.2, 1.58), (-0.8, 0.6, 1.58), (0.8, 0.6, 1.58)]
+    return out
+WH_FAKE = ((0.8, 1.45), (-0.8, 1.45), (0.8, -1.4), (-0.8, -1.4))   # fake_beam_lua.py's wheel order (FR FL RR RL)
+npos = []
+for x, y in WH_FAKE:
+    npos += [(x - 0.1, y, 0.33), (x + 0.1, y, 0.33), (x, y + 0.2, 0.33)]
+npos += body_nodes()
+nodes_ex = dict(c=list(range(len(npos))), p=[round(v, 3) for q in npos for v in g(q)], g=['wheel'] * 12 + ['body'] * (len(npos) - 12),
+                w=[1] * 12 + [0] * (len(npos) - 12))
+NO_NODES = os.environ.get('CAR_NO_NODES') == '1'
 gl = dict(asset=dict(version='2.0'), scene=0, scenes=[dict(nodes=[len(nodes) - 1])], nodes=nodes, meshes=meshes, materials=gmats,
           accessors=accessors, bufferViews=bufviews,
           buffers=[dict(byteLength=len(bin_), uri='data:application/octet-stream;base64,' + base64.b64encode(bytes(bin_)).decode())],
-          extras=dict(gtaBridge=dict(version='2.0', vehicle='testcar', paint=dict(color=[0.72, 0.16, 0.16, 1.2]), wheels=wheels, vehPos=[0, 0, 0])))
+          extras=dict(gtaBridge=dict(version='2.5', vehicle='testcar', paint=dict(color=[0.72, 0.16, 0.16, 1.2]), wheels=wheels, vehPos=[0, 0, 0],
+                                     **({} if NO_NODES else dict(nodes=nodes_ex, flex={'body': 'body'})))))
 json.dump(gl, open(out + '/car.gltf', 'w'))
 print('wrote', out + '/car.gltf', sum(len(p[3]) for p in parts.values()) // 3, 'triangles')
