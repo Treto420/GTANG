@@ -2,6 +2,8 @@
 40 key f11
 100 key f10
 170 pad 0,0,255,0,0,0,0
-700 pad 0,0,0,0,0,0,0
-760 key f10
-800 quit
+171 waitfile fake_past.txt
+172 pad 0,255,0,0,0,0,0
+173 waitfile fake_still10.txt
+180 key f10
+200 quit

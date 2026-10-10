@@ -1,0 +1,9 @@
+5 pad 0,0,0,0,0,0,0
+40 key f11
+100 key f10
+170 pad 0,0,255,0,0,0,0
+230 timescale 0.2
+430 timescale 1.0
+470 pad 0,0,0,0,0,0,0
+500 key f10
+540 quit

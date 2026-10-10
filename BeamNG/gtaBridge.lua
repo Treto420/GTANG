@@ -48,6 +48,10 @@
 --         Sound: "session" mode (the mute option off for the whole BeamNG session, BeamNG's volume down while GTA
 --         isn't driving). Poses carry BeamNG's simulation clock too ("ss", measurement only). The car state ("vs")
 --         carries the damage and the ground ids under the wheels.
+--   v2.51: dents work (the export wrote one position per node instead of three: GTA couldn't read them); props are boxes in
+--         BeamNG your car really hits ("pb": breakaway ones break when the car has lost their "break" speed against them, GTA
+--         then knocks them over: "pbk"); reload_vehicle can be your repair where the car is; combinations you press are logged;
+--         flat ground cells whose edges don't meet their neighbours' points are built finely (no small steps: less bumping).
 --
 -- Install: <BeamNG user folder>/mods/unpacked/gtabridge/lua/ge/extensions/gtaBridge.lua
 -- Console helpers (press ~):
@@ -68,7 +72,7 @@
 --   gtaBridge.soundSession(false) -- v2.4: switch the sound "session" mode off (the GTA plugin's BeamNGSoundWake=session sets it)
 
 local M = {}
-M.version = '2.43'
+M.version = '2.53'
 local logTag = 'gtaBridge'
 
 -- ---------------------------------------------------------------- config
@@ -249,6 +253,7 @@ end
 local worldTiles = {}   -- v2.4: id -> GTA ground tile info (see "T3" below)
 local worldDriveEnded     -- v2.4: set in the T3 section (forward declarations)
 local buildTileMsg
+local dents = {}          -- v2.5 (D2): dents shown in GTA (filled in the T3 section)
 local function removeSurface(id)
   local obj = surfaces[id]
   if obj then
@@ -1075,6 +1080,15 @@ local function onExported(root)
     end
     info.stripped = stripImages(root)
     info.wheels, info.driven = readWheels(exportJob.veh)
+    -- v2.5 (dents): the car's nodes; v2.53: each flexbody's own nodes, each prop's 3 nodes
+    local okN, nodes, flex, note, props = pcall(dents.exportNodes, exportJob.veh)
+    if okN and nodes then
+      info.nodes, info.flex, info.props = nodes, flex, props
+      info.dentsNote = tostring(note)
+      logI('export: nodes for the dents: ' .. tostring(note))
+    else
+      logE('export: no nodes for the dents (the car is drawn without them): ' .. tostring(okN and note or nodes))
+    end
     lines[#lines + 1] = ''
     lines[#lines + 1] = 'Driven wheels: ' .. tostring(info.driven)
     do
@@ -1092,7 +1106,7 @@ local function onExported(root)
     local vp
     pcall(function() local p = exportJob.veh:getPosition(); vp = { p.x, p.z, -p.y } end)
     root.extras.gtaBridge = { version = M.version, paint = exportJob.paint, vehicle = exportJob.vehicle,
-                              wheels = info.wheels, vehPos = vp }
+                              wheels = info.wheels, vehPos = vp, nodes = info.nodes, flex = info.flex, props = info.props }
     local s = jsonEncode(root)
     local wr = writeFile(exportCfg.vpath, s)
     if wr == false then error('writeFile failed for ' .. exportCfg.vpath) end
@@ -1112,7 +1126,7 @@ local function onExported(root)
     texConverted = ms.converted, texCopied = ms.copied, texReused = ms.reused, imagesStripped = info.stripped,
     texDds = ms.ddsCopied, texDdsFailed = ms.ddsFailed, textureMode = exportCfg.textures,
     wheels = #(info.wheels or {}), drivenWheels = info.driven, paint = exportJob.paint, vehicle = exportJob.vehicle,
-    modVersion = M.version,
+    modVersion = M.version, dents = info.dentsNote and info.dentsNote:sub(1, 700) or nil,   -- v2.52: in GTA's log too
   }
   local line = string.format('export: %s -> %s (%.1f MB, %d meshes, %d materials, textures %d new (%d .dds as they are, %d .dds failed -> png) + %d reused, %d wheels (driven %s), %.1f s)',
     tostring(reply.vehicle), tostring(real), reply.bytes / 1048576, reply.meshes, ms.materials or 0,
@@ -1425,8 +1439,8 @@ local function catMatches(cat, c)
 end
 
 local function actionAllowed(name, def)
+  if bindOpts.rep[name] then return true, 'repair' end   -- v2.43: repairs the car where it is (BeamNG's own would move it); v2.51: also reload_vehicle
   if ALWAYS_DENY[name] then return false, 'never forwarded (reloads the BeamNG car)' end
-  if bindOpts.rep[name] then return true, 'repair' end   -- v2.43: repairs the car where it is (BeamNG's own would move it)
   if bindOpts.deny[name] then return false, 'never forwarded (BeamNGActionsNever)' end
   if type(def) ~= 'table' then return false, 'action not defined' end
   if not (def.onChange or def.onDown or def.onUp) then return false, 'action has no code' end
@@ -1565,18 +1579,41 @@ local function buildBinds(veh)
       end
     end
   end
+  -- v2.52: the other pad list's combinations (modifier + button) run too, like BeamNG with both pads on (your choice: your
+  -- Xbox list has the repair on RB+LB+D-pad down, your DualSense list cruise control). Single buttons stay the used list's.
+  local padAlso
+  if padUse then
+    if kinds[padUse] == 'ds' then padAlso = xiUse elseif kinds[padUse] == 'xi' and bindOpts.ds then padAlso = dsUse or dsAny end
+    if padAlso == padUse then padAlso = nil end
+  end
+  local modMap2 = {}   -- the other list's modifier number -> the used list's
+  if padAlso then
+    local dev = devs[padAlso]
+    for _, b in pairs(dev.list) do
+      local n = type(b) == 'table' and tonumber(tostring(b.action or ''):match('^customModifier(%d)$'))
+      local nm = n and padName(dev, kinds[padAlso], b.control or b.ctrl)
+      if nm and PAD_BTN[nm] then
+        local m
+        for k = 1, 3 do if B.modCtl[k] == nm then m = k end end
+        for k = 1, 3 do if not m and not B.modCtl[k] then m = k end end
+        if m then B.modCtl[m] = nm; modMap2[n] = m end
+      end
+    end
+  end
+  B.padAlso = padAlso and devs[padAlso].devname or nil
   B.padCombo, B.modUsed = {}, {}
   local seenPair = {}
   for i, dev in ipairs(devs) do
     local kind = kinds[i]
-    local use = kind == 'key' or ((kind == 'xi' or kind == 'ds') and i == padUse)
+    local also = padAlso ~= nil and i == padAlso
+    local use = kind == 'key' or ((kind == 'xi' or kind == 'ds') and (i == padUse or also))
     L[#L + 1] = string.format('device %s "%s" (%s, %s): %d bindings%s', dev.devname, dev.name, dev.vidpid,
       kind == 'key' and 'keyboard' or kind == 'xi' and 'pad, XInput' or kind == 'ds' and (dev.sce and 'PlayStation pad, BeamNG\'s own support' or 'PlayStation pad seen as DirectInput')
         or kind == 'mouse' and 'mouse' or 'DirectInput (wheel/joystick)',
       (function() local n = 0 for _ in pairs(dev.list) do n = n + 1 end return n end)(),
-      use and ((kind == 'xi' or kind == 'ds') and ' - THE PAD LIST USED' or '') or ((kind == 'xi' or kind == 'ds') and ' - not used (another pad list is used: BeamNGPadBindings in GTA\'s ini)'
+      use and ((kind == 'xi' or kind == 'ds') and (also and ' - its combinations (modifier + button) run too (v2.52)' or ' - THE PAD LIST USED') or '') or ((kind == 'xi' or kind == 'ds') and ' - not used (another pad list is used: BeamNGPadBindings in GTA\'s ini)'
         or ' - not used by the bridge yet'))
-    if use and (kind == 'xi' or kind == 'ds') then
+    if use and not also and (kind == 'xi' or kind == 'ds') then
       local ms = {}
       for n = 1, 3 do
         local note = B.modNote and B.modNote[n]
@@ -1635,9 +1672,17 @@ local function buildBinds(veh)
             local name, how2
             if words[#words] then name, how2 = padName(dev, kind, words[#words]) end
             local missing
+            if also then
+              -- (its modifier numbers in the used list's numbering)
+              local m2 = {}
+              for n in pairs(mods) do if modMap2[n] then m2[modMap2[n]] = true else missing = n end end
+              mods = m2
+            end
             for n in pairs(mods) do if not B.modCtl[n] then missing = n end end
             if #words == 0 then
               note = 'empty control'
+            elseif also and nMods == 0 then
+              note = 'single buttons come from the pad list used'
             elseif badWord then
               note = 'pad control not understood'
               B.unknown[#B.unknown + 1] = ctl
@@ -1711,7 +1756,8 @@ local function buildBinds(veh)
   L[#L + 1] = ''
   L[#L + 1] = string.format('forwarded: pad %d bindings on %d controls (%s), keyboard %d bindings on %d keys; driving inputs bound: pad %s, keyboard %s',
     #B.pad, #pc, table.concat(pc, ' '), #B.key, #kc, has('pad'), has('key'))
-  L[#L] = L[#L] .. string.format('; pad list: %s; combination-only controls: %s; modifier buttons used: %s', tostring(B.padDev or 'none'),
+  L[#L] = L[#L] .. string.format('; pad list: %s%s; combination-only controls: %s; modifier buttons used: %s', tostring(B.padDev or 'none'),
+    B.padAlso and (' (+ the combinations of ' .. B.padAlso .. ')') or '',
     #pm > 0 and table.concat(pm, ' ') or 'none', #pmod > 0 and table.concat(pmod, ' ') or 'none')
   B.summary = L[#L]
   if #B.combos > 0 then L[#L + 1] = string.format('pad combinations not usable: %d (%s)', #B.combos, table.concat(B.combos, ', '):sub(1, 400)) end
@@ -1998,6 +2044,41 @@ pcall(function()
   end
 end)
 s = s .. '|' .. dmg .. '|' .. (#gm > 0 and table.concat(gm, ',') or '-')
+-- v2.5: the car's drive mode (your ESC modes: Comfort, Sport, ESC & TC off...): the esc controller's current configuration
+-- (its name, as BeamNG shows it when you switch), else the driveModes controller's current mode. Each read in pcall: '-' = none
+local mode, probe = '-', '-'
+pcall(function()
+  local c = controller.getController('esc')
+  if c and c.getCurrentConfigData then
+    local d = c.getCurrentConfigData()
+    if type(d) == 'table' and d.name then mode = tostring(d.name) end
+  end
+end)
+if mode == '-' then pcall(function()
+  local c = controller.getController('driveModes')
+  if c and c.getCurrentDriveModeKey then
+    local k = c.getCurrentDriveModeKey()
+    if k ~= nil then mode = tostring(k) end
+  end
+end) end
+if not gtabModeProbed then
+  -- once: what the two controllers offer (for the log, in case the names differ in your BeamNG)
+  gtabModeProbed = true
+  local names = {}
+  for _, cn in ipairs({ 'esc', 'driveModes' }) do
+    pcall(function()
+      local c = controller.getController(cn)
+      if type(c) == 'table' then
+        local fns = {}
+        for k, v in pairs(c) do if type(v) == 'function' and #fns < 24 then fns[#fns + 1] = tostring(k) end end
+        table.sort(fns)
+        names[#names + 1] = cn .. ': ' .. table.concat(fns, ' ')
+      end
+    end)
+  end
+  probe = #names > 0 and table.concat(names, '; ') or 'no esc or driveModes controller'
+end
+s = s .. '|' .. mode:gsub('[|"\\]', '/') .. '|' .. probe:gsub('[|"\\]', '/')
 obj:queueGameEngineLua(string.format('if gtaBridge and gtaBridge.vstate then gtaBridge.vstate(%d, %q) end', obj:getID(), s))
 ]]
 
@@ -2043,6 +2124,11 @@ local function fireBind(d, b, v)
   local down = v >= 0.5
   if down ~= b.down then
     b.down = down
+    if down and b.nMods and b.nMods > 0 then
+      -- v2.51: which of your combinations ran (your v2.5 test: RB + LB + D-pad down did something else than your repair)
+      d.comboLogs = (d.comboLogs or 0) + 1
+      if d.comboLogs <= 40 then logI('drive: pad combination ' .. tostring(b.ctlName) .. ' -> ' .. tostring(b.action) .. (b.def.repair and ' (repair where the car is)' or '')) end
+    end
     runAction(d, b, down and 'onDown' or 'onUp', down and 1 or 0)
   end
   b.last = v
@@ -2120,7 +2206,13 @@ local function evalBinds(d)
   end
   B.padLatch = B.padLatch or {}
   local mh = {}
-  for n, nm in pairs(B.modCtl or {}) do mh[n] = padDown(nm) end
+  -- v2.5: GTA also sends the modifier buttons held as modifiers ("pm"), even while their own actions wait to be let go
+  -- (held across a pad mode switch): your combinations work at once
+  local function pmDown(name)
+    local bit = PAD_BTN[name]
+    return p ~= nil and bit ~= nil and math.floor((p.pm or 0) / bit) % 2 == 1
+  end
+  for n, nm in pairs(B.modCtl or {}) do mh[n] = padDown(nm) or pmDown(nm) end
   local function modsExact(b)
     for n = 1, 3 do if (b.mods and b.mods[n] or false) ~= (mh[n] or false) then return false end end
     return true
@@ -2235,7 +2327,14 @@ function M.vstate(id, s)
   local function n(i) return tonumber(f[i]) end
   d.vs = { thrIn = n(1), brkIn = n(2), strIn = n(3), pbIn = n(4), cluIn = n(5), thr = n(6), brk = n(7), gear = f[8], rpm = n(9),
            ws = n(10), ign = f[11], eng = f[12], gbm = f[13], pb = n(14), mx = n(15), t = now(),
-           dmg = n(22), gm = f[23] }   -- v2.4: damage, ground ids under the wheels
+           dmg = n(22), gm = f[23], esc = f[24] }   -- v2.4: damage, ground ids under the wheels; v2.5: drive mode
+  if f[25] and f[25] ~= '-' then logI('drive: the car\'s drive mode controllers: ' .. tostring(f[25])) end
+  if d.vs.esc ~= d.escWas then
+    -- v2.5: the drive mode shown on GTA's gauge
+    d.escWas = d.vs.esc
+    d.escChanges = (d.escChanges or 0) + 1
+    if d.escChanges <= 30 then logI('drive: drive mode now ' .. tostring(d.vs.esc)) end
+  end
   if d.vs.gm and d.vs.gm ~= '-' and d.vs.gm ~= d.gmWas then
     -- v2.4: logged when the ground under the wheels changes (does a GTA dirt tile give BeamNG's dirt?)
     d.gmWas = d.vs.gm
@@ -2254,9 +2353,9 @@ function M.vstate(id, s)
   d.recent = {}
   local vs = d.vs
   local function clean(x) return (tostring(x):gsub('[%c"\\]', '')) end
-  local msg = string.format('{"t":"vs","thr":%.3f,"brk":%.3f,"str":%.3f,"pb":%.3f,"clu":%.3f,"gear":"%s","rpm":%.0f,"mx":%.0f,"ws":%.2f,"li":%d,"ign":"%s","eng":"%s","gbm":"%s","la":"%s","inp":"%s","dmg":%.0f,"gm":"%s"}',
+  local msg = string.format('{"t":"vs","thr":%.3f,"brk":%.3f,"str":%.3f,"pb":%.3f,"clu":%.3f,"gear":"%s","rpm":%.0f,"mx":%.0f,"ws":%.2f,"li":%d,"ign":"%s","eng":"%s","gbm":"%s","la":"%s","inp":"%s","dmg":%.0f,"gm":"%s","esc":"%s"}',
     vs.thrIn or -1, vs.brkIn or -1, vs.strIn or 0, vs.pbIn or vs.pb or -1, vs.cluIn or -1, clean(vs.gear), vs.rpm or -1, vs.mx or -1, vs.ws or 0, vs.li or 0,
-    clean(vs.ign), clean(vs.eng), clean(vs.gbm), clean(table.concat(la, ','):sub(1, 200)), clean(d.inpHow), vs.dmg or -1, clean(vs.gm or '-'))
+    clean(vs.ign), clean(vs.eng), clean(vs.gbm), clean(table.concat(la, ','):sub(1, 200)), clean(d.inpHow), vs.dmg or -1, clean(vs.gm or '-'), clean(vs.esc or '-'):sub(1, 40))
   pcall(function() udp:sendto(msg, d.ip, d.port) end)
   -- did the throttle we asked for arrive? (once, a few seconds in)
   if not d.checked and d.wantThrT and now() - d.wantThrT > 1.5 and (vs.thrIn or 0) < 0.05 then
@@ -2570,6 +2669,9 @@ function pz.update(d, dtReal, dtSim)
     if ok and v == true then paused = true end
   end
   local t = now()
+  -- v2.5: just unpaused by the mod (GTA runs again): BeamNG's clock may still read 0 for a frame or two. Not "paused by you"
+  -- (GTA would open its pause menu, pause itself and BeamNG with it: both stuck)
+  if t < (pz.graceT or 0) and not pz.byUs then paused, pz.zeroN = false, 0 end
   if pz.byUs then
     if paused then
       pz.took = true
@@ -2611,6 +2713,7 @@ function pz.gtaPaused(d, on, why)
     pz.override = false
     if pz.byUs then
       pz.byUs = false
+      pz.graceT = now() + 0.5
       pcall(pz.set, false)
       logI('pause: GTA runs again: BeamNG runs again')
     end
@@ -2622,6 +2725,56 @@ function pz.reset()
 end
 M.pauseState = function() return { api = pz.api, byUs = pz.byUs, paused = pz.paused, gta = pz.gta, override = pz.override } end
 M.driveOn = function() return drive ~= nil end
+
+-- v2.5: BeamNG's gravity x DriveGravity (GTA's ini, default 1.1) while GTA drives (your idea: Los Santos felt bouncy). Read
+-- and set through BeamNG's environment (core_environment.getGravity / setGravity: UNVERIFIED names, the log says what
+-- happened); without a readable gravity nothing is changed (no guessing its sign). Put back when drive mode ends; if
+-- BeamNG's Lua reloads meanwhile, gravity_restore.txt puts it back when this mod loads again.
+local grav = { was = nil, file = '/gtabridge/gravity_restore.txt' }   -- (one local: Lua allows 200 in the main chunk)
+function grav.get()
+  local g
+  pcall(function() g = core_environment.getGravity() end)
+  if type(g) ~= 'number' then pcall(function() g = extensions.core_environment.getGravity() end) end
+  return type(g) == 'number' and g or nil
+end
+function grav.set(g)
+  local ok = pcall(function() core_environment.setGravity(g) end)
+  if not ok then ok = pcall(function() extensions.core_environment.setGravity(g) end) end
+  return ok
+end
+function grav.on(mult)
+  mult = tonumber(mult) or 1
+  if math.abs(mult - 1) < 0.001 then return end
+  local g0 = grav.get()
+  if not g0 then logE('drive: gravity: BeamNG\'s gravity could not be read (core_environment.getGravity): left as it is'); return end
+  local base = grav.was or g0   -- (a second drive start: from BeamNG's own)
+  if math.abs(base) < 0.5 or math.abs(base) > 50 then logE('drive: gravity: BeamNG\'s gravity reads ' .. tostring(base) .. ': left as it is'); return end
+  local g = base * mult
+  local ok = grav.set(g)
+  if ok then
+    grav.was = base
+    pcall(writeFile, grav.file, string.format('%.5f', base))
+  end
+  logI(string.format('drive: gravity %.2f -> %.2f (x%.2f): %s; reads back %s', base, g, mult, ok and 'set' or 'FAILED (core_environment.setGravity)', tostring(grav.get())))
+end
+function grav.off(why)
+  if not grav.was then return end
+  local ok = grav.set(grav.was)
+  logI(string.format('drive: gravity back to %.2f (%s): %s; reads back %s', grav.was, tostring(why), ok and 'set' or 'FAILED', tostring(grav.get())))
+  grav.was = nil
+  pcall(writeFile, grav.file, '')
+end
+-- at load: a gravity left changed by a Lua reload during a drive goes back
+function grav.restoreFile()
+  local txt
+  pcall(function() txt = readFile(grav.file) end)
+  local g = tonumber(txt or '')
+  if not g or math.abs(g) < 0.5 or math.abs(g) > 50 then return end
+  if grav.set(g) then
+    logI(string.format('drive: gravity put back to %.2f (it was changed for GTA\'s drive when BeamNG\'s Lua reloaded)', g))
+    pcall(writeFile, grav.file, '')
+  end
+end
 
 local function driveEnd(why, tellGta)
   if not drive then return end
@@ -2639,6 +2792,7 @@ local function driveEnd(why, tellGta)
   screen('GTA bridge: drive mode ended (' .. tostring(why) .. ')', 6)
   drive = nil
   driveActive = false
+  pcall(grav.off, why)   -- v2.5
   pcall(driveSettings, false)
   pcall(sessionVolume, true, 'drive end')   -- v2.4 session mode: quiet while you walk in GTA
   if worldDriveEnded then pcall(worldDriveEnded, d) end   -- v2.4: the parking pad under the car (T3, below)
@@ -2677,6 +2831,8 @@ local function driveUpdate(dtReal, dtSim, dtRaw)
     d.vsT = t
     pcall(function() veh:queueLuaCommand(VEH_STATE) end)
   end
+  local okD, errD = pcall(dents.tick, d, veh)   -- v2.5 (D2)
+  if not okD and not d.dentErr then d.dentErr = true; logE('dents: ' .. tostring(errD)) end
   if t - d.logT >= 10 then
     local vs = d.vs or {}
     local la = {}
@@ -2689,6 +2845,10 @@ local function driveUpdate(dtReal, dtSim, dtRaw)
       tostring(d.keyStr or ''):sub(1, 80), d.inp.thr, d.inp.brk, d.inp.str, d.inp.hb,
       tostring(vs.thrIn), tostring(vs.thr), tostring(vs.brkIn), tostring(vs.strIn), tostring(vs.cluIn), tostring(vs.pbIn), tostring(vs.gear), tostring(vs.rpm),
       tostring(vs.ws), tostring(vs.ign), tostring(vs.eng), tostring(vs.gbm), tostring(vs.li), d.velApi and 'getVelocity' or 'from positions'))
+    if (d.dentMsgs or 0) > 0 then
+      logI(string.format('dents: %d messages to GTA (%.1f KB) in %.0f s', d.dentMsgs, (d.dentBytes or 0) / 1024, t - d.logT))
+      d.dentMsgs, d.dentBytes = 0, 0
+    end
     d.poses, d.applied, d.msgs, d.acts, d.logT = 0, 0, 0, 0, t
   end
 end
@@ -2710,7 +2870,7 @@ local function driveInput(str)
   if ps and ps ~= '' then
     local v = {}
     for x in (ps .. ','):gmatch('([^,]*),') do v[#v + 1] = tonumber(x) or 0 end
-    d.pad = { v[1] or 0, v[2] or 0, v[3] or 0, v[4] or 0, v[5] or 0, v[6] or 0, btn = math.floor(v[7] or 0) }
+    d.pad = { v[1] or 0, v[2] or 0, v[3] or 0, v[4] or 0, v[5] or 0, v[6] or 0, btn = math.floor(v[7] or 0), pm = math.floor(v[8] or 0) }
     -- buttons seen since the last BeamNG frame (a tap shorter than a frame still counts)
     if d.pad.btn > 0 then
       d.tapBtn = d.tapBtn or {}
@@ -2900,6 +3060,8 @@ handlers.drive_start = function(m)
   local sndMode = (m.snd == false or m.snd == 0) and 0 or (tonumber(m.snd) == 2 and 2 or 1)
   local okS, woke = pcall(driveSettings, true, sndMode, m.bgf, m.sq)
   if not okS then logE('settings: ' .. tostring(woke)) elseif woke then drive.okMsg.sw = 1 end
+  pcall(grav.on, m.grav)   -- v2.5
+  pcall(dents.start, drive, m.dz)   -- v2.5 (D2)
   driveActive = true
   send(drive.okMsg)
   logI(string.format('drive: GTA drives %s now: %d wheels (%s), wheel turn from %s; wheel data keys: %s', tostring(vehicle), #wl,
@@ -3050,6 +3212,7 @@ local SURF_COLOR = {
   GRAVEL = '0.52 0.5 0.46 1', GRAVEL_WET = '0.4 0.38 0.35 1', GRASS = '0.25 0.5 0.18 1', SAND = '0.8 0.7 0.45 1', MUD = '0.3 0.22 0.14 1',
   ROCK = '0.42 0.42 0.44 1', ICE = '0.8 0.9 1 1', SNOW = '0.95 0.95 0.97 1', METAL = '0.5 0.56 0.62 1', METAL_TREAD = '0.45 0.5 0.55 1',
   WOOD = '0.55 0.36 0.2 1', RUMBLE_STRIP = '0.7 0.2 0.2 1', COBBLESTONE = '0.46 0.41 0.36 1', SLIPPERY = '0.1 0.1 0.3 1', PLASTIC = '0.7 0.7 0.75 1',
+  WALL = '0.62 0.6 0.56 1', PROP = '0.85 0.55 0.15 1',   -- v2.5: GTA's walls and barriers, solid props
 }
 
 -- v2.41: GTA's concrete (sidewalks, car parks) had no BeamNG ground model: it drove and looked like asphalt. BeamNG
@@ -3206,8 +3369,63 @@ local function makeProcMesh(name, origin, meshList)
   return obj
 end
 
--- a tile message -> mesh: z = heights in cm above z0 (n x n points, step st, row by row along +y), s = surfaces
--- (palette), m = one base-36 character per cell (palette index), cells row by row
+-- v2.5: boxes (GTA's walls, barriers, pillars; solid props) as one sub-mesh: each box = centre x y, bottom, top (relative
+-- to the mesh's origin, at the centre), along x y (unit), length, thickness, rise per metre along it (the ground's slope:
+-- bottom and top follow it); faces outward, counter-clockwise from outside, no bottom.
+-- v2.52: corners cut at 45 degrees (BeamNG's developers: cars catch on walls' 90 degree edges), and joined (overlap = true:
+-- walls, whose pieces meet end to end) each piece goes on past its ends by its cut, so the long faces run on without a gap
+world.boxMesh = function(list, material, overlap)   -- (a field of world: Lua's 200-locals limit)
+  local verts, uvs, normals, faces = {}, {}, {}, {}
+  local function addFace(nrm, pts, w, h)
+    local v0 = #verts
+    local ni = #normals
+    normals[ni + 1] = nrm
+    for c = 1, #pts do verts[#verts + 1] = pts[c] end
+    if #pts == 4 then
+      uvs[v0 + 1] = { u = 0, v = 0 }; uvs[v0 + 2] = { u = w, v = 0 }; uvs[v0 + 3] = { u = w, v = h }; uvs[v0 + 4] = { u = 0, v = h }
+    else
+      for c = 1, #pts do uvs[v0 + c] = { u = pts[c].x * 0.5, v = pts[c].y * 0.5 } end
+    end
+    for t = 2, #pts - 1 do
+      local a, b, c = v0, v0 + t - 1, v0 + t
+      if cfg.flipWinding then b, c = c, b end
+      faces[#faces + 1] = { v = a, n = ni, u = a }
+      faces[#faces + 1] = { v = b, n = ni, u = b }
+      faces[#faces + 1] = { v = c, n = ni, u = c }
+    end
+  end
+  for q = 1, #list - 8, 9 do
+    local cx, cy, z0, z1 = tonumber(list[q]), tonumber(list[q + 1]), tonumber(list[q + 2]), tonumber(list[q + 3])
+    local dx, dy, len, th = tonumber(list[q + 4]), tonumber(list[q + 5]), tonumber(list[q + 6]), tonumber(list[q + 7])
+    local gs = math.max(-2, math.min(2, tonumber(list[q + 8]) or 0))
+    if cx and cy and z0 and z1 and dx and dy and len and th and z1 > z0 and len > 0 and th > 0 then
+      local nx, ny = -dy, dx
+      local cut = math.min(0.15, th * 0.45, len * 0.2)
+      local hl, ht = len * 0.5 + (overlap and cut or 0), th * 0.5
+      -- the outline, counter-clockwise from above: (along, across)
+      local o = { { hl, -ht + cut }, { hl, ht - cut }, { hl - cut, ht }, { -hl + cut, ht }, { -hl, ht - cut }, { -hl, -ht + cut }, { -hl + cut, -ht }, { hl - cut, -ht } }
+      local function P(sa, sb, z) return { x = cx + dx * sa + nx * sb, y = cy + dy * sa + ny * sb, z = z + gs * sa } end
+      for k = 1, 8 do
+        local A, B = o[k], o[k % 8 + 1]
+        local ea, eb = B[1] - A[1], B[2] - A[2]
+        local el = math.sqrt(ea * ea + eb * eb)
+        if el > 1e-4 then
+          -- outward normal of the edge (the outline goes counter-clockwise): (eb, -ea) in (along, across)
+          local na, nb = eb / el, -ea / el
+          addFace({ x = dx * na + nx * nb, y = dy * na + ny * nb, z = 0 }, { P(A[1], A[2], z0), P(B[1], B[2], z0), P(B[1], B[2], z1), P(A[1], A[2], z1) }, el * 0.5, (z1 - z0) * 0.5)
+        end
+      end
+      local top = {}
+      for k = 1, 8 do top[k] = P(o[k][1], o[k][2], z1) end
+      addFace({ x = 0, y = 0, z = 1 }, top)
+    end
+  end
+  if #faces == 0 then return nil, 0 end
+  return { verts = verts, uvs = uvs, normals = normals, faces = faces, material = material }, #faces / 3
+end
+
+-- a tile message -> mesh: z = heights above z0 in units of zs m (v2.52: mm; cm before) (n x n points, step st, row by row along +y), s = surfaces
+-- (palette), m = one base-36 character per cell (palette index), cells row by row; v2.5: w = its walls (boxes)
 buildTileMsg = function(m)
   local t0 = now()
   local id = tostring(m.id or 'tile')
@@ -3215,6 +3433,7 @@ buildTileMsg = function(m)
   local st = tonumber(m.st) or 1
   local x0, y0, z0 = tonumber(m.x0), tonumber(m.y0), tonumber(m.z0)
   local z = m.z
+  local zs = tonumber(m.zs) or 0.01   -- v2.52: GTA 2.52 sends mm (2.51: cm)
   if n < 2 or n > 129 or not (x0 and y0 and z0) or type(z) ~= 'table' or #z < n * n then return false, 'bad tile (n ' .. tostring(n) .. ', ' .. tostring(type(z) == 'table' and #z or 'no') .. ' heights)' end
   local pal, palLook = {}, {}
   for i, s in ipairs(type(m.s) == 'table' and m.s or { 'ASPHALT' }) do
@@ -3232,7 +3451,7 @@ buildTileMsg = function(m)
       local k = j * n + i
       local zc = tonumber(z[k + 1]) or 0
       if zc <= -999000 then missing[k] = true; zc = 0 end
-      local h = zc * 0.01
+      local h = zc * zs
       if h > zmax then zmax = h end
       verts[k + 1] = { x = i * st, y = j * st, z = h }
       uvs[k + 1] = { u = (x0 + i * st) * 0.25, v = (y0 + j * st) * 0.25 }
@@ -3242,10 +3461,42 @@ buildTileMsg = function(m)
   -- v2.42: "lf" = per cell the size of the flat cell it is part of (GTA found every point in it within a few cm of the
   -- same 2 triangles): one cell of that size is drawn as 2 triangles instead of 2 per 0.5 m cell
   local lf = type(m.lf) == 'string' and #m.lf == (n - 1) * (n - 1) and m.lf or nil
+  -- v2.51: a flat cell drawn as one whose edge points (measured for a finer neighbour, or by the next tile) aren't on its
+  -- straight edges leaves a step against that neighbour (up to WorldRefineCm, also between tiles): drawn finely instead
+  local split
+  if lf then
+    local function zz(k) if missing[k] then return nil end return verts[k + 1].z end
+    for j = 0, n - 2 do
+      for i = 0, n - 2 do
+        local c = j * (n - 1) + i
+        local sz = tonumber(lf:sub(c + 1, c + 1)) or 1
+        if sz > 1 and i % sz == 0 and j % sz == 0 and i + sz <= n - 1 and j + sz <= n - 1 then
+          local a = j * n + i
+          local A, B, C, D = zz(a), zz(a + sz), zz(a + sz * n + sz), zz(a + sz * n)
+          local bad = false
+          if A and B and C and D then
+            for t = 1, sz - 1 do
+              local f = t / sz
+              for _, q in ipairs({ { a + t, A + (B - A) * f }, { a + sz * n + t, D + (C - D) * f }, { a + t * n, A + (D - A) * f }, { a + t * n + sz, B + (C - B) * f } }) do
+                local z = zz(q[1])
+                if z and math.abs(z - q[2]) > 0.004 then bad = true end   -- v2.52: 4 mm (2.51: 1 cm)
+              end
+            end
+          end
+          if bad then
+            split = split or {}
+            for jj = j, j + sz - 1 do for ii = i, i + sz - 1 do split[jj * (n - 1) + ii] = true end end
+            world.splitCells = (world.splitCells or 0) + 1
+          end
+        end
+      end
+    end
+  end
   for j = 0, n - 2 do
     for i = 0, n - 2 do
       local c = j * (n - 1) + i
       local sz = lf and (tonumber(lf:sub(c + 1, c + 1)) or 1) or 1
+      if split and split[c] then sz = 1 end
       if sz > 1 and (i % sz ~= 0 or j % sz ~= 0 or i + sz > n - 1 or j + sz > n - 1) then
         if i % sz ~= 0 or j % sz ~= 0 then goto nextCell end
         sz = 1
@@ -3288,6 +3539,20 @@ buildTileMsg = function(m)
     tris = tris + #sub.faces / 3
     gmt[gmName] = #sub.faces / 3
   end
+  -- v2.5: GTA's walls and barriers on this tile: solid boxes
+  local nWalls = 0
+  if type(m.w) == 'table' and #m.w >= 9 then
+    local gm = resolveGround('CONCRETE|ASPHALT')
+    local wm, wt = world.boxMesh(m.w, surfMaterial(gm, 'WALL'), true)
+    if wm then
+      list[#list + 1] = wm
+      gms[#gms + 1] = 'WALL>' .. gm
+      tris = tris + wt
+      gmt['WALL'] = wt
+      nWalls = math.floor(#m.w / 9)
+      world.wallsBuilt = (world.wallsBuilt or 0) + nWalls
+    end
+  end
   removeSurface(id)
   local ok, err = pcall(function()
     if world.mode == 'split' and #list > 1 then
@@ -3320,6 +3585,896 @@ buildTileMsg = function(m)
   stats.lastBuildMs = ms
   if ms > stats.maxBuildMs then stats.maxBuildMs = ms end
   return true, ms
+end
+
+-- v2.5: GTA's props (the GTA plugin decides): "bump" = BeamNG's car hit a soft one (a lamp post, a sign, a bin: GTA knocks it
+-- over): the car loses dv m/s along its way (applyClusterVelocityScaleAdd on its reference node, the way BeamMP sets
+-- velocities: no damage); "pr" = solid props as boxes (id, x, y, bottom, top, along x y, length, thickness, slope; BeamNG
+-- world), "prm" = taken out
+world.props = { boxes = {}, bumps = 0, dvSum = 0, sent = 0, err = nil, logT = 0 }   -- (a field of world: Lua's 200-locals limit)
+handlers.bump = function(m)
+  local d = drive
+  if not d then return end
+  local veh = getPlayerVeh()
+  if not veh then return end
+  local dv = math.max(0, math.min(5, tonumber(m.dv) or 0))
+  local ok, err = pcall(function()
+    local v = veh:getVelocity()
+    local sp = math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
+    if sp < 0.5 then dv = 0; return end
+    dv = math.min(dv, sp * 0.5)
+    local k = -dv / sp
+    veh:applyClusterVelocityScaleAdd(veh:getRefNodeId(), 1, v.x * k, v.y * k, v.z * k)
+  end)
+  if not ok then
+    if not world.props.err then logE('props: a bump could not slow the car (applyClusterVelocityScaleAdd): ' .. tostring(err)) end
+    world.props.err = tostring(err)
+    return
+  end
+  world.props.bumps = world.props.bumps + 1
+  world.props.dvSum = world.props.dvSum + dv
+  if world.props.bumps <= 20 then logI(string.format('props: GTA says the car hit a soft prop (model %s): %.1f km/h lost', tostring(m.m), dv * 3.6)) end
+end
+-- v2.51: props as boxes BeamNG's car really hits ("pb"; the GTA plugin decides which): per prop its boxes (its trunk at bumper
+-- height: GTA measures it, no arms over the road) and "break" (m/s): a breakaway one (lamp post, sign, traffic light, fence)
+-- goes when BeamNG's car has lost that much speed against it since it touched it (the car is dented and slowed and drives on),
+-- and GTA knocks the prop over ("pbk"); 0 = a solid one (it stays). A box that would appear inside the car waits until the car
+-- is clear of it. "prm" = taken out.
+world.props.want, world.props.breaks, world.props.waits = {}, 0, 0
+handlers.pb = function(m)
+  if type(m.p) ~= 'table' then return end
+  local L, q = m.p, 1
+  while q + 2 <= #L do
+    local id, brk, n = math.floor(tonumber(L[q]) or 0), tonumber(L[q + 1]) or 0, math.floor(tonumber(L[q + 2]) or 0)
+    if n < 1 or n > 8 or q + 2 + n * 8 > #L then logE('props: a "pb" message not understood'); break end
+    local bx = {}
+    for b = 0, n - 1 do
+      local o, t = q + 3 + b * 8, {}
+      for k = 0, 7 do t[k + 1] = tonumber(L[o + k]) end
+      if t[1] and t[2] and t[3] and t[4] and t[5] and t[6] and t[7] and t[8] and t[4] > t[3] and t[7] > 0 and t[8] > 0 then bx[#bx + 1] = t end
+    end
+    q = q + 3 + n * 8
+    if #bx > 0 then world.props.want['gtap_' .. id] = { id = id, brk = math.max(0, brk), bx = bx } end
+  end
+end
+-- the car's own box (from its nodes, in its frame: right = forward x up; once per drive)
+world.props.carExt = function(veh)
+  local P = world.props
+  if P.ext and P.extVeh == veh then return P.ext end
+  local vd = core_vehicle_manager.getPlayerVehicleData()
+  local nodes = vd and vd.vdata and vd.vdata.nodes
+  if type(nodes) ~= 'table' then return nil end
+  local f = norm(v3(veh:getDirectionVector()))
+  local u0 = v3(veh:getDirectionVectorUp())
+  local du = dot(f, u0)
+  local u = norm({ u0[1] - f[1] * du, u0[2] - f[2] * du, u0[3] - f[3] * du })
+  local r = cross(f, u)
+  local lo, hi, cnt = { 1e9, 1e9, 1e9 }, { -1e9, -1e9, -1e9 }, 0
+  for _, nd in pairs(nodes) do
+    if type(nd) == 'table' and type(nd.cid) == 'number' then
+      local ok, p = pcall(function() return v3(veh:getNodePosition(nd.cid)) end)
+      if ok and p then
+        local l = { dot(p, r), dot(p, f), dot(p, u) }
+        for k = 1, 3 do lo[k] = math.min(lo[k], l[k]); hi[k] = math.max(hi[k], l[k]) end
+        cnt = cnt + 1
+      end
+    end
+  end
+  if cnt < 4 then return nil end
+  P.ext = { c = { (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2, (lo[3] + hi[3]) / 2 }, h = { (hi[1] - lo[1]) / 2, (hi[2] - lo[2]) / 2, (hi[3] - lo[3]) / 2 } }
+  P.extVeh = veh
+  logI(string.format('props: the car is %.2f x %.2f x %.2f m (its %d nodes): prop boxes are checked against that', hi[1] - lo[1], hi[2] - lo[2], hi[3] - lo[3], cnt))
+  return P.ext
+end
+-- the car's box (cb: centre c, right r, forward f, half sizes h) against a prop box t (x, y, bottom, top, along x y, length,
+-- thickness), seen from above and in height; m = margin (m)
+world.props.overlap = function(cb, t, m)
+  if t[4] < cb.c[3] - cb.h[3] - m or t[3] > cb.c[3] + cb.h[3] + m then return false end
+  local function flat(v) local l = math.sqrt(v[1] * v[1] + v[2] * v[2]) if l < 1e-6 then return 1, 0 end return v[1] / l, v[2] / l end
+  local rx, ry = flat(cb.r)
+  local fx, fy = flat(cb.f)
+  local dxc, dyc = t[1] - cb.c[1], t[2] - cb.c[2]
+  for _, a in ipairs({ { rx, ry }, { fx, fy }, { t[5], t[6] }, { -t[6], t[5] } }) do
+    local rc = cb.h[1] * math.abs(rx * a[1] + ry * a[2]) + cb.h[2] * math.abs(fx * a[1] + fy * a[2])
+    local rb = t[7] * 0.5 * math.abs(t[5] * a[1] + t[6] * a[2]) + t[8] * 0.5 * math.abs(-t[6] * a[1] + t[5] * a[2])
+    if math.abs(dxc * a[1] + dyc * a[2]) > rc + rb + m then return false end
+  end
+  return true
+end
+world.props.build = function(sid, w)
+  local P = world.props
+  local mat = surfMaterial(resolveGround('METAL|ASPHALT'), 'PROP')
+  local o, list = w.bx[1], {}
+  for _, b in ipairs(w.bx) do
+    for _, v in ipairs({ b[1] - o[1], b[2] - o[2], b[3] - o[3], b[4] - o[3], b[5], b[6], b[7], b[8], 0 }) do list[#list + 1] = v end
+  end
+  local mesh = world.boxMesh(list, mat)
+  if not mesh then return end
+  removeSurface(sid)
+  local ok, obj = pcall(makeProcMesh, sid, { o[1], o[2], o[3] }, { mesh })
+  if not ok then logE('props: box ' .. sid .. ' failed: ' .. tostring(obj)); return end
+  surfaces[sid] = obj
+  surfaceTris[sid] = 10 * #w.bx
+  P.boxes[sid] = { id = w.id, brk = w.brk, bx = w.bx }
+  P.sent = P.sent + 1
+  collisionDirty = true
+  if P.sent <= 20 then
+    logI(string.format('props: %s prop %s is %d box(es) here (the first %.2f x %.2f x %.1f m)', w.brk > 0 and string.format('breakaway (%.1f m/s)', w.brk) or 'solid', sid,
+      #w.bx, o[7], o[8], o[4] - o[3]))
+  end
+end
+world.props.breakBox = function(sid, b, vel, lost)
+  local P = world.props
+  removeSurface(sid)
+  P.boxes[sid] = nil
+  world.urgent = true   -- (collision reloaded this frame)
+  P.breaks = P.breaks + 1
+  local d = drive
+  if d then
+    pcall(function() udp:sendto(string.format('{"t":"pbk","id":%d,"vx":%.3f,"vy":%.3f,"vz":%.3f,"dv":%.3f}', b.id, vel[1], vel[2], vel[3], lost), d.ip, d.port) end)
+  end
+  if P.breaks <= 30 then
+    logI(string.format('props: the car broke prop %s: it lost %.1f km/h against it (breaks at %.1f): its box is gone, GTA knocks it over', sid, lost * 3.6, b.brk * 3.6))
+  end
+end
+-- every frame while GTA drives: new boxes in (not inside the car), breakaway ones the car pushes on
+world.props.tick = function()
+  local P, d = world.props, drive
+  if not d or not world.ox or (next(P.want) == nil and next(P.boxes) == nil) then return end
+  local veh = d.veh or getPlayerVeh()
+  if not veh then return end
+  local ext = P.carExt(veh)
+  if not ext then return end
+  local p = v3(veh:getPosition())
+  local f = norm(v3(veh:getDirectionVector()))
+  local u0 = v3(veh:getDirectionVectorUp())
+  local du = dot(f, u0)
+  local u = norm({ u0[1] - f[1] * du, u0[2] - f[2] * du, u0[3] - f[3] * du })
+  local r = cross(f, u)
+  local c = ext.c
+  local cb = { c = { p[1] + r[1] * c[1] + f[1] * c[2] + u[1] * c[3], p[2] + r[2] * c[1] + f[2] * c[2] + u[2] * c[3], p[3] + r[3] * c[1] + f[3] * c[2] + u[3] * c[3] },
+               r = r, f = f, h = ext.h }
+  local vel = v3(veh:getVelocity())
+  local built = 0
+  for sid, w in pairs(P.want) do
+    if built >= 8 then break end   -- (8 a frame: many at once at a drive start)
+    local inside = false
+    for _, b in ipairs(w.bx) do if P.overlap(cb, b, 0.3) then inside = true; break end end
+    if inside then
+      if not w.waited then w.waited = true; P.waits = P.waits + 1 end
+    else
+      P.want[sid] = nil
+      P.build(sid, w)
+      built = built + 1
+    end
+  end
+  local t = now()
+  for sid, b in pairs(P.boxes) do
+    if b.brk and b.brk > 0 then
+      local touch = false
+      local b1 = b.bx[1]
+      if (b1[1] - cb.c[1]) ^ 2 + (b1[2] - cb.c[2]) ^ 2 < 144 then
+        for _, bb in ipairs(b.bx) do if P.overlap(cb, bb, 0.05) then touch = true; break end end
+      end
+      if touch then
+        if not b.t0 then
+          b.t0, b.vp, b.tp, b.lost = t, vel, t, 0
+          local sp = math.sqrt(dot(vel, vel))
+          b.dir = sp > 0.3 and { vel[1] / sp, vel[2] / sp, vel[3] / sp } or nil
+        end
+        -- v2.52: only what the box takes counts: speed lost faster than brakes can (12 m/s2); 2.51 counted braking next to a post
+        local dt = math.max(0, t - b.tp)
+        if b.dir and dt > 0 then b.lost = b.lost + math.max(0, dot({ b.vp[1] - vel[1], b.vp[2] - vel[2], b.vp[3] - vel[3] }, b.dir) - 12 * dt) end
+        b.vp, b.tp = vel, t
+        if b.lost >= b.brk then P.breakBox(sid, b, vel, b.lost) end
+      else
+        b.t0, b.vp, b.dir, b.lost = nil, nil, nil, nil
+      end
+    end
+  end
+end
+-- all of them out (the drive ended without GTA's "prm": GTA closed; a new session with another origin)
+world.props.clear = function(why)
+  local n = 0
+  for id in pairs(world.props.boxes) do
+    removeSurface(id)
+    n = n + 1
+  end
+  world.props.boxes, world.props.want, world.props.ext = {}, {}, nil
+  if n > 0 then
+    collisionDirty = true
+    logI('props: ' .. n .. ' prop boxes taken out (' .. tostring(why) .. ')')
+  end
+end
+handlers.prm = function(m)
+  for _, i in ipairs(type(m.ids) == 'table' and m.ids or {}) do
+    local id = 'gtap_' .. tostring(math.floor(tonumber(i) or 0))
+    pcall(world.phys.remove, math.floor(tonumber(i) or 0), 'GTA took it out')
+    world.props.want[id] = nil
+    if world.props.boxes[id] then
+      removeSurface(id)
+      world.props.boxes[id] = nil
+    end
+  end
+end
+-- v2.52: physics props (your choice): GTA's props as small weighted boxes BeamNG simulates. The mod's own jbeam "vehicle"
+-- (vehicles/gtab_prop: 8 corner nodes, beams, triangles; no 3D model, drawn as yellow lines): size and mass from GTA ($gx $gy
+-- $gz $gm); posts are tied to 4 fixed nodes in the ground by beams that snap at $gb newtons (part gtab_prop_anchor). GTA's
+-- prop copies the box: "pp" = per prop how far its middle moved and how it turned since it settled. "pq" = spawn these
+-- (id, anchored, mass, strength, bottom centre x y z, rotation x y z w, size x y z; BeamNG world), "prm" = take out.
+-- How BeamNG places a spawned vehicle is not documented: the first spawns are measured, and a fixed offset or a mirrored
+-- rotation is learned and corrected; when spawning can't work the GTA plugin is told ("pqs") and uses fixed boxes.
+world.phys = { list = {}, want = {}, ok = nil, how = nil, comp = nil, conj = false, fails = 0, spawned = 0, spawnMs = 0, spawnMax = 0,
+               spawnT = 0, poses = 0, knocked = 0, logT = 0, noDraw = false, tries = 0 }
+handlers.pq = function(m)
+  local P = world.phys
+  if type(m.p) ~= 'table' then return end
+  local L = m.p
+  for q = 1, #L - 13, 14 do
+    local v = {}
+    for k = 0, 13 do v[k + 1] = tonumber(L[q + k]) end
+    local id = v[1] and math.floor(v[1])
+    if id and v[14] and not P.list[id] then
+      P.want[id] = { id = id, anchor = v[2] == 1, mass = math.max(4, math.min(5000, v[3])), brk = math.max(1, v[4]), pos = { v[5], v[6], v[7] },
+                     q = { v[8], v[9], v[10], v[11] }, size = { math.max(0.12, v[12]), math.max(0.12, v[13]), math.max(0.12, v[14]) }, t = now() }
+    end
+  end
+  if P.ok == false then pcall(function() udp:sendto('{"t":"pqs","ok":0,"why":' .. jsonEncode(P.why or 'spawning failed') .. '}', drive.ip, drive.port) end) end
+end
+-- quaternion helpers ({x, y, z, w}) and a box frame from its nodes
+world.phys.qrot = function(q, v)
+  local t = cross({ q[1], q[2], q[3] }, v)
+  t = { 2 * t[1], 2 * t[2], 2 * t[3] }
+  local c = cross({ q[1], q[2], q[3] }, t)
+  return { v[1] + q[4] * t[1] + c[1], v[2] + q[4] * t[2] + c[2], v[3] + q[4] * t[3] + c[3] }
+end
+world.phys.qOfFrame = function(r, f, u)   -- columns: local x, y, z in world
+  local m00, m01, m02, m10, m11, m12, m20, m21, m22 = r[1], f[1], u[1], r[2], f[2], u[2], r[3], f[3], u[3]
+  local tr = m00 + m11 + m22
+  if tr > 0 then local s = math.sqrt(tr + 1) * 2; return { (m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25 * s }
+  elseif m00 > m11 and m00 > m22 then local s = math.sqrt(1 + m00 - m11 - m22) * 2; return { 0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s }
+  elseif m11 > m22 then local s = math.sqrt(1 + m11 - m00 - m22) * 2; return { (m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s }
+  else local s = math.sqrt(1 + m22 - m00 - m11) * 2; return { (m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s } end
+end
+-- the box's corners (world): g0..g7 = (-x,-y,0) (+x,-y,0) (-x,+y,0) (+x,+y,0), then the same at the top
+world.phys.corners = function(e)
+  local veh = e.veh
+  local ok, pos = pcall(function() return v3(veh:getPosition()) end)
+  if not ok or not pos then return nil end
+  local c = {}
+  for k = 1, 8 do
+    local ok2, p = pcall(function() return v3(veh:getNodePosition(e.cids[k])) end)
+    if not ok2 or not p then return nil end
+    c[k] = { pos[1] + p[1], pos[2] + p[2], pos[3] + p[3] }
+  end
+  return c
+end
+world.phys.frame = function(c)
+  local function sub(a, b) return { a[1] - b[1], a[2] - b[2], a[3] - b[3] } end
+  local x = norm(sub(c[2], c[1]))
+  local y0 = sub(c[3], c[1])
+  local z = norm(cross(x, y0))
+  local y = cross(z, x)
+  local m = { 0, 0, 0 }
+  for k = 1, 8 do for i = 1, 3 do m[i] = m[i] + c[k][i] / 8 end end
+  return m, x, y, z
+end
+world.phys.spawnOne = function(w)
+  local P = world.phys
+  local q = P.conj and { -w.q[1], -w.q[2], -w.q[3], w.q[4] } or w.q
+  local pos = { w.pos[1], w.pos[2], w.pos[3] + 0.05 }   -- (5 cm up: it settles on GTA's ground; never starts inside it)
+  if P.comp then
+    -- a learned placement offset (in the box's frame, per metre of its size): taken back
+    local o = P.qrot(w.q, { P.comp[1] * w.size[1], P.comp[2] * w.size[2], P.comp[3] * w.size[3] })
+    pos = { pos[1] - o[1], pos[2] - o[2], pos[3] - o[3] }
+  end
+  local cfgT = { format = 2, model = 'gtab_prop', parts = w.anchor and { gtab_prop_anchor = 'gtab_prop_anchor' } or {},
+                 vars = { ['$gx'] = w.size[1], ['$gy'] = w.size[2], ['$gz'] = w.size[3], ['$gm'] = w.mass, ['$gb'] = w.brk } }
+  local opts = { config = cfgT, pos = vec3(pos[1], pos[2], pos[3]), rot = quat(q[1], q[2], q[3], q[4]), autoEnterVehicle = false, cling = false,
+                 vehicleName = 'gtab_prop_' .. w.id }
+  local car = drive and drive.veh or getPlayerVeh()
+  local t0 = os.clock()
+  local veh, err, how
+  for _, way in ipairs({ P.how or 'core_vehicles', 'spawn' }) do
+    if not veh then
+      local ok, v = pcall(function()
+        if way == 'core_vehicles' then return core_vehicles.spawnNewVehicle('gtab_prop', opts) end
+        return spawn.spawnVehicle('gtab_prop', serialize(cfgT), opts.pos, opts.rot, { autoEnterVehicle = false, cling = false, vehicleName = opts.vehicleName })
+      end)
+      if ok and v then veh, how = v, way elseif not ok then err = (err and (err .. '; ') or '') .. way .. ': ' .. tostring(v) end
+    end
+  end
+  local ms = (os.clock() - t0) * 1000
+  P.spawnMs, P.spawnMax = P.spawnMs + ms, math.max(P.spawnMax, ms)
+  -- (BeamNG's player car stays the one GTA drives)
+  pcall(function() if car and be:getPlayerVehicle(0):getID() ~= car:getID() then be:enterVehicle(0, car) end end)
+  if not veh then return nil, err or 'no vehicle came back' end
+  P.how = how
+  P.spawned = P.spawned + 1
+  local vid
+  pcall(function() vid = veh:getID() end)
+  return { id = w.id, w = w, veh = veh, vid = vid, t0 = now(), ms = ms }
+end
+world.phys.remove = function(id, why)
+  local P = world.phys
+  P.want[id] = nil
+  local e = P.list[id]
+  if not e then return end
+  P.list[id] = nil
+  pcall(function() e.veh:delete() end)
+end
+world.phys.clear = function(why)
+  local P = world.phys
+  local n = 0
+  for id in pairs(P.list) do P.remove(id, why); n = n + 1 end
+  P.want = {}
+  if n > 0 then logI('props: ' .. n .. ' physics props taken out (' .. tostring(why) .. ')') end
+end
+world.phys.fail = function(why, id)
+  local P = world.phys
+  P.fails = P.fails + 1
+  if id then pcall(function() udp:sendto(string.format('{"t":"pqf","id":%d,"why":%s}', id, jsonEncode(why)), drive.ip, drive.port) end) end
+  if P.ok == nil and P.fails >= 3 then
+    P.ok, P.why = false, why
+    logE('props: physics props don\'t work here (' .. tostring(why) .. '): GTA uses fixed boxes instead')
+    pcall(function() udp:sendto('{"t":"pqs","ok":0,"why":' .. jsonEncode(why) .. '}', drive.ip, drive.port) end)
+    P.clear('physics props off')
+  end
+end
+-- a spawned box: its nodes found, its size and place checked (and the placement learned from the first ones)
+world.phys.ready = function(e)
+  local P = world.phys
+  if not e.cids then
+    local cids = {}
+    pcall(function()
+      local vd = core_vehicle_manager.getVehicleData(e.vid)
+      for _, nd in pairs(vd and vd.vdata and vd.vdata.nodes or {}) do
+        local k = type(nd) == 'table' and type(nd.name) == 'string' and tonumber(nd.name:match('^g(%d)$'))
+        if k then cids[k + 1] = nd.cid end
+      end
+    end)
+    if #cids < 8 then cids = { 0, 1, 2, 3, 4, 5, 6, 7 } end
+    e.cids = cids
+  end
+  local c = P.corners(e)
+  if not c then return false end
+  local w = e.w
+  local function dist(a, b) return math.sqrt((a[1] - b[1]) ^ 2 + (a[2] - b[2]) ^ 2 + (a[3] - b[3]) ^ 2) end
+  local sx, sy, sz = dist(c[1], c[2]), dist(c[1], c[3]), dist(c[1], c[5])
+  if sx < 0.01 and sy < 0.01 then return false end   -- (its nodes aren't there yet)
+  if math.abs(sx - w.size[1]) > 0.03 + 0.1 * w.size[1] or math.abs(sy - w.size[2]) > 0.03 + 0.1 * w.size[2] or math.abs(sz - w.size[3]) > 0.03 + 0.1 * w.size[3] then
+    return nil, string.format('its size came out %.2f x %.2f x %.2f m, not %.2f x %.2f x %.2f (the size wasn\'t passed: jbeam variables)', sx, sy, sz, w.size[1], w.size[2], w.size[3])
+  end
+  local m, x = P.frame(c)
+  -- where its bottom is vs where it was asked to be (the box's frame)
+  local b = { (c[1][1] + c[2][1] + c[3][1] + c[4][1]) / 4, (c[1][2] + c[2][2] + c[3][2] + c[4][2]) / 4, (c[1][3] + c[2][3] + c[3][3] + c[4][3]) / 4 }
+  local want = { w.pos[1], w.pos[2], w.pos[3] + 0.05 }
+  local off = { b[1] - want[1], b[2] - want[2], b[3] - want[3] }
+  local wx = P.qrot(w.q, { 1, 0, 0 })
+  local align = math.abs(dot(x, wx))
+  if align < 0.97 then
+    if not P.conj and P.ok == nil then
+      P.conj = true
+      logI('props: spawned boxes come out turned the other way: rotations mirrored from now on')
+      return nil, 'turned wrong', true
+    end
+    return nil, string.format('turned wrong (%.2f)', align)
+  end
+  if math.sqrt(dot(off, off)) > 0.03 then
+    if not P.comp and P.ok == nil then
+      local qi = { -w.q[1], -w.q[2], -w.q[3], w.q[4] }
+      local lo = P.qrot(qi, off)
+      P.comp = { lo[1] / w.size[1], lo[2] / w.size[2], lo[3] / w.size[3] }
+      logI(string.format('props: BeamNG puts a spawned box %.2f m from where it was asked (%.2f %.2f %.2f in its frame): taken back from now on', math.sqrt(dot(off, off)), lo[1], lo[2], lo[3]))
+      return nil, 'placed off', true
+    end
+    if math.sqrt(dot(off, off)) > 0.3 then return nil, string.format('placed %.2f m off', math.sqrt(dot(off, off))) end
+  end
+  return true
+end
+world.phys.tick = function()
+  local P, d = world.phys, drive
+  if not d or not world.ox then return end
+  if next(P.want) == nil and next(P.list) == nil then return end
+  local t = now()
+  -- one spawn a frame, 4 a second at most (each one may hitch BeamNG: the log says how long), nearest first, never inside the car
+  if P.ok ~= false and t - P.spawnT > 0.25 then
+    local car = d.veh or getPlayerVeh()
+    local cp = car and v3(car:getPosition())
+    local list = {}
+    for id, w in pairs(P.want) do
+      local dd = cp and ((w.pos[1] - cp[1]) ^ 2 + (w.pos[2] - cp[2]) ^ 2) or 0
+      local r = math.max(w.size[1], w.size[2]) * 0.5 + 2.6
+      if dd > r * r then list[#list + 1] = { w, dd } end
+    end
+    table.sort(list, function(a, b) return a[2] < b[2] end)
+    -- (only where GTA's ground is in BeamNG's collision already: else a loose one would fall through)
+    local best
+    for _, it in ipairs(list) do
+      local w = it[1]
+      local okR, h = pcall(function() return castRayStatic(vec3(w.pos[1], w.pos[2], w.pos[3] + 1.0), vec3(0, 0, -1), 3) end)
+      if okR and type(h) == 'number' and h < 2.5 then best = w; break end
+    end
+    if best then
+      P.want[best.id] = nil
+      P.spawnT = t
+      local e, err = P.spawnOne(best)
+      if e then P.list[best.id] = e else P.fail(tostring(err), best.id) end
+    end
+  end
+  local out = {}
+  for id, e in pairs(P.list) do
+    if not e.ok then
+      local r, why, learned = P.ready(e)
+      if learned then
+        P.remove(id, why)
+        P.want[id] = e.w   -- (spawned again, placed the learned way)
+      elseif r then
+        e.ok, e.readyT = true, t
+        if P.ok == nil then
+          P.ok = true
+          logI(string.format('props: physics props work (%s; the first spawn took %.0f ms)', tostring(P.how), e.ms))
+          pcall(function() udp:sendto('{"t":"pqs","ok":1}', d.ip, d.port) end)
+        end
+      elseif r == nil or t - e.t0 > 3 then
+        why = why or 'its nodes never came'
+        P.remove(id, why)
+        P.fail(why, id)
+        if P.fails <= 5 then logE('props: physics prop ' .. id .. ' failed: ' .. tostring(why)) end
+      end
+    elseif not e.m0 then
+      -- settled (0.4 s after it came): this is where GTA's prop is
+      if t - e.readyT > 0.4 then
+        local c = P.corners(e)
+        if c then
+          local m, x, y, z = P.frame(c)
+          e.m0, e.q0i = m, P.qOfFrame(x, y, z)
+          e.zlo0 = math.min(c[1][3], c[2][3], c[3][3], c[4][3], c[5][3], c[6][3], c[7][3], c[8][3])   -- (its lowest corner: a fall goes by that)
+          e.q0i = { -e.q0i[1], -e.q0i[2], -e.q0i[3], e.q0i[4] }
+        end
+      end
+    else
+      local c = P.corners(e)
+      if c then
+        local m, x, y, z = P.frame(c)
+        local qn = P.qOfFrame(x, y, z)
+        -- turned since it settled: qn * inverse(q0)
+        local a, b = qn, e.q0i
+        local qr = { a[4] * b[1] + a[1] * b[4] + a[2] * b[3] - a[3] * b[2], a[4] * b[2] - a[1] * b[3] + a[2] * b[4] + a[3] * b[1],
+                     a[4] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[4], a[4] * b[4] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3] }
+        if qr[4] < 0 then qr = { -qr[1], -qr[2], -qr[3], -qr[4] } end
+        local dm = { m[1] - e.m0[1], m[2] - e.m0[2], m[3] - e.m0[3] }
+        local moved = math.sqrt(dot(dm, dm))
+        local zlo = math.min(c[1][3], c[2][3], c[3][3], c[4][3], c[5][3], c[6][3], c[7][3], c[8][3])
+        if zlo < (e.zlo0 or zlo) - 1.5 then
+          -- fell through the ground (a gap in GTA's): out, and GTA's prop goes back where it stood
+          P.remove(id, 'fell through the ground')
+          pcall(function() udp:sendto(string.format('{"t":"pqf","id":%d,"why":"fell through the ground"}', id), d.ip, d.port) end)
+          if P.knocked <= 30 then logI('props: physics prop ' .. id .. ' fell through GTA\'s ground: taken out') end
+          goto nextProp
+        end
+        local ang = 2 * math.acos(math.min(1, qr[4]))
+        if not e.moving and (moved > 0.02 or ang > 0.017) then e.moving = true end
+        if e.moving then
+          local lm, lq = e.lastM or { 0, 0, 0 }, e.lastQ or { 0, 0, 0, 1 }
+          local dd = (dm[1] - lm[1]) ^ 2 + (dm[2] - lm[2]) ^ 2 + (dm[3] - lm[3]) ^ 2
+          local dq = math.abs(qr[1] * lq[1] + qr[2] * lq[2] + qr[3] * lq[3] + qr[4] * lq[4])
+          if (dd > 0.005 ^ 2 or dq < 0.99999) and t - (e.sentT or 0) > 0.033 then
+            e.lastM, e.lastQ, e.sentT = dm, qr, t
+            out[#out + 1] = string.format('%d,%.3f,%.3f,%.3f,%.5f,%.5f,%.5f,%.5f', id, dm[1], dm[2], dm[3], qr[1], qr[2], qr[3], qr[4])
+          end
+        end
+        if not e.knocked and (moved > 0.15 or ang > 0.17) then
+          e.knocked = true
+          P.knocked = P.knocked + 1
+          local v = d.vel or { 0, 0, 0 }
+          local sp = math.sqrt(v[1] ^ 2 + v[2] ^ 2 + v[3] ^ 2)
+          if P.knocked <= 30 then logI(string.format('props: the car knocked %s prop %d (%.0f kg) at %.0f km/h: moved %.2f m, tilted %.0f deg', e.w.anchor and 'post' or 'loose', id, e.w.mass, sp * 3.6, moved, math.deg(ang))) end
+          pcall(function() udp:sendto(string.format('{"t":"pk","id":%d,"v":%.2f}', id, sp), d.ip, d.port) end)
+        end
+        -- drawn in BeamNG's window (it has no 3D model): its edges in yellow
+        if not P.noDraw then
+          local okD = pcall(function()
+            local col = ColorF(1, 0.75, 0.1, 1)
+            for _, ed in ipairs({ { 1, 2 }, { 2, 4 }, { 4, 3 }, { 3, 1 }, { 5, 6 }, { 6, 8 }, { 8, 7 }, { 7, 5 }, { 1, 5 }, { 2, 6 }, { 3, 7 }, { 4, 8 } }) do
+              local A, B = c[ed[1]], c[ed[2]]
+              debugDrawer:drawLine(vec3(A[1], A[2], A[3]), vec3(B[1], B[2], B[3]), col)
+            end
+          end)
+          if not okD then P.noDraw = true end
+        end
+      end
+    end
+    ::nextProp::
+  end
+  if #out > 0 then
+    P.poses = P.poses + #out
+    for k = 1, #out, 20 do
+      local part = {}
+      for j = k, math.min(#out, k + 19) do part[#part + 1] = out[j] end
+      pcall(function() udp:sendto('{"t":"pp","p":[' .. table.concat(part, ',') .. ']}', d.ip, d.port) end)
+    end
+  end
+  if t - P.logT > 10 then
+    P.logT = t
+    local n, nw = 0, 0
+    for _ in pairs(P.list) do n = n + 1 end
+    for _ in pairs(P.want) do nw = nw + 1 end
+    if n + nw + P.spawned > 0 then
+      logI(string.format('props: physics: %d here, %d waiting, %d spawned (%.0f ms each, max %.0f), %d failed, %d knocked, %d pose updates to GTA (10 s)', n, nw, P.spawned,
+        P.spawned > 0 and P.spawnMs / P.spawned or 0, P.spawnMax, P.fails, P.knocked, P.poses))
+    end
+    P.spawned, P.spawnMs, P.spawnMax, P.poses = 0, 0, 0, 0
+  end
+end
+-- v2.51: how bumpy the ride is on GTA's ground (to compare versions): jolts = the car's vertical speed changing faster than
+-- 1.5 g, counted above 50 km/h, per km
+world.feel = { n = 0, km = 0 }
+world.feel.tick = function(dtSim)
+  local d, F = drive, world.feel
+  if not d or not world.ox or type(d.vel) ~= 'table' or type(dtSim) ~= 'number' or dtSim <= 0.001 then F.vz = nil; return end
+  local v = d.vel
+  local sp = math.sqrt(v[1] * v[1] + v[2] * v[2])
+  if F.vz and sp > 14 then
+    F.km = F.km + sp * dtSim / 1000
+    local jolt = math.abs((v[3] - F.vz) / dtSim) > 14.7
+    if jolt and not F.inJolt then F.n = F.n + 1 end
+    F.inJolt = jolt
+  end
+  F.vz = v[3]
+end
+
+-- ---------------------------------------------------------------- v2.5 (D2): dents shown in GTA
+-- The car's own Lua (gtabDents, put in when the drive starts) watches its nodes: how far each one moved since the
+-- drive started, in the car's own frame (driving and turning don't count, only bending; the wheels' nodes are left
+-- out). Nodes that moved 5 mm or more (v2.53; was 1 cm) go to GTA ("dm" messages, one per range of 256 node ids)
+-- whenever they change by 2 mm or more, and one range more each time (a lost message is fixed soon). The GTA plugin bends its drawn car with
+-- them (it knows which nodes each vertex follows from the car file: the export below writes the nodes into it).
+-- A repairing teleport (your repair binding, putting the car back after a fall) takes the reference again once the
+-- car settled. UNVERIFIED in BeamNG 0.39: obj:getDirectionVector/Up in the car's Lua (else from the car's refNodes),
+-- the flexbodies' "_group_nodes" form (the export logs a sample).
+dents.WHEELS = [==[
+local function gtabWheelNodes(data)
+  -- the wheels' nodes (they turn with the wheel: nothing on the body may follow them), by id
+  local set, byName = {}, {}
+  for cid, n in pairs(data.nodes or {}) do
+    if type(n) == 'table' and n.name then byName[n.name] = n.cid or cid end
+  end
+  local function add(x)
+    if type(x) == 'number' then set[x] = true
+    elseif type(x) == 'string' and byName[x] then set[byName[x]] = true
+    elseif type(x) == 'table' and type(x.cid) == 'number' then set[x.cid] = true end
+  end
+  for _, w in pairs(data.wheels or {}) do
+    if type(w) == 'table' then
+      for k, val in pairs(w) do
+        if type(k) == 'string' and k:lower():find('node', 1, true) and k ~= 'nodeArm' then   -- (nodeArm: on the suspension)
+          if type(val) == 'table' and val.cid == nil then
+            for _, x in pairs(val) do add(x) end
+          else
+            add(val)
+          end
+        end
+      end
+    end
+  end
+  return set, byName
+end
+]==]
+
+-- in the car's Lua
+dents.VEH = dents.WHEELS .. [==[
+gtabDents = gtabDents or { errs = {} }
+local D = gtabDents
+D.ver = 1
+local function report(kind, note)
+  obj:queueGameEngineLua(string.format('if gtaBridge and gtaBridge.dentsInfo then gtaBridge.dentsInfo(%d, %d, %d, %q, %q) end', obj:getID(),
+    D.nn or -1, D.cids and #D.cids or -1, tostring(kind), tostring(note or '')))
+end
+-- the car's frame: forward, up (BeamNG's direction vectors), right = forward x up (the GTA plugin's car space)
+function D.frame()
+  local f, u
+  pcall(function() f = obj:getDirectionVector() u = obj:getDirectionVectorUp() end)
+  if not (f and u) then
+    local rn = v.data.refNodes and (v.data.refNodes[0] or v.data.refNodes[1])
+    if not rn then return nil end
+    local a, b, c = obj:getNodePosition(rn.ref), obj:getNodePosition(rn.back), obj:getNodePosition(rn.up)
+    f = { x = a.x - b.x, y = a.y - b.y, z = a.z - b.z }
+    u = { x = c.x - a.x, y = c.y - a.y, z = c.z - a.z }
+    D.frameHow = 'refNodes'
+  else
+    D.frameHow = 'getDirectionVector'
+  end
+  local fx, fy, fz = f.x, f.y, f.z
+  local l = math.sqrt(fx * fx + fy * fy + fz * fz)
+  if not (l > 1e-6) then return nil end
+  fx, fy, fz = fx / l, fy / l, fz / l
+  local ux, uy, uz = u.x, u.y, u.z
+  local dd = ux * fx + uy * fy + uz * fz
+  ux, uy, uz = ux - fx * dd, uy - fy * dd, uz - fz * dd
+  l = math.sqrt(ux * ux + uy * uy + uz * uz)
+  if not (l > 1e-6) then return nil end
+  ux, uy, uz = ux / l, uy / l, uz / l
+  return fy * uz - fz * uy, fz * ux - fx * uz, fx * uy - fy * ux, fx, fy, fz, ux, uy, uz
+end
+-- every watched node in the car's frame (relative to the car's position: a move or turn of the whole car cancels out)
+function D.read(out)
+  local rx, ry, rz, fx, fy, fz, ux, uy, uz = D.frame()
+  if not rx then return false end
+  local C = D.cids
+  for i = 1, #C do
+    local p = obj:getNodePosition(C[i])
+    local x, y, z = p.x, p.y, p.z
+    out[i * 3 - 2] = x * rx + y * ry + z * rz
+    out[i * 3 - 1] = x * fx + y * fy + z * fz
+    out[i * 3] = x * ux + y * uy + z * uz
+  end
+  return true
+end
+-- the nodes to watch: all but the wheels' (and any inside a wheel: hub, tyre), sorted by id
+function D.init()
+  local skip, byName = gtabWheelNodes(v.data)
+  local function cidOf(x) if type(x) == 'number' then return x end return byName[x] end
+  local W = {}
+  for _, w in pairs(v.data.wheels or {}) do
+    local a, b = type(w) == 'table' and cidOf(w.node1), type(w) == 'table' and cidOf(w.node2)
+    if a and b then
+      local pa, pb = obj:getNodePosition(a), obj:getNodePosition(b)
+      local ax, ay, az = pb.x - pa.x, pb.y - pa.y, pb.z - pa.z
+      local l = math.sqrt(ax * ax + ay * ay + az * az)
+      if l > 1e-4 then
+        W[#W + 1] = { x = (pa.x + pb.x) * 0.5, y = (pa.y + pb.y) * 0.5, z = (pa.z + pb.z) * 0.5, ax = ax / l, ay = ay / l, az = az / l,
+                      r = (tonumber(w.radius) or 0.35) + 0.03 }
+      end
+    end
+  end
+  local all = {}
+  D.nn = 0
+  for _, n in pairs(v.data.nodes or {}) do
+    if type(n) == 'table' and type(n.cid) == 'number' then
+      D.nn = D.nn + 1
+      if not skip[n.cid] then all[#all + 1] = n.cid end
+    end
+  end
+  table.sort(all)
+  local keep, inWheels = {}, 0
+  for _, c in ipairs(all) do
+    local p = obj:getNodePosition(c)
+    local inW = false
+    for _, w in ipairs(W) do
+      local dx, dy, dz = p.x - w.x, p.y - w.y, p.z - w.z
+      local al = dx * w.ax + dy * w.ay + dz * w.az
+      if math.abs(al) < 0.3 then
+        local qx, qy, qz = dx - al * w.ax, dy - al * w.ay, dz - al * w.az
+        if qx * qx + qy * qy + qz * qz < w.r * w.r then inW = true break end
+      end
+    end
+    if inW then inWheels = inWheels + 1 else keep[#keep + 1] = c end
+  end
+  D.cids = keep
+  D.blk, D.first, D.blocks = {}, {}, {}
+  for i, c in ipairs(keep) do
+    local b = math.floor(c / 256)
+    D.blk[i] = b
+    if not D.first[b] then D.first[b] = i; D.blocks[#D.blocks + 1] = b end
+  end
+  D.skipped = (D.nn - #all) .. ' wheel nodes, ' .. inWheels .. ' inside the wheels'
+end
+-- the reference: where the nodes are now (force: again, after a repair)
+function D.takeRef(force)
+  if D.R and not force then report('kept', 'the reference from before') return end
+  D.init()
+  local R = {}
+  if not D.read(R) then report('error', 'the car\'s frame could not be read') return end
+  D.R, D.C, D.S, D.A, D.ch = R, {}, {}, {}, {}
+  for i = 1, #D.cids * 3 do D.S[i] = 0 end
+  for i = 1, #D.cids do D.A[i] = false end
+  for _, b in ipairs(D.blocks) do D.send(b) end   -- GTA: all of the car as it was
+  report(force and 'again' or 'taken', D.skipped .. ' left out; frame from ' .. tostring(D.frameHow))
+end
+function D.send(b)
+  local t, S, C = {}, D.S, D.cids
+  local hi = (b + 1) * 256
+  for i = D.first[b] or (#C + 1), #C do
+    local c = C[i]
+    if c >= hi then break end
+    local k = i * 3
+    local x, y, z = S[k - 2], S[k - 1], S[k]
+    if x ~= 0 or y ~= 0 or z ~= 0 then t[#t + 1] = string.format('%d,%d,%d,%d', c, x, y, z) end
+  end
+  obj:queueGameEngineLua(string.format("if gtaBridge and gtaBridge.dents then gtaBridge.dents(%d,%d,%d,%d,'%s') end", obj:getID(), D.nn, b * 256, hi, table.concat(t, ';')))
+end
+function D.tick()
+  local R = D.R
+  if not R then return end
+  local C = D.C
+  if not D.read(C) then return end
+  local S, A, B, ch = D.S, D.A, D.blk, D.ch
+  local floor, abs = math.floor, math.abs
+  for i = 1, #D.cids do
+    local k = i * 3
+    local dx, dy, dz = C[k - 2] - R[k - 2], C[k - 1] - R[k - 1], C[k] - R[k]
+    local m2 = dx * dx + dy * dy + dz * dz
+    local a = A[i]
+    if a then a = m2 > 0.000009 else a = m2 > 0.000025 end   -- v2.53: on at 5 mm, off below 3 mm (1 cm left steps in GTA's panels)
+    A[i] = a
+    local qx, qy, qz = 0, 0, 0
+    if a then qx, qy, qz = floor(dx * 1000 + 0.5), floor(dy * 1000 + 0.5), floor(dz * 1000 + 0.5) end
+    local sx, sy, sz = S[k - 2], S[k - 1], S[k]
+    if abs(qx - sx) > 1 or abs(qy - sy) > 1 or abs(qz - sz) > 1 or (a ~= (sx ~= 0 or sy ~= 0 or sz ~= 0)) then
+      S[k - 2], S[k - 1], S[k] = qx, qy, qz
+      ch[B[i]] = true
+    end
+  end
+  local nb = #D.blocks
+  if nb > 0 then
+    D.rr = (D.rr or 0) % nb + 1
+    ch[D.blocks[D.rr]] = true
+  end
+  for b in pairs(ch) do
+    D.send(b)
+    ch[b] = nil
+  end
+end
+function D.run(name, a)
+  local ok, e = pcall(D[name], a)
+  if not ok and not D.errs[name] then
+    D.errs[name] = true
+    report('error', name .. ': ' .. tostring(e))
+  end
+end
+]==]
+
+dents.wheelNodes = (loadstring or load)(dents.WHEELS .. '\nreturn gtabWheelNodes')()
+
+-- export: the car's nodes (id, position in glTF axes relative to the car like the wheels' nodes, wheel node) and, v2.53,
+-- each flexbody's own nodes (its "_group_nodes": the nodes BeamNG bends its mesh with) and each prop's 3 nodes (a
+-- mirror, a light: carried rigidly). GTA's loader puts every vertex of a part in a triangle of that part's nodes.
+function dents.exportNodes(veh)
+  local vd = core_vehicle_manager.getPlayerVehicleData()
+  local vdata = vd and vd.vdata
+  if not vdata or type(vdata.nodes) ~= 'table' then return nil, nil, 'no vehicle data' end
+  local wheelSet, byName = dents.wheelNodes(vdata)
+  local list, isNode = {}, {}
+  for _, n in pairs(vdata.nodes) do
+    if type(n) == 'table' and type(n.cid) == 'number' then list[#list + 1] = n; isNode[n.cid] = true end
+  end
+  table.sort(list, function(a, b) return a.cid < b.cid end)
+  local C, P, W, nw = {}, {}, {}, 0
+  local function r3(x) return math.floor(x * 1000 + 0.5) / 1000 end
+  for i, n in ipairs(list) do
+    local p = vec3(veh:getNodePosition(n.cid))
+    C[i] = n.cid
+    P[i * 3 - 2], P[i * 3 - 1], P[i * 3] = r3(p.x), r3(p.z), r3(-p.y)
+    W[i] = wheelSet[n.cid] and 1 or 0
+    nw = nw + W[i]
+  end
+  -- node ids out of whatever form the processed data keeps them in (ids, names, {cid=}, {[id]=true}, nested lists)
+  local function cidsOf(t, set, depth)
+    if type(t) ~= 'table' or depth > 3 then return end
+    for k, x in pairs(t) do
+      local c
+      if type(x) == 'number' then c = x
+      elseif type(x) == 'string' then c = byName[x]
+      elseif type(x) == 'table' then if type(x.cid) == 'number' then c = x.cid else cidsOf(x, set, depth + 1) end
+      elseif x == true then c = type(k) == 'number' and k or byName[k] end
+      if c and isNode[c] then set[c] = true end
+    end
+  end
+  local function oneCid(x) if type(x) == 'number' and isNode[x] then return x end return byName[x] end
+  local sets, nf, nfNo, sample, keys = {}, 0, 0, nil, nil
+  for _, fb in pairs(vdata.flexbodies or {}) do
+    if type(fb) == 'table' and type(fb.mesh) == 'string' then
+      if not keys then
+        keys = {}
+        for k in pairs(fb) do keys[#keys + 1] = tostring(k) end
+        table.sort(keys)
+      end
+      local gn = fb._group_nodes
+      if not sample then
+        local cnt, first = 0, nil
+        for k, x in pairs(type(gn) == 'table' and gn or {}) do cnt = cnt + 1; if not first then first = tostring(k) .. '=' .. type(x) .. ' ' .. tostring(x) end end
+        sample = string.format('%s: %s with %d entries like [%s]', fb.mesh, type(gn), cnt, tostring(first))
+      end
+      local set = sets[fb.mesh] or {}
+      local before = next(set)
+      cidsOf(gn, set, 0)
+      if next(set) then sets[fb.mesh] = set; if not before then nf = nf + 1 end else nfNo = nfNo + 1 end
+    end
+  end
+  local flex, nodesIn = {}, 0
+  for mesh, set in pairs(sets) do
+    local t = {}
+    for c in pairs(set) do t[#t + 1] = c end
+    table.sort(t)
+    flex[mesh] = t
+    nodesIn = nodesIn + #t
+  end
+  local props, np = {}, 0
+  for _, pr in pairs(vdata.props or {}) do
+    if type(pr) == 'table' and type(pr.mesh) == 'string' and not flex[pr.mesh] and not props[pr.mesh] then
+      local r, x, y = oneCid(pr.idRef or pr['idRef:']), oneCid(pr.idX or pr['idX:']), oneCid(pr.idY or pr['idY:'])
+      if r and x and y then props[pr.mesh] = { r, x, y }; np = np + 1 end
+    end
+  end
+  local nkeys = {}
+  for k in pairs(list[1] or {}) do nkeys[#nkeys + 1] = tostring(k) end
+  table.sort(nkeys)
+  local note = string.format('%d nodes (%d of the wheels); %d flexbody meshes with their own nodes (%.0f each on average), %d without; %d props on 3 nodes (%s; a flexbody\'s fields: %s; a node\'s fields: %s)',
+    #C, nw, nf, nf > 0 and nodesIn / nf or 0, nfNo, np, tostring(sample), keys and table.concat(keys, ' '):sub(1, 200) or 'no flexbodies', table.concat(nkeys, ' '):sub(1, 200))
+  if #C == 0 then return nil, nil, 'the car has no nodes' end
+  if nf == 0 then flex = nil end
+  return { c = C, p = P, w = W }, flex, note, np > 0 and props or nil
+end
+
+-- GE side, while GTA drives
+function dents.start(d, rate)
+  d.dz = tonumber(rate) or 0
+  d.dentT, d.dentInj, d.dentRef, d.dentRefAt = 0, false, 'soft', now() + 1.0
+  d.dentRx, d.dentRefT, d.dentMsgs, d.dentBytes, d.dentReinj = nil, nil, 0, 0, 0
+  if d.dz > 0 then logI(string.format('dents: on (%.0f checks a second)', d.dz)) else logI('dents: off (GTA\'s ini: Dents=0)') end
+end
+function dents.tick(d, veh)
+  if not d.dz or d.dz <= 0 then return end
+  local t = now()
+  if not d.dentInj then
+    if d.dentReinj > 10 then return end
+    veh:queueLuaCommand(dents.VEH)
+    d.dentInj, d.dentInjT = true, t
+  end
+  if d.dentRef and t >= d.dentRefAt and not world.tp then
+    veh:queueLuaCommand("if gtabDents then gtabDents.run('takeRef', " .. (d.dentRef == 'force' and 'true' or 'false') .. ") end")
+    d.dentRef, d.dentRefT = nil, t
+  end
+  if t - d.dentT >= 1 / d.dz then
+    d.dentT = t
+    veh:queueLuaCommand("if gtabDents then gtabDents.run('tick') end")
+  end
+  -- nothing from the car for 3 s (its Lua reloaded?): the code goes in again
+  if d.dentRefT and not pz.paused and t - d.dentRefT > 3 and (not d.dentRx or t - d.dentRx > 3) and t - d.dentInjT > 3 then
+    d.dentReinj = d.dentReinj + 1
+    d.dentInj, d.dentRef, d.dentRefAt, d.dentRefT = false, 'soft', t + 0.5, nil
+    if d.dentReinj <= 10 then logI('dents: nothing from the car for 3 s: its Lua code goes in again (' .. d.dentReinj .. ')') end
+    if d.dentReinj > 10 then logE('dents: the car never answers: dents off for this drive') end
+  end
+end
+function dents.afterTeleport(msg)
+  local d = drive
+  if not (d and d.dz and d.dz > 0) then return end
+  if type(msg) == 'table' and msg.keep == 0 then
+    d.dentRef, d.dentRefAt = 'force', now() + 1.0   -- BeamNG's reset repaired the car
+  elseif d.dentRef then
+    d.dentRefAt = math.max(d.dentRefAt or 0, now() + 1.0)   -- (dropped 0.2 m: its springs settle first)
+  end
+end
+function M.dents(id, nn, a, b, s)
+  local d = drive
+  if not d or (d.id ~= nil and id ~= d.id) then return end
+  d.dentRx = now()
+  local msg = string.format('{"t":"dm","nn":%d,"a":%d,"b":%d,"d":"%s"}', tonumber(nn) or -1, tonumber(a) or 0, tonumber(b) or 0, tostring(s):gsub('[^%d,;%-]', ''))
+  pcall(function() udp:sendto(msg, d.ip, d.port) end)
+  d.dentMsgs = (d.dentMsgs or 0) + 1
+  d.dentBytes = (d.dentBytes or 0) + #msg
+end
+-- BeamNG console: gtaBridge.dentsCheck() -> what the next export (Shift+F11) writes for the dents (nodes, flexbody groups)
+function M.dentsCheck()
+  local veh = getPlayerVeh()
+  if not veh then logI('dents check: no player car'); return end
+  local ok, nodes, flex, note = pcall(dents.exportNodes, veh)
+  local n = 0
+  for _ in pairs(type(flex) == 'table' and flex or {}) do n = n + 1 end
+  logI('dents check: ' .. (ok and (nodes and (tostring(note) .. '; meshes with their own nodes: ' .. n) or ('nothing: ' .. tostring(note))) or ('error: ' .. tostring(nodes))))
+  flushLog(true)
+end
+function M.dentsInfo(id, nn, tracked, kind, note)
+  local d = drive
+  if d and id == d.id then d.dentRx = now() end
+  if kind == 'error' then
+    logE('dents: in the car: ' .. tostring(note))
+  else
+    logI(string.format('dents: the car\'s reference %s: %s nodes, %s watched (%s)', kind == 'kept' and 'kept' or (kind == 'again' and 'taken again (repaired)' or 'taken'),
+      tostring(nn), tostring(tracked), tostring(note)))
+  end
 end
 
 -- Do several sub-meshes of one ProceduralMesh all get collision? Checked once with two small quads far below
@@ -3376,12 +4531,11 @@ end
 
 -- ---- the car onto GTA's ground ("tp"). The rotation convention BeamNG's teleport wants is not documented: it is
 -- found by reading the car back (forward/up) after each try, and remembered for the session.
-local function quatT(q) return { x = q.x, y = q.y, z = q.z, w = q.w } end
 local function rotCandidates(f, u)
   local list = {}
   local function qd(dx, dy, dz)
     local ok, q = pcall(quatFromDir, vec3(dx, dy, dz), vec3(u[1], u[2], u[3]))
-    if ok and type(q) ~= 'nil' then return quatT(q) end
+    if ok and type(q) ~= 'nil' then return { x = q.x, y = q.y, z = q.z, w = q.w } end
     return nil
   end
   local a, b = qd(f[1], f[2], f[3]), qd(-f[1], -f[2], -f[3])
@@ -3419,7 +4573,8 @@ local function safeTeleportResetArg()
   return stReset
 end
 local KEEP = 'safeTeleport (no repair)'
-local function wantKeep()
+-- (these helpers are fields of world: Lua's 200-locals limit)
+world.wantKeep = function()
   return modConfig and modConfig.tpKeepDamage ~= false and not world.keepBad and type(rawget(_G, 'spawn')) == 'table'
     and type(spawn.safeTeleport) == 'function' and safeTeleportResetArg() and true or false
 end
@@ -3443,13 +4598,13 @@ local function teleportVeh(veh, p, q, keep)
   errs[#errs + 1] = 'spawn.safeTeleport: ' .. tostring(err)
   return nil, table.concat(errs, '; ')
 end
-local function tileUnder(x, y)
+world.tileUnder = function(x, y)
   for id, t in pairs(worldTiles) do
     if x >= t.x0 and x <= t.x1 and y >= t.y0 and y <= t.y1 then return id, t end
   end
   return nil
 end
-local function removePad()
+world.removePad = function()
   if world.padOn then
     removeSurface('gtab_pad')
     world.padOn = false
@@ -3477,11 +4632,14 @@ local function tpFinish(ok, msg)
       end
     end
     if n > 0 then logI('ground: ' .. n .. ' tiles from the earlier session removed') end
+    pcall(world.props.clear, 'the earlier session\'s')   -- v2.5
+    pcall(world.phys.clear, 'the earlier session\'s')
     world.fresh = false
   end
-  removePad()
+  world.removePad()
   tp.done = now()
   world.tpCheck = { t = now() + 0.6, dmg = tp.dmgBefore, why = tp.m.why }
+  pcall(dents.afterTeleport, msg)   -- v2.5: repaired: a new dents reference; else the first one waits until the car settled
 end
 local function tpUpdate()
   local tp = world.tp
@@ -3506,7 +4664,7 @@ local function tpUpdate()
   end
   if tp.state == 'wait' then
     -- the tiles under the target first (built, collision reloaded); v2.43: a repair is where the car already is
-    local under = m.repair or tileUnder(X[1], X[2])
+    local under = m.repair or world.tileUnder(X[1], X[2])
     if not m.repair and (queueLen() > 0 or collisionDirty or not under) then
       tp.note = (not under) and 'no tile under the target yet' or 'tiles still building'
       if not (t - tp.t0 > 5 and queueLen() == 0 and not collisionDirty) then return end
@@ -3515,7 +4673,7 @@ local function tpUpdate()
     end
     tp.cands = rotCandidates(f, u)
     tp.ci = world.conv or 1
-    tp.keep = not m.repair and wantKeep()   -- v2.43: a repair is BeamNG's repairing reset
+    tp.keep = not m.repair and world.wantKeep()   -- v2.43: a repair is BeamNG's repairing reset
     tp.state = 'go'
     world.corrBy = world.corrBy or {}
     local c = world.corrBy[tp.keep and KEEP or 'reset']
@@ -3609,6 +4767,8 @@ end
 -- the drive ended: a flat 600 m pad under the car keeps it from rolling off the last GTA tiles and falling 200 m
 -- (removed when the next drive puts the car on GTA's ground again)
 worldDriveEnded = function(d)
+  pcall(world.props.clear, 'the drive ended')   -- v2.5 (GTA takes them out itself, unless it closed)
+  pcall(world.phys.clear, 'the drive ended')
   if not world.ox then return end
   local veh = getPlayerVeh()
   if not veh then return end
@@ -3664,6 +4824,17 @@ worldUpdate = function(frameMs)
     world.logT = t
     logI(string.format('ground: %d tiles live (%d triangles), %d built in the last second (%.1f ms average, %.1f max); collision reloads %d (%.1f ms average, %.1f max); bridge cost per frame p95 %.2f ms, max %.2f; queue %d; triangles per ground model: %s',
       nt, ws.tris, ws.b, ws.bms, ws.bmx, ws.rn, ws.rms, ws.rmx, p95, fmx, ws.q, ws.gm))
+    -- v2.51: the ride, flat cells built finely against steps, props
+    local F = world.feel
+    logI(string.format('ground feel: %d jolts (vertical over 1.5 g) in %.2f km above 50 km/h (%.1f per km); %d flat cells drawn finely (their edges had steps)',
+      F.n, F.km, F.km > 0.05 and F.n / F.km or 0, world.splitCells or 0))
+    F.n, F.km, world.splitCells = 0, 0, 0
+    local P, nb = world.props, 0
+    for _ in pairs(P.boxes) do nb = nb + 1 end
+    if nb > 0 or P.breaks > 0 or P.waits > 0 then
+      logI(string.format('props: %d prop boxes here, %d broken by the car, %d waited until the car was clear of them (10 s)', nb, P.breaks, P.waits))
+      P.breaks, P.waits = 0, 0
+    end
   end
   world.wsT = t
   world.built, world.buildMsSum, world.buildMsMax = 0, 0, 0
@@ -3885,6 +5056,12 @@ local function onUpdate(dtReal, dtSim, dtRaw)
   -- v2.0: drive mode first after the controls arrived (nothing below can stop it)
   local okDr, errDr = pcall(driveUpdate, dtReal, dtSim, dtRaw)
   if not okDr and not driveErrLogged then driveErrLogged = true; logE('drive: update failed:', tostring(errDr)) end
+  -- v2.51: prop boxes (new ones in, breakaway ones the car breaks: before this frame's collision reload) and the ride's jolts
+  local okPr, errPr = pcall(world.props.tick)
+  if not okPr and not world.props.tickErr then world.props.tickErr = true; logE('props: ' .. tostring(errPr)) end
+  local okPh, errPh = pcall(world.phys.tick)   -- v2.52
+  if not okPh and not world.phys.tickErr then world.phys.tickErr = true; logE('props: physics: ' .. tostring(errPh)) end
+  pcall(world.feel.tick, dtSim)
   -- v2.01: BeamNG's own device controls off while GTA drives or holds the car parked
   local parked = park.block and not native.userOff and now() - park.t < driveCfg.parkS
   pcall(setNativeBlocked, drive ~= nil or parked, drive and 'GTA drives' or parked and 'GTA is focused, car parked' or 'GTA stopped')
@@ -3920,6 +5097,7 @@ local function onExtensionLoaded()
   pcall(restoreNativeFromFile)
   pcall(restoreSoundFromFile)
   pcall(restoreSessionFromFile)
+  pcall(grav.restoreFile)   -- v2.5
   openSocket()
   logI('v' .. M.version, 'loaded. socket:', caps.socket)
   -- v2.4: sound session mode, remembered from the last time GTA asked for it (BeamNGSoundWake=session): switched on now,
