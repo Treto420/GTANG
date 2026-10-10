@@ -1,0 +1,122 @@
+// GTA bridge v2.52: a weighted box for GTA's props (sized and weighted per prop by the bridge's jbeam variables)
+{
+  "gtab_prop": {
+    "information": {"authors": "GTA bridge", "name": "GTA prop (GTA bridge)", "value": 0},
+    "slotType": "main",
+    "slots": [
+      ["type", "default", "description"],
+      ["gtab_prop_anchor", "", "Tied to the ground"]
+    ],
+    "variables": [
+      ["name", "type", "unit", "category", "default", "min", "max", "title", "description"],
+      ["$gx", "range", "m", "GTA prop", 0.5, 0.05, 20, "Width", "Size along x"],
+      ["$gy", "range", "m", "GTA prop", 0.5, 0.05, 20, "Depth", "Size along y"],
+      ["$gz", "range", "m", "GTA prop", 1.0, 0.05, 20, "Height", "Size along z"],
+      ["$gm", "range", "kg", "GTA prop", 20, 1, 5000, "Mass", "Total mass"],
+      ["$gb", "range", "N", "GTA prop", 30000, 1, 10000000, "Anchor strength", "Force at which its ground beams snap"]
+    ],
+    "refNodes": [
+      ["ref:", "back:", "left:", "up:"],
+      ["g0", "g2", "g1", "g4"]
+    ],
+    "nodes": [
+      ["id", "posX", "posY", "posZ"],
+      {"nodeWeight": "$=$gm*0.125"},
+      {"frictionCoef": 0.6},
+      {"collision": true},
+      {"selfCollision": false},
+      {"staticCollision": true},
+      {"group": "gtab_prop"},
+      ["g0", "$=$gx*-0.5", "$=$gy*-0.5", 0.0],
+      ["g1", "$=$gx*0.5", "$=$gy*-0.5", 0.0],
+      ["g2", "$=$gx*-0.5", "$=$gy*0.5", 0.0],
+      ["g3", "$=$gx*0.5", "$=$gy*0.5", 0.0],
+      ["g4", "$=$gx*-0.5", "$=$gy*-0.5", "$gz"],
+      ["g5", "$=$gx*0.5", "$=$gy*-0.5", "$gz"],
+      ["g6", "$=$gx*-0.5", "$=$gy*0.5", "$gz"],
+      ["g7", "$=$gx*0.5", "$=$gy*0.5", "$gz"],
+      {"group": ""}
+    ],
+    "beams": [
+      ["id1:", "id2:"],
+      {"beamSpring": "$=$gm*15000", "beamDamp": "$=$gm*8"},
+      {"beamDeform": "FLT_MAX", "beamStrength": "FLT_MAX"},
+      ["g0", "g1"],
+      ["g0", "g2"],
+      ["g0", "g3"],
+      ["g0", "g4"],
+      ["g0", "g5"],
+      ["g0", "g6"],
+      ["g0", "g7"],
+      ["g1", "g2"],
+      ["g1", "g3"],
+      ["g1", "g4"],
+      ["g1", "g5"],
+      ["g1", "g6"],
+      ["g1", "g7"],
+      ["g2", "g3"],
+      ["g2", "g4"],
+      ["g2", "g5"],
+      ["g2", "g6"],
+      ["g2", "g7"],
+      ["g3", "g4"],
+      ["g3", "g5"],
+      ["g3", "g6"],
+      ["g3", "g7"],
+      ["g4", "g5"],
+      ["g4", "g6"],
+      ["g4", "g7"],
+      ["g5", "g6"],
+      ["g5", "g7"],
+      ["g6", "g7"]
+    ],
+    "triangles": [
+      ["id1:", "id2:", "id3:"],
+      ["g0", "g2", "g3"],
+      ["g0", "g3", "g1"],
+      ["g4", "g5", "g7"],
+      ["g4", "g7", "g6"],
+      ["g0", "g1", "g5"],
+      ["g0", "g5", "g4"],
+      ["g2", "g6", "g7"],
+      ["g2", "g7", "g3"],
+      ["g0", "g4", "g6"],
+      ["g0", "g6", "g2"],
+      ["g1", "g3", "g7"],
+      ["g1", "g7", "g5"]
+    ]
+  },
+  "gtab_prop_anchor": {
+    "information": {"authors": "GTA bridge", "name": "Tied to the ground (GTA bridge)", "value": 0},
+    "slotType": "gtab_prop_anchor",
+    "nodes": [
+      ["id", "posX", "posY", "posZ"],
+      {"fixed": true},
+      {"nodeWeight": 5},
+      {"collision": false},
+      {"staticCollision": false},
+      {"group": ""},
+      ["a0", "$=$gx*-0.5", "$=$gy*-0.5", -0.1],
+      ["a1", "$=$gx*0.5", "$=$gy*-0.5", -0.1],
+      ["a2", "$=$gx*-0.5", "$=$gy*0.5", -0.1],
+      ["a3", "$=$gx*0.5", "$=$gy*0.5", -0.1]
+    ],
+    "beams": [
+      ["id1:", "id2:"],
+      {"beamSpring": "$=$gm*15000+20000", "beamDamp": "$=$gm*8+50"},
+      {"beamDeform": "FLT_MAX", "beamStrength": "$gb"},
+      ["g0", "a0"],
+      ["g0", "a1"],
+      ["g0", "a2"],
+      ["g1", "a1"],
+      ["g1", "a3"],
+      ["g1", "a0"],
+      ["g3", "a3"],
+      ["g3", "a2"],
+      ["g3", "a1"],
+      ["g2", "a2"],
+      ["g2", "a0"],
+      ["g2", "a3"]
+    ]
+  }
+}
