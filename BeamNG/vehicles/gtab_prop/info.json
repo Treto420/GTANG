@@ -1,0 +1,8 @@
+{
+ "Name": "GTA prop (GTA bridge)",
+ "Brand": "GTA bridge",
+ "Author": "GTA bridge",
+ "Type": "Prop",
+ "Body Style": "Prop",
+ "Description": "A weighted box the GTA bridge puts where GTA's props are (lamp posts, signs, bins). Spawned by the bridge; not for driving."
+}
