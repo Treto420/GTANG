@@ -1,0 +1,8 @@
+5 pad 0,0,0,0,0,0,0
+40 key f11
+100 key f10
+170 pad 0,0,255,0,0,0,0
+171 waitfile fake_putback.txt
+300 pad 0,0,0,0,0,0,0
+360 key f10
+420 quit

@@ -1,0 +1,10 @@
+2 ini PropPhysics 1
+3 key ctrlf11
+5 pad 0,0,0,0,0,0,0
+40 key f11
+100 key f10
+170 pad 0,0,255,0,0,0,0
+171 waitfile fake_s130.txt
+172 pad 0,255,0,0,0,0,0
+230 key f10
+280 quit

@@ -49,12 +49,18 @@ check('0x10DD5498  Tarmac' in mat and '-> ASPHALT' in mat, 'GtaBeamD1_materials.
 falls = log.count('BeamNG\'s car fell through GTA\'s ground (')
 if not hole:
     check(falls == 0, 'nothing fell through (%d)' % falls)
+    if os.environ.get('FAKE_DIP'):   # v2.62: under GTA's ground for less than WorldFallWaitS: no reset
+        ev = open('fake_beam_events.txt', errors='replace').read() if os.path.exists('fake_beam_events.txt') else ''
+        check('DIP the car' in ev, 'v2.62: BeamNG\'s car held under GTA\'s ground for a moment (a crash), then back: not put back')
 else:
     check(falls >= 1 and 'BeamNG\'s car is on GTA\'s ground (fell)' in log, 'the hole: the car fell through and was put back (%d)' % falls)
     check('sent without those cells' in log, 'the hole: tiles at its edge sent with only the empty cells left out')
+    check('(the car is close: at once): sent without those cells' in log, 'v2.63: the tiles at its edge sent at once (not after 2 more tries)')
     # v2.41: no loop: at most 3 falls, then drive mode ends and GTA's car lands on the last good spot
     check(falls <= 3 and (falls < 3 or '3 times in 30 s' in log), 'the hole: no reset loop (%d falls; 3 = drive OFF)' % falls)
     check('BeamNG couldn\'t build tile' not in log, 'the hole: no tile BeamNG can\'t build is sent (no cells with ground)')
+    uf = [float(x) for x in re.findall(r'fell through GTA\'s ground \([\d.]+ m under it at [-\d.]+ [-\d.]+ for ([\d.]+) s', log)]
+    check(uf and min(uf) >= 2.0, 'v2.62: put back only after it stayed under GTA\'s ground for WorldFallWaitS (%s s)' % uf)
     fl = re.findall(r'BeamNG\'s car is on GTA\'s ground \(fell\).*?; ([\d.]+) s after asking', log)
     check(fl and max(float(x) for x in fl) < 6.0, 'the hole: put back within 6 s (%s)' % fl)
 # v2.41: adaptive tiles: far fewer rays per tile than 289
@@ -70,6 +76,7 @@ for line in open('fake_puppet.csv'):
     if len(p) < 14 or p[1] != 'coords': continue
     rows.append([float(x) for x in (p[2], p[3], p[4], p[8], p[9], p[10])])   # position, up (the rotation of that moment)
 dz, xs, ys, deep = [], [], [], []
+dips = 0
 for x, y, z, ux, uy, uz in rows:
     ox, oy, oz = x - 0.6 * ux, y - 0.6 * uy, z - 0.6 * uz
     g = ground(ox, oy)
@@ -77,11 +84,17 @@ for x, y, z, ux, uy, uz in rows:
         deep.append(ground(ox, 69.9) - oz)   # over the hole: how far under the ground at its edge
         continue
     if g is None or (3.0 < ox < 4.5): continue   # the curb itself is a ramp one spacing wide
+    if os.environ.get('FAKE_DIP') and oz - g < -1.0:
+        dips += 1   # v2.62: held under the ground for a moment (FAKE_DIP)
+        continue
     if hole and oy > 55:
         deep.append(g - oz)   # around the hole the car falls in and is put back: how deep it got
         continue
     dz.append(oz - g)
     xs.append(ox); ys.append(oy)
+if os.environ.get('FAKE_DIP'):
+    cb = re.findall(r'was under GTA\'s ground for ([\d.]+) s and came back up: not put back', log)
+    check(cb and 0.5 <= float(cb[0]) < 2.4, 'v2.62: GTA saw the car under its ground for a moment, not put back (%s s)' % cb)
 moved = math.hypot(xs[-1] - xs[0], ys[-1] - ys[0]) if xs else 0
 check(len(dz) > 100, 'puppet placements in drive mode: %d' % len(dz))
 check(moved > 40, 'the car drove %.0f m on GTA\'s ground' % moved)
@@ -92,7 +105,7 @@ if dz:
     check(p95 < 0.08, 'the drawn car\'s tyres follow GTA\'s ground (p95 %.1f cm)' % (p95 * 100))
 if hole:
     dmax = max(deep) if deep else 0
-    check(dmax < 5.0, 'the hole: the drawn car never got more than 5 m under the ground before being put back (%.1f m)' % dmax)
+    check(dmax < 45.0, 'the hole: the drawn car fell at most for WorldFallWaitS (2.5 s, about 35 m) before being put back (%.1f m)' % dmax)
 print()
 print('WORLD E2E: ALL PASS' if not fails else 'WORLD E2E: %d FAILED: %s' % (len(fails), fails))
 sys.exit(1 if fails else 0)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """lua_dents_test.py - v2.5 (D2): the car-side dents code (dents.VEH in gtaBridge.lua) in LuaJIT with a fake car.
-Checks: the reference, moves of the whole car cancel out, a dent is sent in mm in the car's frame, small moves (< 1 cm)
+Checks: the reference, moves of the whole car cancel out, a dent is sent in mm in the car's frame, small moves (< 5 mm)
 are not, the wheels' nodes never are, ranges of 256 ids, the refNodes fallback frame, one error report per kind.
 Usage: python3 lua_dents_test.py <gtaBridge.lua>"""
 import math, re, sys
@@ -136,7 +136,9 @@ check(len(dm) == 5 and all(not e for _, _, _, e in dm), 'whole car turned / whee
 fl = [c for c, p in BODY.items() if p[0] == -0.95 and p[1] == 2.3]
 state['dent'] = {fl[0]: (0.12, -0.15, 0.0), fl[1]: (0.06, -0.08, -0.02)}
 small = [c for c, p in BODY.items() if p == (0.95, 0.0, 1.1)][0]
-state['dent'][small] = (0.004, 0.0, 0.0)   # 4 mm: under 1 cm
+state['dent'][small] = (0.004, 0.0, 0.0)   # 4 mm: under 5 mm (v2.53)
+mid = [c for c, p in BODY.items() if p == (0.95, 0.6, 1.1)][0]
+state['dent'][mid] = (0.0, 0.0, -0.007)   # 7 mm: sent since v2.53 (2.52 only sent 1 cm and more: steps in GTA's panels)
 L.execute("gtabDents.run('tick')")
 dm, info = parse(take())
 ent = {}
@@ -146,6 +148,7 @@ check(ok, 'dent 1 sent in mm in the car frame: %s' % (ent.get(fl[0]),))
 ok = fl[1] in ent and abs(ent[fl[1]][0] - 60) <= 1 and abs(ent[fl[1]][1] + 80) <= 1 and abs(ent[fl[1]][2] + 20) <= 1
 check(ok, 'dent 2: %s' % (ent.get(fl[1]),))
 check(small not in ent, '4 mm move not sent')
+check(mid in ent and abs(ent[mid][2] + 7) <= 1, 'v2.53: 7 mm move sent: %s' % (ent.get(mid),))
 check(all(c in BODY for c in ent), 'no wheel node sent')
 check(all(a <= c < b for _, a, b, e in dm for c in e), 'nodes inside their ranges')
 
@@ -196,5 +199,47 @@ for _ in range(3): L.execute("gtabDents.run('tick')")
 dm, info = parse(take())
 check(len(info) == 1 and info[0][2] == 'error' and 'boom' in info[0][3], 'error reported once: %s' % (info,))
 state['boom'] = False
+
+# v2.51: the export (dents.exportNodes, GE Lua): three position numbers per node (2.5 wrote one: GTA's loader said "node data
+# not readable" and no dent was ever shown)
+m3 = re.search(r"\nfunction dents\.exportNodes\(veh\)\n(.*?)\nend\n", src, re.S)
+check(m3 is not None, 'dents.exportNodes found')
+if m3:
+    E = lj.LuaRuntime(unpack_returned_tuples=True)
+    E.execute('dents = {} vec3 = function(p) return p end')
+    E.globals().WHEELS_SRC = m1.group(1) + '\nreturn gtabWheelNodes'
+    E.execute('dents.wheelNodes = (loadstring or load)(WHEELS_SRC)()')
+    E.execute('function dents.exportNodes(veh)\n' + m3.group(1) + '\nend')
+    E.execute("""
+      local nodes = {}
+      for c = 0, 9 do nodes[c] = { cid = c, name = 'n' .. c } end
+      VD = { vdata = { nodes = nodes, wheels = { [0] = { name = 'FL', node1 = 0, node2 = 1, radius = 0.33 } },
+                       flexbodies = { [0] = { mesh = 'body_mesh', ['[group]:'] = { 'body' }, _group_nodes = { 2, 3, 4, 5 } },
+                                      [1] = { mesh = 'door', _group_nodes = { n6 = true, [7] = true, [8] = { cid = 8 } } },
+                                      [2] = { mesh = 'door', _group_nodes = { { 'n9', 'n6' } } },
+                                      [3] = { mesh = 'trim', _group_nodes = { 55, 'nope' } } },
+                       props = { [0] = { mesh = 'mirror', idRef = 2, idX = 'n3', ['idY:'] = 4 }, [1] = { mesh = 'SPOTLIGHT', idRef = 2, idX = 99, idY = 4 } } } }
+      core_vehicle_manager = { getPlayerVehicleData = function() return VD end }
+      VEH = { getNodePosition = function(self, c) return { x = c * 0.1, y = 1 + c, z = 0.5 + c * 0.01 } end }
+      RES, FLEX, NOTE, PROPS = dents.exportNodes(VEH)
+    """)
+    G2 = E.globals()
+    R = G2.RES
+    C = [R.c[i] for i in range(1, len(R.c) + 1)]
+    P = [R.p[i] for i in range(1, len(R.p) + 1)]
+    check(len(C) == 10 and len(P) == 30, 'export: 10 nodes, 30 position numbers (%d, %d)' % (len(C), len(P)))
+    ok = len(P) == 30 and all(abs(P[i * 3] - c * 0.1) < 1e-3 and abs(P[i * 3 + 1] - (0.5 + c * 0.01)) < 1e-3 and abs(P[i * 3 + 2] + (1 + c)) < 1e-3 for i, c in enumerate(C))
+    check(ok, 'export: positions in glTF axes (x, z, -y) per node, in node order')
+    check(R.w[1] == 1 and R.w[2] == 1 and R.w[3] == 0, 'export: the wheel\'s nodes marked')
+    def lst(t): return [t[i] for i in range(1, len(t) + 1)] if t is not None else None
+    # v2.53: each flexbody mesh -> its own nodes (ids, names, {[id]=true}, {cid=}, nested; two flexbodies of one mesh joined)
+    check(lst(G2.FLEX['body_mesh']) == [2, 3, 4, 5], 'v2.53: body mesh -> its _group_nodes ids (%s)' % lst(G2.FLEX['body_mesh']))
+    check(lst(G2.FLEX['door']) == [6, 7, 8, 9], 'v2.53: door -> names, id keys, {cid=} and a nested list, both flexbodies joined (%s)' % lst(G2.FLEX['door']))
+    check(G2.FLEX['trim'] is None, 'v2.53: unknown node ids left out (a mesh with none is not written)')
+    check(lst(G2.PROPS['mirror']) == [2, 3, 4] and G2.PROPS['SPOTLIGHT'] is None, 'v2.53: a prop -> its 3 nodes (one with an unknown node left out)')
+    nt = str(G2.NOTE)
+    check('2 flexbody meshes with their own nodes' in nt and '1 without' in nt and '1 props on 3 nodes' in nt, 'v2.53: the note counts them (%s)' % nt)
+    # the export writes them into the car file next to the nodes
+    check('flex = info.flex, props = info.props' in src, 'v2.53: the car file gets the props too')
 
 print('ALL PASS' if not fails else 'FAILED: %d' % len(fails))

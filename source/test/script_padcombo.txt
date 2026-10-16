@@ -1,6 +1,7 @@
 5 pad 0,0,0,0,0,0,0
 40 key f11
 100 key f10
+120 waitfile fake_drive_on.txt
 160 pad 2,0,0,0,0,0,0
 175 pad 0,0,0,0,0,0,0
 200 pad 300,0,0,0,0,0,0

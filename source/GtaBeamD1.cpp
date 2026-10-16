@@ -116,7 +116,7 @@
 #include "carmodel.h"
 #include "shv.h"
 
-#define D1_VERSION "2.5"
+#define D1_VERSION "2.7"
 
 namespace
 {
@@ -170,6 +170,30 @@ namespace
 		constexpr UINT64 GET_GAMEPLAY_CAM_COORD = 0x14D6F5678D8F1B37;  // v1.9.4
 		constexpr UINT64 GET_GAMEPLAY_CAM_ROT = 0x837765A25378F0BB;
 		constexpr UINT64 GET_FRAME_TIME = 0x15C40837039FFAF7;
+		// v2.6: weapons and explosions on BeamNG's car
+		constexpr UINT64 IS_EXPLOSION_IN_SPHERE = 0xAB0F816885B0E483;        // type (-1 any), x, y, z, radius
+		constexpr UINT64 GET_PED_LAST_WEAPON_IMPACT_COORD = 0x6C4D0409BA1A2BC2;
+		constexpr UINT64 IS_PED_SHOOTING = 0x34616828CD07F1A1;
+		constexpr UINT64 GET_SELECTED_PED_WEAPON = 0x0A6DB4965674D243;
+		constexpr UINT64 GET_WEAPONTYPE_GROUP = 0xC3287EE3050FB74C;
+		constexpr UINT64 GET_PED_BONE_COORDS = 0x17C07FC640E86B4E;
+		constexpr UINT64 GET_PED_ACCURACY = 0x37F4AD56ECBC0CD6;
+		constexpr UINT64 IS_PED_IN_COMBAT = 0x4859F1FC66A6278E;           // ped, target
+		constexpr UINT64 SET_ENTITY_AS_MISSION_ENTITY = 0xAD738C3085FE7E11;  // v2.61: entity, scriptHost, grab (GTA doesn't delete it)
+		constexpr UINT64 START_PARTICLE_FX_LOOPED_ON_ENTITY = 0x1AE42C1660FD6517;  // v2.61: name, entity, offset xyz, rot xyz, scale, flip xyz
+		constexpr UINT64 STOP_PARTICLE_FX_LOOPED = 0x8F75998877616996;
+		constexpr UINT64 DOES_PARTICLE_FX_LOOPED_EXIST = 0x74AFEF0D2E1E409B;
+		constexpr UINT64 USE_PARTICLE_FX_ASSET = 0x6C38AF3693A69A91;
+		constexpr UINT64 REQUEST_NAMED_PTFX_ASSET = 0xB80D8756B4668AB6;
+		constexpr UINT64 HAS_NAMED_PTFX_ASSET_LOADED = 0x8702416E512EC454;
+		constexpr UINT64 GET_OFFSET_FROM_ENTITY_GIVEN_WORLD_COORDS = 0x2274BC1C4885E333;
+		constexpr UINT64 IS_PED_DEAD_OR_DYING = 0x3317DEDB88C95038;
+		constexpr UINT64 EXPLODE_VEHICLE = 0xBA71116ADF5B514C;
+		constexpr UINT64 START_SCRIPT_FIRE = 0x6B83617E04503888;
+		constexpr UINT64 REMOVE_SCRIPT_FIRE = 0x7FF548385680673F;
+		constexpr UINT64 SET_ENTITY_PROOFS = 0xFAEE099C6F890BB8;
+		constexpr UINT64 GET_ENTITY_HEALTH = 0xEEF059FAD016D209;
+		constexpr UINT64 SET_ENTITY_HEALTH = 0x6B76DC1F3AE6E6A3;
 		constexpr UINT64 GET_FRAME_COUNT = 0xFC8202EFC642E6F2;  // v1.9.5 (timing recording)
 		constexpr UINT64 GET_GAME_TIMER = 0x9CD27B0045628463;
 		constexpr UINT64 START_EXPENSIVE_SYNCHRONOUS_SHAPE_TEST_LOS_PROBE = 0x377906D8A31E5586;
@@ -191,6 +215,14 @@ namespace
 		constexpr UINT64 SET_ENTITY_ROTATION = 0x8524A8B0171D5E07;          // entity, pitch, roll, yaw, rotationOrder, p5
 		constexpr UINT64 SET_ENTITY_QUATERNION = 0x77B21BE7AC540F07;        // entity, x, y, z, w
 		constexpr UINT64 SET_ENTITY_VELOCITY = 0x1C99BB7B6E96D16F;
+		constexpr UINT64 GET_VEHICLE_CLASS = 0x29439776AAA00A62;          // v2.7
+		constexpr UINT64 SET_PED_TO_RAGDOLL = 0xAE99FB955581844A;         // v2.7: ped, time1, time2, type, p4, p5, p6
+		constexpr UINT64 KNOCK_PED_OFF_VEHICLE = 0x45BBCBA77C29A841;      // v2.7
+		constexpr UINT64 SET_VEHICLE_DAMAGE = 0xA1DD317EA8FD4F29;         // v2.7: veh, x y z offset, damage, radius, focusOnModel
+		constexpr UINT64 APPLY_DAMAGE_TO_PED = 0x697157CED63F18D4;        // v2.7: ped, amount, p2, p3, weapon
+		constexpr UINT64 IS_PED_IN_ANY_VEHICLE = 0x997ABD671D25CA0B;      // v2.7
+		constexpr UINT64 START_PARTICLE_FX_NON_LOOPED_AT_COORD = 0x25129531F77B9ED3;  // v2.7: name, x y z, rot x y z, scale, axes
+		constexpr UINT64 START_PARTICLE_FX_LOOPED_AT_COORD = 0xE184F4F0DC5910E7;      // v2.7: name, x y z, rot x y z, scale, axes, p11
 		constexpr UINT64 SET_ENTITY_COLLISION = 0x1A9205C1B9EE827F;         // entity, toggle, keepPhysics
 		constexpr UINT64 SET_ENTITY_HAS_GRAVITY = 0x4A4722448F18EEF5;
 		constexpr UINT64 FREEZE_ENTITY_POSITION = 0x428CA6DBD1094446;
@@ -226,6 +258,9 @@ namespace
 		constexpr UINT64 HAS_COLLISION_LOADED_AROUND_ENTITY = 0xE9676F61BC0B3321;
 		constexpr UINT64 SET_VEH_RADIO_STATION = 0x1B9C0099CB942AC6;          // vehicle, station name ("OFF" = off)
 		constexpr UINT64 IS_DISABLED_CONTROL_JUST_PRESSED = 0x91AEF906BCA88877;
+		// v2.51: did a knocked prop really go over in GTA (measured 1 s after)
+		constexpr UINT64 HAS_OBJECT_BEEN_BROKEN = 0x8ABFB70C49CC43E2;
+		constexpr UINT64 GET_ENTITY_UPRIGHT_VALUE = 0x95EED5A694951F9F;
 	}
 
 	// GTA control ids (input group 0)
@@ -452,7 +487,7 @@ namespace
 		float       worldTileM = 8.0f;        // WorldTileM: tile size (metres)
 		float       worldStepNear = 0.5f;     // WorldStepM: point spacing (finest)
 		float       worldCoarseM = 2.0f;      // WorldCoarseM (v2.41): first pass every this many metres; only cells that aren't flat get the fine spacing
-		float       worldRefineCm = 4.0f;     // WorldRefineCm: a cell this far off flat (cm) gets the next finer points (v2.42: 4, was 3)
+		float       worldRefineCm = 1.5f;     // WorldRefineCm: a cell this far off flat (cm) gets the next finer points (v2.56: 1.5; v2.52: 2, was 4)
 		float       worldRefineSoftCm = 8.0f; // WorldRefineSoftCm (v2.42): the same for soft ground (grass, dirt, sand...)
 		float       worldDraftS = 2.0f;       // WorldDraftS (v2.42): at speed, road the car reaches within this many seconds goes to BeamNG as a 2 m draft first
 		float       worldPrebuildM = 96.0f;   // WorldPrebuildM (v2.42): the ring around the car measured with spare rays (0 = off)
@@ -470,6 +505,7 @@ namespace
 		float       worldZLift = 200.0f;      // WorldZLift: GTA's ground this far above BeamNG's own map
 		float       worldRebaseM = 2000.0f;   // WorldRebaseM: a new origin at F10 when the car is this far from the old one
 		float       worldFallM = 3.0f;        // WorldFallCheckM: BeamNG's car this far under GTA's ground = it fell through
+		float       worldFallWaitS = 2.5f;    // WorldFallWaitS (v2.62): ... for this long (s) before it is put back
 		float       driveStartMaxKmh = 5.0f;  // DriveStartMaxKmh: F10 on only below this speed (World=1)
 		bool        exitKeepSpeed = true;     // DriveExitKeepSpeed: F10 off hands BeamNG's speed to GTA's car
 		float       quietVolume = 0.0f;       // BeamNGQuietVolume: BeamNG's volume while not driving in session mode (0..1 of its own)
@@ -496,7 +532,14 @@ namespace
 		bool        propSolid = true;         // PropSolid: big props (and the ones GtaBeamD1_props.json calls solid) are boxes in BeamNG
 		bool        dents = true;             // Dents: BeamNG's dents and bent parts shown on the drawn car
 		float       dentHz = 20.0f;           // DentsPerSecond: how often BeamNG sends its car's shape
-		float       driveGravity = 1.10f;     // DriveGravity: BeamNG's gravity x this while GTA drives (1 = BeamNG's own)
+		float       driveGravity = 1.1f;      // DriveGravity: BeamNG's gravity x this while GTA drives (1 = BeamNG's own; v2.62: 1.1 again, v2.51: 1.0)
+		float       propBreak = 1.0f;         // PropBreak: how hard BeamNG's car must hit a breakaway prop before it breaks (x)
+		bool        worldLanding = true;      // WorldLanding: v2.51: jumps: GTA's ground built where the car will land
+		bool        propPhysics = true;       // PropPhysics: v2.52: props as weighted boxes BeamNG simulates (GTA's prop copies them)
+		int         propPhysicsMax = 10;      // PropPhysicsMax: v2.52: that many at once (each one may hitch BeamNG for a moment when it comes)
+		bool        trafficCollision = true;  // TrafficCollision: v2.7: GTA's cars and people and BeamNG's car push each other
+		bool        weapons = true;           // Weapons: v2.6: GTA's bullets and explosions hit BeamNG's car; fire; the driver gets hurt
+		int         carExplosion = 0;         // CarExplosion: v2.6: how the burning car blows up: 0 gta (GTA's explosion pushes BeamNG's car), 1 beamng (+ BeamNG's own)
 	} g_cfg;
 
 	const char* kSec = "D1";
@@ -787,7 +830,7 @@ namespace
 				false);
 			c.beamAlso = NameList(path, "BeamNGActionsAlso", "", false);
 			// v2.43: your repair binding (RB+LB+X) repairs the car where it is (these actions would put BeamNG's car somewhere else)
-			c.repairActs = NameList(path, "BeamNGRepairActions", "reset_physics, reset_all_physics, recover_vehicle, recover_vehicle_alt, recover_to_last_road, loadHome", false);
+			c.repairActs = NameList(path, "BeamNGRepairActions", "reset_physics, reset_all_physics, recover_vehicle, recover_vehicle_alt, recover_to_last_road, loadHome, reload_vehicle, reload_all_vehicles", false);
 			c.pauseSync = GetPrivateProfileIntA(kSec, "PauseSync", 1, path) != 0;
 			c.driveHud = GetPrivateProfileIntA(kSec, "DriveCheckText", 0, path) != 0;
 			GetPrivateProfileStringA(kSec, "BeamNGPadBindings", "auto", dv, sizeof(dv), path);
@@ -861,7 +904,7 @@ namespace
 			};
 			c.worldStepNear = fitStep(c.worldStepNear);
 			c.worldCoarseM = std::clamp(IniFloat(path, "WorldCoarseM", 2.0f), 0.0f, 8.0f);
-			c.worldRefineCm = std::clamp(IniFloat(path, "WorldRefineCm", 4.0f), 0.5f, 100.0f);
+			c.worldRefineCm = std::clamp(IniFloat(path, "WorldRefineCm", 1.5f), 0.5f, 100.0f);
 			c.worldRefineSoftCm = std::clamp(IniFloat(path, "WorldRefineSoftCm", 8.0f), 0.5f, 100.0f);
 			c.worldDraftS = std::clamp(IniFloat(path, "WorldDraftS", 2.0f), 0.0f, 10.0f);
 			c.worldPrebuildM = std::clamp(IniFloat(path, "WorldPrebuildM", 96.0f), 0.0f, 400.0f);
@@ -879,6 +922,7 @@ namespace
 			c.worldZLift = std::clamp(IniFloat(path, "WorldZLift", 200.0f), 0.0f, 5000.0f);
 			c.worldRebaseM = std::clamp(IniFloat(path, "WorldRebaseM", 2000.0f), 200.0f, 20000.0f);
 			c.worldFallM = std::clamp(IniFloat(path, "WorldFallCheckM", 3.0f), 0.5f, 50.0f);
+			c.worldFallWaitS = std::clamp(IniFloat(path, "WorldFallWaitS", 2.5f), 0.0f, 30.0f);
 			c.driveStartMaxKmh = std::clamp(IniFloat(path, "DriveStartMaxKmh", 5.0f), 0.0f, 400.0f);
 			c.exitKeepSpeed = GetPrivateProfileIntA(kSec, "DriveExitKeepSpeed", 1, path) != 0;
 			// v2.43
@@ -902,11 +946,27 @@ namespace
 			c.propSolid = GetPrivateProfileIntA(kSec, "PropSolid", 1, path) != 0;
 			c.dents = GetPrivateProfileIntA(kSec, "Dents", 1, path) != 0;
 			c.dentHz = std::clamp(IniFloat(path, "DentsPerSecond", 20.0f), 1.0f, 60.0f);
-			c.driveGravity = std::clamp(IniFloat(path, "DriveGravity", 1.10f), 0.5f, 3.0f);
+			c.driveGravity = std::clamp(IniFloat(path, "DriveGravity", 1.1f), 0.5f, 3.0f);
+			c.propBreak = std::clamp(IniFloat(path, "PropBreak", 1.0f), 0.1f, 10.0f);
+			c.worldLanding = GetPrivateProfileIntA(kSec, "WorldLanding", 1, path) != 0;
+			c.propPhysics = GetPrivateProfileIntA(kSec, "PropPhysics", 1, path) != 0;
+			c.propPhysicsMax = std::clamp(int(GetPrivateProfileIntA(kSec, "PropPhysicsMax", 10, path)), 1, 40);
 			Log("settings: v2.5: ground rays %.1f m up / %.1f m down from the level; walls %d (scan %.2f m up, lines %.2f m apart, %.2f ms a frame); props %d "
 			    "(within %.0f m, push x%.2f, bump x%.2f, big ones solid %d); dents %d (%.0f a second); BeamNG gravity x%.2f while GTA drives",
 				c.worldUpM, c.worldDownM, int(c.worldWalls), c.worldWallProbeM, c.worldWallStepM, c.worldWallMs, int(c.props), c.propRangeM, c.propPush, c.propBump,
 				int(c.propSolid), int(c.dents), c.dentHz, c.driveGravity);
+			Log("settings: v2.51: breakaway props break after BeamNG's car lost x%.2f of their speed against them; jumps: ground built where the car lands %d",
+				c.propBreak, int(c.worldLanding));
+			Log("settings: v2.52: physics props %d (%d at once); ground heights to BeamNG in mm", int(c.propPhysics), c.propPhysicsMax);
+			c.weapons = GetPrivateProfileIntA(kSec, "Weapons", 1, path) != 0;
+			c.trafficCollision = GetPrivateProfileIntA(kSec, "TrafficCollision", 1, path) != 0;
+			{
+				char ce[32] = "";
+				GetPrivateProfileStringA(kSec, "CarExplosion", "gta", ce, sizeof(ce), path);
+				c.carExplosion = (!_stricmp(ce, "beamng") || !strcmp(ce, "1")) ? 1 : 0;
+			}
+			Log("settings: v2.6: weapons and explosions on BeamNG's car %d (GtaBeamD1_weapons.json); the burning car blows up %s", int(c.weapons),
+				c.carExplosion ? "BeamNG's way (its fuel explodes) + GTA's explosion" : "with GTA's explosion");
 			Log("settings: v2.43 GTA ground: levels %.1f m apart (bridges), edges %.1f m high leave the ground below out, static world %d triangles within %.0f m, "
 			    "filled at %.1f tiles a second when standing",
 				c.worldLevelM, c.worldDropM, c.worldKeepTris, c.worldKeepM, c.worldFillPerS);
@@ -914,9 +974,9 @@ namespace
 				c.worldRefineCm, c.worldRefineSoftCm, c.worldDraftS, c.worldPrebuildM, c.worldMap ? "on" : "off", c.worldMapReadM);
 			Log("settings: v2.41 GTA ground in BeamNG %s: tiles %.0f m, first pass every %.2f m, finest %.2f m where a cell is %.1f cm off flat, %.0f m around the car, %.1f s ahead x "
 			    "%.0f m wide, %d rays per frame (%d waiting at most) + immediate rays for %.2f ms a frame within %.1f s, %d tiles at once, %d tiles remembered, %.0f m above "
-			    "BeamNG's map, new origin past %.0f m, fall check %.1f m; F10 below %.0f km/h; F10 off keeps speed %d",
+			    "BeamNG's map, new origin past %.0f m, fall check %.1f m for %.1f s; F10 below %.0f km/h; F10 off keeps speed %d",
 				c.world ? "ON" : "off", c.worldTileM, c.worldCoarseM, c.worldStepNear, c.worldRefineCm, c.worldRadius, c.worldAheadS, c.worldWidth, c.worldRays,
-				c.worldInFlight, c.worldSyncMs, c.worldUrgentS, c.worldTilesWork, c.worldCacheTiles, c.worldZLift, c.worldRebaseM, c.worldFallM, c.driveStartMaxKmh,
+				c.worldInFlight, c.worldSyncMs, c.worldUrgentS, c.worldTilesWork, c.worldCacheTiles, c.worldZLift, c.worldRebaseM, c.worldFallM, c.worldFallWaitS, c.driveStartMaxKmh,
 				int(c.exitKeepSpeed));
 		}
 		Log("settings: frame delay %d, fov %s, tolerance %.4f + %.3f m, depth source %s, depth Z %s, near scale %.3f, key 0x%02X", c.frameDelay,
@@ -1161,6 +1221,29 @@ namespace
 	std::atomic<bool>           g_haveModel{ false };  // the render thread has a car to draw
 	std::string                 g_lastCarPath;         // guarded by g_modelMx
 	std::atomic<float>          g_modelSize[3] = {};   // width, length, height of the loaded car
+	std::atomic<uint64_t>       g_dgBroken[4] = {};    // v2.6: the car's breakable groups (car::Model::dgNames) BeamNG broke (bit per group)
+	// v2.62: bullet holes on the drawn car (car space x y z, radius), the newest over the oldest past kHoles
+	constexpr int               kHoles = 128;  // v2.7: 64 -> 128 (your 2.63 test: a riddled side ran out)
+	std::mutex                  g_holeMx;
+	float                       g_holes[kHoles][8] = {};  // v2.7: centre, radius; the bullet's direction (car frame), 0
+	int                         g_holeN = 0, g_holeNext = 0;
+	float                       g_burnt = 0;  // v2.7: the drawn car charred (0..1) after it blew up; off when repaired
+	std::atomic<uint32_t>       g_holeGen{ 0 };
+	// v2.63: a cracked windscreen / lamp shatters out after more hits on it: each breakable group's box (car space, from the
+	// drawn car's own vertices), hits on it since it cracked, and the shattered ones (bit per group, drawn like hidden glass)
+	std::vector<std::array<float, 6>> g_dgBox;  // guarded by g_holeMx
+	int                               g_dgHits[256] = {};
+	std::atomic<uint64_t>             g_dgShatter[4] = {};
+	void HolesClear(const char* why)
+	{
+		std::lock_guard<std::mutex> lk(g_holeMx);
+		if (g_holeN) Log("weapons: %d bullet holes taken off the drawn car (%s)", g_holeN, why);
+		g_holeN = g_holeNext = 0;
+		g_burnt = 0;
+		++g_holeGen;
+		memset(g_dgHits, 0, sizeof(g_dgHits));
+		for (auto& b : g_dgShatter) b.store(0);
+	}
 
 	// ---------------------------------------------------------------------------------------
 	// Script thread: natives, keys, the target GTA car
@@ -1271,7 +1354,10 @@ namespace
 			CallVoid(N::SET_ENTITY_VISIBLE, ped, 0, 0);
 			g_hiddenPed = ped;
 		} else if (!want && g_hiddenPed) {
-			if (Call<int>(N::DOES_ENTITY_EXIST, g_hiddenPed)) CallVoid(N::SET_ENTITY_VISIBLE, g_hiddenPed, 1, 0);
+			if (Call<int>(N::DOES_ENTITY_EXIST, g_hiddenPed)) {
+				CallVoid(N::SET_ENTITY_VISIBLE, g_hiddenPed, 1, 0);
+				CallVoid(N::RESET_ENTITY_ALPHA, g_hiddenPed);  // v2.61: (the hidden car's alpha 0 stayed on you as you got out)
+			}
 			g_hiddenPed = 0;
 		}
 	}
@@ -1689,6 +1775,7 @@ namespace
 		std::string name[kDrvWheels];
 		double      c[kDrvWheels][3] = {};
 		double      radius[kDrvWheels] = {};
+		std::vector<std::string> dgNames;  // v2.6: the car's breakable groups (glass, lights), as the car file's draws know them
 	} g_drvModel;
 	std::atomic<uint32_t> g_modelGen{ 0 };  // counts loaded car files
 
@@ -1739,6 +1826,9 @@ namespace
 		uint32_t          repCount = 0;
 		std::vector<std::string> dmQ;  // v2.5: "dm" messages (BeamNG's nodes that moved: dents), oldest first
 		uint32_t          dmCount = 0, dmLost = 0;
+		std::vector<std::string> pbkQ;  // v2.51: "pbk" (BeamNG's car broke a prop's box: knock it over in GTA)
+		std::vector<std::string> ppQ;   // v2.52: physics props: "pp" poses, "pk" knocked, "pqf" one failed, "pqs" they work or not
+		std::vector<std::string> fxQ;   // v2.6: "fx" from BeamNG's car: hits it took, its fire, its explosion, its broken glass
 	} g_dnet;
 
 	struct DriveState
@@ -1801,6 +1891,7 @@ namespace
 		double   rotErrMax = 0;
 		bool     rotFailed = false;
 		bool     frozen = false;
+		bool     foot = false;  // v2.61: you got out with drive mode on: BeamNG keeps its car parked
 		// wheels for drawing (from the last interpolated pose, car space)
 		bool     wHave = false;
 		bool     wOk[kDrvWheels] = {};
@@ -1897,6 +1988,8 @@ namespace
 		double   goodX[3] = {}, goodF[3] = {}, goodU[3] = {};
 		uint32_t falls = 0;
 		double   fallT = 0;
+		double   underT = 0;           // v2.62: since when BeamNG's car is under GTA's ground (0: it isn't)
+		int      underLogs = 0;
 		double   tpX[3] = {}, tpF[3] = {}, tpU[3] = {};  // where the last teleport put the car
 		int      setupNote = 0;        // state 3 messages shown
 		// v2.41
@@ -2216,10 +2309,9 @@ namespace
 	// ---------------------------------------------------------------------------------------
 	// v2.5 (D2): dents. BeamNG's car sends how far its nodes moved since the drive started, in the car's own frame
 	// (driving and turning don't count, only bending): "dm" messages, each one for a range of node ids. The car
-	// file says which nodes each vertex follows (carmodel.cpp). Here each node also gets a turn (fitted to its
-	// neighbours: the light on a bent panel), and the render thread copies it all to the video card (DentsUpload).
+	// file says which triangle of nodes each vertex sits in (carmodel.cpp, v2.53), and the render thread copies the
+	// moves to the video card (DentsUpload), where the shader puts every vertex back in its moved triangle.
 	// ---------------------------------------------------------------------------------------
-	constexpr double kDentOffM = 1.5;  // a node farther than this from its place came off the car (a part on the road)
 
 	struct DentModel
 	{
@@ -2227,7 +2319,6 @@ namespace
 		std::vector<int>                   cid;       // BeamNG's node id per node
 		std::vector<float>                 rest;      // xyz per node (car space, at export)
 		std::vector<uint8_t>               wheel;     // a wheel's node (turns with the wheel: its moves are left out)
-		std::vector<std::vector<uint16_t>> nbr, rev;  // neighbours (its turn is fitted to them), and who uses it as one
 		std::vector<int>                   order;     // nodes sorted by cid
 		std::vector<int>                   sortedCid;
 		std::vector<int>                   idxOfCid;  // cid -> node (-1: none)
@@ -2239,7 +2330,7 @@ namespace
 	struct DentShared  // script thread -> render thread
 	{
 		SRWLOCK            lock = SRWLOCK_INIT;
-		std::vector<float> data;  // per node: how far it moved (xyz, 0), its turn (quaternion xyzw)
+		std::vector<float> data;  // per node: how far it moved (xyz, 0), where it is on the car (xyz, 0)
 		uint32_t           gen = 0;
 		uint64_t           seq = 0;
 	} g_dentShared;
@@ -2248,14 +2339,14 @@ namespace
 	struct DentState
 	{
 		std::shared_ptr<DentModel> m;
-		std::vector<float>         off, q, nv;
+		std::vector<float>         off, tgt, nv;  // drawn (eased), BeamNG's newest, a message's
+		double                     easeT = 0;
 		std::vector<uint32_t>      stamp;
 		uint32_t                   stampNow = 0;
-		std::vector<uint8_t>       dirty;
 		bool                       any = false;      // a node is moved now (published)
 		bool                       pending = false;  // changes not published yet
 		double                     statT = 0;
-		uint32_t                   msgs = 0, entries = 0, unknown = 0, bad = 0, pubs = 0, fits = 0, wrongCar = 0;
+		uint32_t                   msgs = 0, entries = 0, unknown = 0, bad = 0, pubs = 0, wrongCar = 0;
 		uint32_t                   lostSeen = 0;
 		bool                       warnedNodes = false, warnedNone = false, firstMove = false;
 		int                        changeLogs = 0, movedLogged = 0, movedNow = 0;
@@ -2263,72 +2354,13 @@ namespace
 		bool                       settleCheck = false;
 	} g_dent;
 
-	// the turn (quaternion x y z w) that best turns the vectors a[k] into b[k]: Horn's method (1987), the eigenvector
-	// of the largest eigenvalue of a 4x4 matrix made from their products, found with Jacobi rotations. bias leans it
-	// toward no turn (two neighbours on a line leave one turn open).
-	bool FitTurn(const double (*a)[3], const double (*b)[3], int n, double bias, float q[4])
-	{
-		double S[3][3] = {};
-		for (int k = 0; k < n; ++k)
-			for (int r = 0; r < 3; ++r)
-				for (int c = 0; c < 3; ++c) S[r][c] += a[k][r] * b[k][c];
-		for (int r = 0; r < 3; ++r) S[r][r] += bias;
-		double N[4][4] = { { S[0][0] + S[1][1] + S[2][2], S[1][2] - S[2][1], S[2][0] - S[0][2], S[0][1] - S[1][0] },
-			{ S[1][2] - S[2][1], S[0][0] - S[1][1] - S[2][2], S[0][1] + S[1][0], S[2][0] + S[0][2] },
-			{ S[2][0] - S[0][2], S[0][1] + S[1][0], -S[0][0] + S[1][1] - S[2][2], S[1][2] + S[2][1] },
-			{ S[0][1] - S[1][0], S[2][0] + S[0][2], S[1][2] + S[2][1], -S[0][0] - S[1][1] + S[2][2] } };
-		double V[4][4] = { { 1, 0, 0, 0 }, { 0, 1, 0, 0 }, { 0, 0, 1, 0 }, { 0, 0, 0, 1 } };
-		double scale = 0;
-		for (int p = 0; p < 4; ++p)
-			for (int r = 0; r < 4; ++r) scale = std::max(scale, fabs(N[p][r]));
-		if (!(scale > 1e-12) || !std::isfinite(scale)) return false;
-		for (int sweep = 0; sweep < 16; ++sweep) {
-			double offd = 0;
-			for (int p = 0; p < 4; ++p)
-				for (int r = p + 1; r < 4; ++r) offd += N[p][r] * N[p][r];
-			if (offd < 1e-24 * scale * scale) break;
-			for (int p = 0; p < 3; ++p) {
-				for (int r = p + 1; r < 4; ++r) {
-					if (fabs(N[p][r]) < 1e-15 * scale) continue;
-					const double th = (N[r][r] - N[p][p]) / (2.0 * N[p][r]);
-					const double t = (th >= 0 ? 1.0 : -1.0) / (fabs(th) + sqrt(th * th + 1.0));
-					const double c = 1.0 / sqrt(t * t + 1.0), s = t * c;
-					for (int k = 0; k < 4; ++k) {
-						const double kp = N[k][p], kr = N[k][r];
-						N[k][p] = c * kp - s * kr;
-						N[k][r] = s * kp + c * kr;
-					}
-					for (int k = 0; k < 4; ++k) {
-						const double pk = N[p][k], rk = N[r][k];
-						N[p][k] = c * pk - s * rk;
-						N[r][k] = s * pk + c * rk;
-					}
-					for (int k = 0; k < 4; ++k) {
-						const double kp = V[k][p], kr = V[k][r];
-						V[k][p] = c * kp - s * kr;
-						V[k][r] = s * kp + c * kr;
-					}
-				}
-			}
-		}
-		int best = 0;
-		for (int k = 1; k < 4; ++k)
-			if (N[k][k] > N[best][best]) best = k;
-		double w = V[0][best], x = V[1][best], y = V[2][best], z = V[3][best];
-		const double l = sqrt(w * w + x * x + y * y + z * z);
-		if (!(l > 1e-9) || !std::isfinite(l)) return false;
-		if (w < 0) w = -w, x = -x, y = -y, z = -z;
-		q[0] = float(x / l), q[1] = float(y / l), q[2] = float(z / l), q[3] = float(w / l);
-		return true;
-	}
-
 	// the dents data of the car file (LoadCar, on the loader thread)
 	std::shared_ptr<DentModel> DentModelOf(const car::Model& model)
 	{
 		auto         dm = std::make_shared<DentModel>();
 		const size_t n = model.nodeCid.size();
 		dm->note = model.skinNote;
-		if (model.skinned <= 0 || n == 0 || model.nodePos.size() != n * 3 || model.nodeNbr.size() != n) return dm;
+		if (model.skinned <= 0 || n == 0 || model.nodePos.size() != n * 3) return dm;
 		int mx = 0;
 		for (int c : model.nodeCid) mx = std::max(mx, c);
 		if (mx > 4000000) {
@@ -2339,11 +2371,6 @@ namespace
 		dm->rest = model.nodePos;
 		dm->wheel = model.nodeWheel;
 		dm->wheel.resize(n, 0);
-		dm->nbr = model.nodeNbr;
-		dm->rev.assign(n, {});
-		for (size_t i = 0; i < n; ++i)
-			for (uint16_t j : dm->nbr[i])
-				if (j < n) dm->rev[j].push_back(uint16_t(i));
 		dm->idxOfCid.assign(size_t(mx) + 1, -1);
 		for (size_t i = 0; i < n; ++i)
 			if (dm->cid[i] >= 0) dm->idxOfCid[size_t(dm->cid[i])] = int(i);
@@ -2356,7 +2383,7 @@ namespace
 		return dm;
 	}
 
-	// script thread, every tick: BeamNG's "dm" messages -> node moves and turns -> g_dentShared
+	// script thread, every tick: BeamNG's "dm" messages -> node moves -> g_dentShared
 	void DentsTick()
 	{
 		DentState& d = g_dent;
@@ -2371,10 +2398,8 @@ namespace
 				d.m = std::move(nm);
 				const size_t n = d.m->cid.size();
 				d.off.assign(n * 3, 0.0f);
+				d.tgt.assign(n * 3, 0.0f);
 				d.nv.assign(n * 3, 0.0f);
-				d.q.assign(n * 4, 0.0f);
-				for (size_t i = 0; i < n; ++i) d.q[i * 4 + 3] = 1.0f;
-				d.dirty.assign(n, 0);
 				d.stamp.assign(n, 0);
 				d.stampNow = 0;
 				d.any = false;
@@ -2405,7 +2430,7 @@ namespace
 			// switched off (ini): the car as drawn
 			if (d.any) {
 				std::fill(d.off.begin(), d.off.end(), 0.0f);
-				for (size_t i = 0; i < n; ++i) d.q[i * 4] = d.q[i * 4 + 1] = d.q[i * 4 + 2] = 0.0f, d.q[i * 4 + 3] = 1.0f;
+				std::fill(d.tgt.begin(), d.tgt.end(), 0.0f);
 				d.any = false;
 				d.pending = true;
 			}
@@ -2472,59 +2497,19 @@ namespace
 				const bool   set = d.stamp[i] == d.stampNow;
 				for (int c = 0; c < 3; ++c) {
 					const float v = set ? d.nv[i * 3 + c] : 0.0f;
-					if (fabsf(v - d.off[i * 3 + c]) > 0.0005f) {
-						d.off[i * 3 + c] = v;
-						d.dirty[i] = 1;
+					if (fabsf(v - d.tgt[i * 3 + c]) > 0.0005f) {
+						d.tgt[i * 3 + c] = v;
 						changed = true;
 					}
 				}
 			}
 		}
 		if (changed) {
-			// turns: of the nodes that moved, and of the nodes that have them as neighbours
-			std::vector<int> fit;
-			for (size_t i = 0; i < n; ++i) {
-				if (!d.dirty[i]) continue;
-				d.dirty[i] = 0;
-				fit.push_back(int(i));
-				for (uint16_t j : m.rev[i]) fit.push_back(int(j));
-			}
-			std::sort(fit.begin(), fit.end());
-			fit.erase(std::unique(fit.begin(), fit.end()), fit.end());
-			double a[16][3], b[16][3];
-			for (int i : fit) {
-				const std::vector<uint16_t>& nb = m.nbr[size_t(i)];
-				const float*                 oi = &d.off[size_t(i) * 3];
-				bool                         moved = oi[0] != 0 || oi[1] != 0 || oi[2] != 0;
-				int                          k = 0;
-				double                       len2 = 0;
-				for (uint16_t j : nb) {
-					if (k >= 16 || j >= n) break;
-					const float* oj = &d.off[size_t(j) * 3];
-					moved = moved || oj[0] != 0 || oj[1] != 0 || oj[2] != 0;
-					for (int c = 0; c < 3; ++c) {
-						a[k][c] = double(m.rest[size_t(j) * 3 + c]) - m.rest[size_t(i) * 3 + c];
-						b[k][c] = a[k][c] + double(oj[c]) - oi[c];
-					}
-					const double la = sqrt(a[k][0] * a[k][0] + a[k][1] * a[k][1] + a[k][2] * a[k][2]);
-					const double lb = sqrt(b[k][0] * b[k][0] + b[k][1] * b[k][1] + b[k][2] * b[k][2]);
-					if (fabs(lb - la) > 0.5) continue;  // (torn away from this node: no part of its turn)
-					len2 += la * la;
-					++k;
-				}
-				float* qi = &d.q[size_t(i) * 4];
-				if (!moved || k < 2 || !FitTurn(a, b, k, 0.01 * len2, qi)) {
-					qi[0] = qi[1] = qi[2] = 0.0f;
-					qi[3] = 1.0f;
-				} else {
-					++d.fits;
-				}
-			}
 			bool   any = false;
 			int    movedNow = 0;
 			double most = 0;
 			for (size_t i = 0; i < n; ++i) {
-				const float* o = &d.off[i * 3];
+				const float* o = &d.tgt[i * 3];
 				const double l = sqrt(double(o[0]) * o[0] + double(o[1]) * o[1] + double(o[2]) * o[2]);
 				if (l > 0) {
 					any = true;
@@ -2561,21 +2546,32 @@ namespace
 				d.mostLogged = d.mostNow;
 			}
 		}
+		// v2.54: the drawn nodes ease onto BeamNG's every frame (BeamNG's DentsPerSecond came as steps: "the damaged parts
+		// look lower fps than the rest", your 2.53 test)
+		{
+			const double dt = std::clamp(now - d.easeT, 0.0, 0.1);
+			d.easeT = now;
+			const float k = float(1.0 - exp(-dt / std::clamp(0.7 / double(g_cfg.dentHz), 0.015, 0.1)));
+			bool        moving = false;
+			for (size_t q = 0; q < n * 3; ++q) {
+				const float e = d.tgt[q] - d.off[q];
+				if (e == 0.0f) continue;
+				if (fabsf(e) < 0.0003f || fabsf(e) > 3.0f) d.off[q] = d.tgt[q];  // (there; a part flung far: at once)
+				else d.off[q] += e * k;
+				moving = true;
+			}
+			if (moving) d.pending = true;
+		}
 		if (d.pending) {
 			d.pending = false;
 			AcquireSRWLockExclusive(&g_dentShared.lock);
-			g_dentShared.data.resize(n * 8);
+			g_dentShared.data.assign(n * 8, 0.0f);
 			float* o = g_dentShared.data.data();
 			for (size_t i = 0; i < n; ++i) {
-				o[i * 8] = d.off[i * 3];
-				o[i * 8 + 1] = d.off[i * 3 + 1];
-				o[i * 8 + 2] = d.off[i * 3 + 2];
-				const double l2 = double(d.off[i * 3]) * d.off[i * 3] + double(d.off[i * 3 + 1]) * d.off[i * 3 + 1] + double(d.off[i * 3 + 2]) * d.off[i * 3 + 2];
-				o[i * 8 + 3] = l2 > kDentOffM * kDentOffM ? 1.0f : 0.0f;  // came off the car (see DentW in the shader)
-				o[i * 8 + 4] = d.q[i * 4];
-				o[i * 8 + 5] = d.q[i * 4 + 1];
-				o[i * 8 + 6] = d.q[i * 4 + 2];
-				o[i * 8 + 7] = d.q[i * 4 + 3];
+				for (int c = 0; c < 3; ++c) {
+					o[i * 8 + c] = d.off[i * 3 + c];
+					o[i * 8 + 4 + c] = m.rest[i * 3 + c];  // where it is on the car (the shader rebuilds each vertex's triangle)
+				}
 			}
 			g_dentShared.gen = m.gen;
 			++g_dentShared.seq;
@@ -2587,16 +2583,16 @@ namespace
 				int    movedNow = 0;
 				double most = 0;
 				for (size_t i = 0; i < n; ++i) {
-					const float* o = &d.off[i * 3];
+					const float* o = &d.tgt[i * 3];
 					const double l = sqrt(double(o[0]) * o[0] + double(o[1]) * o[1] + double(o[2]) * o[2]);
 					if (l > 0) ++movedNow, most = std::max(most, l);
 				}
 				Log("dents: %u messages from BeamNG (%u node moves, %u unknown nodes, %u bad, %u for another car, %u lost), %d of %zu nodes moved now (the most %.1f cm), "
-				    "%u turns fitted, %u updates, %u copies to the video card",
-					d.msgs, d.entries, d.unknown, d.bad, d.wrongCar, lost - d.lostSeen, movedNow, n, most * 100.0, d.fits, d.pubs, g_dentUploads.load());
+				    "%u updates, %u copies to the video card",
+					d.msgs, d.entries, d.unknown, d.bad, d.wrongCar, lost - d.lostSeen, movedNow, n, most * 100.0, d.pubs, g_dentUploads.load());
 			}
 			d.statT = now;
-			d.msgs = d.entries = d.unknown = d.bad = d.fits = d.pubs = d.wrongCar = 0;
+			d.msgs = d.entries = d.unknown = d.bad = d.pubs = d.wrongCar = 0;
 			d.lostSeen = lost;
 		}
 	}
@@ -2657,7 +2653,10 @@ namespace
 			dm.radius[i] = std::max(0.1f, w.radius);
 		}
 		if (model->wheels.size() > size_t(kDrvWheels)) Log("drive: the car has %zu wheels; drive mode uses the first %d", model->wheels.size(), kDrvWheels);
+		dm.dgNames = model->dgNames;  // v2.6
+		for (auto& b : g_dgBroken) b.store(0);
 		std::shared_ptr<DentModel> dents = DentModelOf(*model);  // v2.5
+		if (model->skinNote.find("export the car again") != std::string::npos) Notify("D1: export the car again (Shift+F11) for the 2.53 dents");
 		std::lock_guard<std::mutex> lk(g_modelMx);
 		g_lastCarPath = path;
 		g_pendingModel = std::move(model);
@@ -3085,6 +3084,18 @@ namespace
 					}
 					g_dnet.dmQ.push_back(std::move(s));
 					++g_dnet.dmCount;
+					ReleaseSRWLockExclusive(&g_dnet.lock);
+				} else if (ty == "pbk") {
+					AcquireSRWLockExclusive(&g_dnet.lock);
+					if (g_dnet.pbkQ.size() < 256) g_dnet.pbkQ.push_back(std::move(s));
+					ReleaseSRWLockExclusive(&g_dnet.lock);
+				} else if (ty == "fx") {
+					AcquireSRWLockExclusive(&g_dnet.lock);
+					if (g_dnet.fxQ.size() < 512) g_dnet.fxQ.push_back(std::move(s));
+					ReleaseSRWLockExclusive(&g_dnet.lock);
+				} else if (ty == "pp" || ty == "pk" || ty == "pqf" || ty == "pqs") {
+					AcquireSRWLockExclusive(&g_dnet.lock);
+					if (g_dnet.ppQ.size() < 1024) g_dnet.ppQ.push_back(std::move(s));
 					ReleaseSRWLockExclusive(&g_dnet.lock);
 				} else if (ty == "map_ok") {
 					AcquireSRWLockExclusive(&g_dnet.lock);
@@ -3718,6 +3729,7 @@ namespace
 	}
 
 	// drive_start, with what the BeamNG mod needs to pick your bindings (v2.01)
+	std::string WeaponsStartJson();  // v2.6 (below)
 	void DrvSendStart()
 	{
 		// v2.4: snd 0 no BeamNG sound, 1 switched for each drive (bounce), 2 session mode (sq: BeamNG's volume while not driving)
@@ -3729,8 +3741,9 @@ namespace
 		                ",\"sq\":" + sq + ",\"bgf\":" + std::to_string(g_cfg.beamBgFps) + ",\"rep\":\"" + g_cfg.repairActs + "\",\"ps\":" + (g_cfg.pauseSync ? "1" : "0");
 		// v2.5: gravity x DriveGravity while GTA drives; the car's shape (dents) this often a second (0 = off)
 		char v25[96];
-		snprintf(v25, sizeof(v25), ",\"grav\":%.3f,\"dz\":%.1f}", g_cfg.driveGravity, g_cfg.dents ? g_cfg.dentHz : 0.0f);
+		snprintf(v25, sizeof(v25), ",\"grav\":%.3f,\"dz\":%.1f", g_cfg.driveGravity, g_cfg.dents ? g_cfg.dentHz : 0.0f);
 		m += v25;
+		m += WeaponsStartJson() + "}";  // v2.6
 		DrvSend(m.c_str());
 	}
 
@@ -4019,6 +4032,11 @@ namespace
 		bool                  planeOk = false;
 		double                t0 = 0, tGap = 0;
 		int                   gaps = 0, filled = 0, partial = 0;
+		int                   heal = 0;        // v2.7: times an empty or part-empty tile near the car was measured again (this spot, last 2 min)
+		bool                  wide = false;    // v2.7: measured again with a tall ray window (a hill or deck above the level it was made for)
+		bool                  healOld = false; // v2.7: its last version stays in BeamNG while it is measured again (kept like a draft)
+		std::vector<float>    zOld;            // v2.7: that version's heights (what BeamNG's car stands on until the new one comes)
+		bool                  noGround = false;// v2.7: empty because its rays found nothing (not another level's ground left out on purpose)
 		int                   rays = 0, copied = 0;
 		bool                  draft = false;   // a 2 m draft of it is in BeamNG
 		bool                  noDraft = false; // no draft for it (too many points without ground)
@@ -4085,6 +4103,14 @@ namespace
 		std::map<int64_t, double> cost;   // wanted tiles -> how soon the car gets there (metres-equivalent)
 		std::set<int64_t> wanted, keep;
 		double   urgentM = 20, draftM = 0, spd = 0;
+		// v2.54: tiles swapped for the car's level stay in BeamNG until their new measurement replaces them (key -> by when;
+		// 2.53 took them out at once: a hole the car could reach first), and when each spot was swapped last
+		std::unordered_map<int64_t, double> stale, swapT;
+		uint32_t swapHeld = 0, staleGone = 0;
+		int      pitPts = 0, spikePts = 0;  // (v2.55: points lifted out of pits, lowered from spikes)
+		std::vector<std::pair<double, double>> spdHist;  // v2.54: (time, speed) over the last 0.3 s: hard hits are logged
+		double   hitLogT = 0;
+		int      hitLogs = 0;
 		std::map<int64_t, double> preFail;  // ring tiles GTA had no ground for: not tried again until then
 		// stats (10 s)
 		uint32_t started = 0, refused = 0, hits = 0, misses = 0, timeouts = 0, failed = 0, sent = 0, removed = 0, filledPts = 0, gapTiles = 0, errs = 0;
@@ -4094,7 +4120,16 @@ namespace
 		uint32_t syncRays = 0, syncRefused = 0;
 		uint32_t voidPts = 0, voidTiles = 0, swaps = 0, keptRm = 0, idleSent = 0, levelMiss = 0;  // v2.43
 		uint32_t noLevelTiles = 0, levelMoved = 0;                                                // v2.5
-		uint32_t wallTiles = 0, wallBoxes = 0, wallRaysN = 0, wallFlat = 0, wallLate = 0;          // v2.5: walls scanned
+		uint32_t underPts = 0, jointPts = 0;                                                      // v2.62
+		uint32_t soonPartial = 0;                                                                 // v2.63
+		// v2.51: jumps: the car in the air (GTA's ground more than 1.2 m under it) and where it will land (its flight followed
+		// against GTA's map): the ground there is built first, at the landing's level
+		bool     air = false, landOk = false;
+		double   airH = 0, airT = 0, airCheckT = 0, groundT = 0;
+		double   placedT = 0;  // v2.63: when the car was last put somewhere new (drive start, a put-back): GTA streams its collision there
+		double   landX = 0, landY = 0, landZ = 0, landGx = 0, landGy = 0, landT = 0, landAt = 0, landFirstX = 0, landFirstY = 0;
+		uint32_t jumps = 0, landRays = 0, landLogs = 0, noFall = 0;
+		uint32_t wallTiles = 0, wallBoxes = 0, wallRaysN = 0, wallFlat = 0, wallLate = 0, wallLow = 0;  // v2.5: walls scanned
 		double   wallUs = 0, wallUsMax = 0;
 		size_t   liveTris = 0;
 		double   fillT = 0;
@@ -4112,6 +4147,9 @@ namespace
 		uint32_t wsSeen = 0, mapSeen = 0;
 		std::string ws;
 		std::set<int64_t> gapLogged;
+		std::set<int64_t> healLogged;  // v2.7
+		uint32_t          healed = 0;
+		std::map<int64_t, std::pair<int, double>> healN;  // v2.7: per spot: times measured again, when last (a level swap makes a new tile: no endless loop)
 		bool     matDirty = false;
 		float    cfgTile = 0, cfgStep = 0;  // the tile layout the cache was measured with
 	} g_world;
@@ -4167,6 +4205,9 @@ namespace
 	};
 	inline double PlaneZ(const WPlane& p, double x, double y) { return p.z + p.gx * (x - p.cx) + p.gy * (y - p.cy); }
 
+	// v2.51: how far around the landing spot its level is taken (and the ground built first)
+	inline double LandR() { return std::max(12.0, 0.3 * g_world.spd); }
+
 	WPlane CarPlane()
 	{
 		const WorldState& w = g_world;
@@ -4175,6 +4216,7 @@ namespace
 	}
 
 	bool FitPlaneCalc(const WTile& t, double& pz, double& px, double& py);
+	int  WallRay(const double a[3], const double b[3], double p[3], double n[3], uint32_t* mat = nullptr);
 
 	// a live tile's plane: a finished one's own; one being measured: through its points known so far, once its first
 	// pass is done (on a ramp it has the ramp's slope: the next tile up the ramp is measured where the ramp is)
@@ -4230,6 +4272,8 @@ namespace
 		const double nx = std::clamp(w.cx, i * T, (i + 1) * T), ny = std::clamp(w.cy, j * T, (j + 1) * T);
 		if (anchored) *anchored = true;
 		if (from) *from = nullptr;
+		// v2.51: around where the car will land (a jump): the landing's level
+		if (w.landOk && hypot((i + 0.5) * T - w.landX, (j + 0.5) * T - w.landY) < LandR()) return WPlane{ w.landZ, w.landGx, w.landGy, w.landX, w.landY };
 		if (hypot(nx - w.cx, ny - w.cy) < 2.0) return CarPlane();
 		const double                                     mine = ChainCost(WKey(i, j));
 		std::array<std::pair<double, int64_t>, 8>        nb;
@@ -4437,6 +4481,10 @@ namespace
 			if (t.state == 2 && t.sent) {
 				if (acked) *acked = t.acked;
 				return GridZ(t.z, t.n, t.step, ti, tj, x, y, z);
+			}
+			if (t.healOld && !t.zOld.empty()) {  // v2.7: measured again: BeamNG still has its last version
+				if (acked) *acked = t.acked;
+				return GridZ(t.zOld, t.n, t.step, ti, tj, x, y, z);
 			}
 			if (t.draft) {
 				if (acked) *acked = t.acked;
@@ -4789,14 +4837,16 @@ namespace
 		std::string msg;
 		msg.reserve(size_t(m) * m * 5 + cells.size() * 2 + 256);
 		char buf[256];
-		snprintf(buf, sizeof(buf), "{\"t\":\"hf\",\"id\":\"g_%d_%d\",\"x0\":%.3f,\"y0\":%.3f,\"z0\":%.3f,\"st\":%.4f,\"n\":%d,%s\"z\":[", t.i, t.j, t.i * WTileM() - w.ox,
+		w.stale.erase(WKey(t.i, t.j));  // v2.54: this replaces a swapped tile's old measurement in BeamNG
+		// v2.52: heights in mm ("zs"): 2.51 sent cm, and on sloped roads that rounding left a step every 0.5 m (jolts at speed)
+		snprintf(buf, sizeof(buf), "{\"t\":\"hf\",\"id\":\"g_%d_%d\",\"x0\":%.3f,\"y0\":%.3f,\"z0\":%.3f,\"st\":%.4f,\"n\":%d,\"zs\":0.001,%s\"z\":[", t.i, t.j, t.i * WTileM() - w.ox,
 			t.j * WTileM() - w.oy, double(zmin) + g_cfg.worldZLift, t.step * S, m, draft ? "\"d\":1," : "");
 		msg += buf;
 		for (int b = 0; b < m; ++b)
 			for (int a = 0; a < m; ++a) {
 				const float z = t.z[(b * S) * n + a * S];
 				// -999999 = no ground here: the BeamNG mod leaves out the cells around it
-				snprintf(buf, sizeof(buf), (a || b) ? ",%d" : "%d", std::isfinite(z) ? int(lround((z - zmin) * 100.0)) : -999999);
+				snprintf(buf, sizeof(buf), (a || b) ? ",%d" : "%d", std::isfinite(z) ? int(lround((z - zmin) * 1000.0)) : -999999);
 				msg += buf;
 			}
 		msg += "],\"s\":[";
@@ -4817,12 +4867,44 @@ namespace
 					double(wl.z0) - zmin, double(wl.z1) - zmin, wl.dx, wl.dy, wl.len, wl.thick, wl.gs);
 				msg += buf;
 				first = false;
-				tris += 10;
+				tris += 22;  // (v2.52: corners cut)
 			}
 			msg += "]";
 		}
 		msg += "}";
 		DrvSend(msg.c_str());
+		// v2.61: WorldDebug=1: each finished tile within 25 m of the car as BeamNG gets it (heights in cm over its lowest point, '.' no
+		// ground; its walls), in GtaBeamD1_tiles_dbg.txt: for the truss bridge and the barrier teeth
+		if (g_cfg.worldDebug && !draft && hypot(t.i * WTileM() + WTileM() * 0.5 - w.cx, t.j * WTileM() + WTileM() * 0.5 - w.cy) < 25.0) {
+			static FILE* df = nullptr;
+			static long  dsz = 0;
+			if (!df) {
+				char path[MAX_PATH + 16];
+				PathNextToModule("_tiles_dbg.txt", path, sizeof(path));
+				df = fopen(path, "wb");
+			}
+			if (df && dsz < 8000000) {
+				std::string o;
+				snprintf(buf, sizeof(buf), "tile %d,%d corner GTA %.2f %.2f, %d x %d points %.2f m apart, lowest %.3f, level %.2f, %zu walls (rows along +y, x left to right)\r\n", t.i, t.j,
+					t.i * WTileM(), t.j * WTileM(), n, n, t.step, double(zmin), t.lv, t.walls.size());
+				o += buf;
+				for (int b = 0; b < n; ++b) {
+					for (int a = 0; a < n; ++a) {
+						const float z = t.z[b * n + a];
+						snprintf(buf, sizeof(buf), std::isfinite(z) ? "%6.0f" : "     .", std::isfinite(z) ? (z - zmin) * 100.0 : 0.0);
+						o += buf;
+					}
+					o += "\r\n";
+				}
+				for (const WTile::Wall& wl : t.walls) {
+					snprintf(buf, sizeof(buf), "  wall at %.2f %.2f, %.2f m long, %.2f thick, z %.2f to %.2f, along %.2f %.2f\r\n", wl.cx, wl.cy, wl.len, wl.thick, wl.z0, wl.z1, wl.dx, wl.dy);
+					o += buf;
+				}
+				fputs(o.c_str(), df);
+				fflush(df);
+				dsz += long(o.size());
+			}
+		}
 		t.acked = false;
 		t.lastUse = w.tick;
 		if (draft) {
@@ -4980,6 +5062,8 @@ namespace
 		DrvSend(m);
 		t.draft = false;
 		t.tris = 0;
+		t.healOld = false;  // v2.7
+		std::vector<float>().swap(t.zOld);
 	}
 
 	bool AnyCell(const WTile& t)
@@ -5021,6 +5105,175 @@ namespace
 		if (d.size() < 3) return false;
 		std::nth_element(d.begin(), d.begin() + d.size() / 2, d.end());
 		return d[d.size() / 2] < 1.0;
+	}
+
+	// v2.55: narrow spikes and pits in a measured tile. A spike: over 1 m above everything within 1 m around it (a truss
+	// member, a beam or a thin wall top the ray met before the road: the tall panels on your bridge in BeamNG); a pit: 15 cm
+	// or more below (a crack, a drain or a pothole where the ray slipped through to the ground under it: your "holes in the
+	// hill roads"). Spikes go down, pits up, to the ground around them: a morphological opening, then a closing, over 1 m.
+	// Steps (curbs, a deck's edge) and slopes stay as they are; walls are found by their own rays; points copied from a
+	// finished neighbour are never changed.
+	int FillPits(WTile& t, int& lowered)
+	{
+		// the tile with a margin of r points around it, filled from finished neighbours at its level where there are any
+		const int          n = t.n, r = std::clamp(int(1.0 / t.step + 0.5), 1, 4), m = n + 2 * r;
+		std::vector<float> E(size_t(m) * m, NAN), tmp(size_t(m) * m, NAN), sh(size_t(m) * m, NAN);
+		for (int dj = -1; dj <= 1; ++dj)
+			for (int di = -1; di <= 1; ++di) {
+				const WTile* nb = &t;
+				if (di || dj) {
+					auto it = g_world.tiles.find(WKey(t.i + di, t.j + dj));
+					if (it == g_world.tiles.end() || it->second.state != 2 || it->second.n != n || fabs(it->second.step - t.step) > 1e-4f ||
+					    fabs(it->second.lv - t.lv) > g_cfg.worldLevelM)
+						continue;
+					nb = &it->second;
+				}
+				for (int b = 0; b < m; ++b)
+					for (int a = 0; a < m; ++a) {
+						const int ga = a - r - di * (n - 1), gb = b - r - dj * (n - 1);  // (a point of that tile)
+						if (ga < 0 || gb < 0 || ga >= n || gb >= n) continue;
+						if ((di || dj) && std::isfinite(E[b * m + a])) continue;  // (shared edges: the tile's own)
+						E[b * m + a] = nb->z[gb * n + ga];
+					}
+			}
+		// the lowest (lo) or highest of the finite values within r of each point
+		auto pass = [&](const std::vector<float>& src, std::vector<float>& dst, bool lo) {
+			for (int b = 0; b < m; ++b)
+				for (int a = 0; a < m; ++a) {
+					float v = lo ? 1e30f : -1e30f;
+					for (int bb = std::max(0, b - r); bb <= std::min(m - 1, b + r); ++bb)
+						for (int aa = std::max(0, a - r); aa <= std::min(m - 1, a + r); ++aa) {
+							const float z = src[bb * m + aa];
+							if (std::isfinite(z)) v = lo ? std::min(v, z) : std::max(v, z);
+						}
+					dst[b * m + a] = fabsf(v) < 1e29f ? v : NAN;
+				}
+		};
+		// and only where the ground on BOTH sides of it (along a row, a column or a diagonal, within 1 m) is that much lower
+		// (a spike) or higher (a pit): where one side isn't known (the tile's edge, no finished neighbour) a wall or a curb
+		// cut by the edge isn't taken for one
+		std::vector<float> z0;  // (the values before each pass)
+		// v2.56: nanLow: a tall spike (a bridge's truss member over its deck, your 2.55 bridge) counts no ground on the tile itself
+		// (water beside the deck) as lower ground; the unknown margin (no finished neighbour) still doesn't count
+		auto both = [&](int a, int b, float d, bool nanLow) {  // d > 0: ground on both sides at least d higher; d < 0: at least -d lower
+			static const int dirs[4][2] = { { 1, 0 }, { 0, 1 }, { 1, 1 }, { 1, -1 } };
+			const float      zk = z0[b * m + a];
+			for (const auto& dv : dirs) {
+				int sides = 0;
+				for (int sg = -1; sg <= 1; sg += 2)
+					for (int q = 1; q <= r; ++q) {
+						const int aa = a + sg * dv[0] * q, bb = b + sg * dv[1] * q;
+						if (aa < 0 || bb < 0 || aa >= m || bb >= m) break;
+						const float z = z0[bb * m + aa];
+						if (nanLow && !std::isfinite(z) && aa >= r && bb >= r && aa < r + n && bb < r + n) {
+							++sides;
+							break;
+						}
+						if (std::isfinite(z) && (d > 0 ? z >= zk + d : z <= zk + d)) {
+							++sides;
+							break;
+						}
+					}
+				if (sides == 2) return true;
+			}
+			return false;
+		};
+		auto apply = [&](bool spikes) {
+			int cnt = 0;
+			z0 = E;
+			pass(E, tmp, spikes);   // opening (spikes): lowest around, then the highest of those; closing (pits): the reverse
+			pass(tmp, sh, !spikes);
+			for (int b = 0; b < n; ++b)
+				for (int a = 0; a < n; ++a) {
+					const int k = b * n + a, e = (b + r) * m + a + r;
+					if (!std::isfinite(t.z[k]) || t.src[k] == 1 || !std::isfinite(sh[e])) continue;
+					if (spikes ? (t.z[k] - sh[e] > 1.0f && both(a + r, b + r, -1.0f, t.z[k] - sh[e] > 2.5f)) : (sh[e] - t.z[k] > 0.15f && both(a + r, b + r, 0.15f, false))) {
+						t.z[k] = sh[e];
+						E[e] = sh[e];
+						++cnt;
+					}
+				}
+			return cnt;
+		};
+		lowered += apply(true);
+		return apply(false);
+	}
+
+	// v2.62: the tile's level as a gentle plane: the level it is measured for at its middle, its slope no steeper than a
+	// steep road (a level carried up a ramp next to a deck may lean 1.2 m per m: through the deck on one side)
+	inline double GentleLevel(const WTile& t, double x, double y)
+	{
+		const double cx = (t.i + 0.5) * WTileM(), cy = (t.j + 0.5) * WTileM();
+		const double c = t.hasRef ? t.lvE : t.rz + t.rx * (cx - t.rcx) + t.ry * (cy - t.rcy);
+		return c + std::clamp(double(t.rx), -0.3, 0.3) * (x - cx) + std::clamp(double(t.ry), -0.3, 0.3) * (y - cy);
+	}
+
+	// v2.62: ground far over the tile's level with open space under it is an overpass's deck (your 2.61 freeways under
+	// overpasses: the deck became the road's ground, an 8 to 14 m block across the road in BeamNG, and the falls next to it).
+	// One ray down from just under each such point (GTA's map has no back faces: from inside the deck it isn't seen): the
+	// ground under it replaces it when a car fits between and it is nearer the level. A hill or an embankment has nothing
+	// under its surface: it stays.
+	int UnderOverhead(WTile& t)
+	{
+		const double L = g_cfg.worldLevelM;
+		int          cnt = 0, rays = 0;
+		for (int k = 0; k < t.n * t.n && rays < 300; ++k) {
+			if (t.ps[k] != 2 || !std::isfinite(t.z[k])) continue;
+			const double x = t.i * WTileM() + (k % t.n) * t.step, y = t.j * WTileM() + (k / t.n) * t.step;
+			const double lv = GentleLevel(t, x, y), z = t.z[k];
+			if (z <= lv + L) continue;
+			const double A[3] = { x, y, z - 0.3 }, B[3] = { x, y, lv - L };
+			double       p[3], nn[3];
+			uint32_t     m = 0;
+			++rays;
+			if (WallRay(A, B, p, nn, &m) == 1 && z - p[2] >= 1.8 && fabs(p[2] - lv) < z - lv) {
+				t.z[k] = float(p[2]);
+				t.mat[k] = m;
+				++cnt;
+			}
+		}
+		return cnt;
+	}
+
+	// v2.62: a point with no ground at the level (none found, or the ground far under it) that has the level's ground within
+	// 1 m on both sides of it (along a row, a column or a diagonal) is a gap in a deck (an expansion joint the rays slipped
+	// through), not its edge: joined across. 2.61 left those out: a 0.5 to 1.5 m hole across the road (your "3 foot holes" on
+	// the highways). shortcut: the tile's own points only (a joint right on a tile's edge stays); look into finished
+	// neighbours like FillPits does if holes still show there.
+	int JoinGaps(WTile& t)
+	{
+		const int    n = t.n, reach = std::max(1, int(1.0 / t.step + 1e-6));
+		const double D = std::max(0.5, double(g_cfg.worldDropM));
+		auto lvAt = [&](int a, int b) { return t.rz + t.rx * (t.i * WTileM() + a * t.step - t.rcx) + t.ry * (t.j * WTileM() + b * t.step - t.rcy); };
+		auto atLevel = [&](int a, int b) {
+			if (a < 0 || b < 0 || a >= n || b >= n) return false;
+			const int k = b * n + a;
+			return t.ps[k] == 2 && std::isfinite(t.z[k]) && fabs(t.z[k] - lvAt(a, b)) <= D;
+		};
+		static const int dirs[4][2] = { { 1, 0 }, { 0, 1 }, { 1, 1 }, { 1, -1 } };
+		int cnt = 0;
+		for (int b = 0; b < n; ++b)
+			for (int a = 0; a < n; ++a) {
+				const int  k = b * n + a;
+				const bool gap = (t.ps[k] == 3 && !std::isfinite(t.z[k])) || (t.ps[k] == 2 && std::isfinite(t.z[k]) && t.z[k] < lvAt(a, b) - D);
+				if (!gap) continue;
+				for (const auto& dv : dirs) {
+					int q1 = 0, q2 = 0;
+					for (int q = 1; q <= reach && !q1; ++q)
+						if (atLevel(a + dv[0] * q, b + dv[1] * q)) q1 = q;
+					for (int q = 1; q <= reach && !q2; ++q)
+						if (atLevel(a - dv[0] * q, b - dv[1] * q)) q2 = q;
+					if (!q1 || !q2) continue;
+					const int k1 = (b + dv[1] * q1) * n + a + dv[0] * q1, k2 = (b - dv[1] * q2) * n + a - dv[0] * q2;
+					t.z[k] = float((double(t.z[k1]) * q2 + double(t.z[k2]) * q1) / (q1 + q2));
+					t.mat[k] = t.mat[q1 <= q2 ? k1 : k2];
+					t.ps[k] = 2;
+					t.src[k] = 2;
+					++cnt;
+					break;
+				}
+			}
+		return cnt;
 	}
 
 	// all points of a pass answered: the next finer pass where it's needed, or done (holes filled from neighbours / left
@@ -5082,12 +5335,17 @@ namespace
 				t.ps[k] = 2;
 				t.src[k] = 2;
 			}
+		// v2.62: an overpass's deck over this level: the ground under it (before the level checks: a tile all under a deck
+		// was left empty as "nothing at this level"), then gaps in a deck joined (before the edges are left out)
+		w.underPts += uint32_t(UnderOverhead(t));
+		w.jointPts += uint32_t(JoinGaps(t));
 		// v2.43: another level's ground next to an edge left out (a bridge deck's edge: no wall down to the road below)
 		if (VoidBelow(t)) w.voidPts += uint32_t(t.voids);
 		// v2.5: nothing at this level here: every point it measured is another level's ground (beside a deck: the road far
 		// below; your v2.43 log: such tiles became this level's ground, then were swapped and measured again and again).
 		// Left empty, unless that ground meets the tile the level came from: then it is the same road and its level was
 		// carried a little wrong: it is moved onto its own ground. (A jump: the car's own level was a guess: kept as it is.)
+		const double lvMeasured = t.lvE;
 		if (t.hasRef && !(t.refCar && t.carAir)) {
 			int    meas = 0, at = 0;
 			double nearest = 1e9;
@@ -5134,6 +5392,8 @@ namespace
 				}
 			}
 		}
+		if (t.lvE != lvMeasured) w.underPts += uint32_t(UnderOverhead(t));  // v2.62: again on the level it was moved to
+		w.pitPts += FillPits(t, w.spikePts);  // v2.55
 		for (int b = 0; b < t.n - 1; ++b)
 			for (int a = 0; a < t.n - 1; ++a) {
 				const int s = t.leaf[b * (t.n - 1) + a];
@@ -5174,23 +5434,32 @@ namespace
 				miss = 0;
 			}
 		}
-		if (miss && t.gaps >= 2) {
+		// v2.63: a tile the car reaches soon (within 2 x the "urgent" distance) goes at once with its empty cells left out (your 2.62 test: on a raised road over
+		// water at an angle to the tiles, the tiles along its edges, half road half water, waited 2 tries (2 s+) for ground that
+		// isn't there: holes at the "corners" when changing lanes). GTA has its collision loaded that close to the car.
+		// (not in the first 3 s after the car was put somewhere new: GTA may still be loading its collision there)
+		const bool soonPartial = miss && !t.pre && ChainCost(key) <= 2.0 * w.urgentM && NowSeconds() - w.placedT > 3.0 && AnyCell(t);
+		if (soonPartial && t.gaps < 2) ++w.soonPartial;
+		if (miss && (t.gaps >= 2 || soonPartial)) {
 			// the same points stayed empty after two more tries (water, the edge of a bridge or of the map): the tile goes
 			// with only those cells left out. v2.41: unless no cell has ground on all 4 corners (BeamNG can't build that:
 			// your car would wait for it): then it stays a gap for good
 			if (!AnyCell(t)) {
 				t.state = 3;
 				t.tGap = NowSeconds();
-				t.gaps = 99;  // not tried again (WorldTick: gaps < 5)
+				t.gaps = 99;  // not tried again (WorldTick: gaps < 5); v2.7: near the car, measured again (noGround)
+				t.noGround = true;
 				WorldDropDraft(t);
 				++w.gapTiles;
 				Log("ground: tile %d,%d: no ground in any of its cells (water or a hole): left empty", t.i, t.j);
 				return;
 			}
 			t.partial = miss;
+			t.tGap = NowSeconds();  // v2.7: its empty cells are measured again a few seconds later if the car is near
 			if (!w.gapLogged.count(key ^ 0x5A5A5A5A) && w.gapLogged.size() < 400) {
 				w.gapLogged.insert(key ^ 0x5A5A5A5A);
-				Log("ground: tile %d,%d: %d of %d points still have no ground after 3 tries: sent without those cells", t.i, t.j, miss, np);
+				Log("ground: tile %d,%d: %d of %d points still have no ground %s: sent without those cells", t.i, t.j, miss, np,
+					t.gaps >= 2 ? "after 3 tries" : "(the car is close: at once)");
 			}
 			miss = 0;
 			++w.partialTiles;
@@ -5228,6 +5497,40 @@ namespace
 			t.gaps = 99;
 			WorldDropDraft(t);
 			return;
+		}
+		// v2.7: a tile measured with the tall window is kept when its ground meets a finished neighbour at their shared edge (within
+		// 1 m on average: a hillside, a deck), or when none of it is more than WorldLevelM above the level it was measured for (the
+		// ground below a ridge or a bridge: a car going over the edge lands on it). Ground high above it that meets nothing (a roof,
+		// an overpass, a terrace behind a retaining wall: no car gets there) is left empty
+		if (t.wide) {
+			int con = 0;
+			for (const auto& dd : { std::array<int, 2>{ 1, 0 }, std::array<int, 2>{ -1, 0 }, std::array<int, 2>{ 0, 1 }, std::array<int, 2>{ 0, -1 } }) {
+				auto nb = w.tiles.find(WKey(t.i + dd[0], t.j + dd[1]));
+				if (nb == w.tiles.end() || nb->second.state != 2) continue;
+				int          cnt = 0;
+				const double dz = EdgeDiff(t, nb->second, cnt);
+				con += cnt >= 3 && dz < 1.0;
+			}
+			double up = -1e9;
+			for (int k = 0; k < t.n * t.n; ++k) {
+				if (!std::isfinite(t.z[k])) continue;
+				const double x = t.i * WTileM() + (k % t.n) * t.step, y = t.j * WTileM() + (k / t.n) * t.step;
+				up = std::max(up, t.z[k] - (t.rz + t.rx * (x - t.rcx) + t.ry * (y - t.rcy)));
+			}
+			t.wide = false;
+			if (!con && up > g_cfg.worldLevelM) {
+				for (size_t q = 0; q < t.z.size(); ++q) t.z[q] = NAN;
+				t.state = 3;
+				t.tGap = NowSeconds();
+				t.gaps = 99;
+				t.noGround = true;
+				if (w.healLogged.size() < 300 && w.healLogged.insert(key * 4 + 3 + 0x7000000).second)
+					Log("ground: tile %d,%d: the tall window found ground %.1f m over the level and meeting none of its neighbours (a roof, an overpass, "
+					    "a terrace): left empty", t.i, t.j, up);
+				return;
+			}
+			if (w.healLogged.size() < 300 && w.healLogged.insert(key * 4 + 3 + 0x6000000).second)
+				Log("ground: tile %d,%d: found with the tall window (%s; up to %.1f m over the level): built", t.i, t.j, con ? "meets a neighbour" : "below the level", up);
 		}
 		FitPlane(t);
 		t.lv = t.planeOk ? t.pz : t.lvE;
@@ -5318,6 +5621,13 @@ namespace
 		return t.next < np ? t.next : -1;
 	}
 
+	// v2.7: how often this spot was measured again lately (forgotten after 2 minutes)
+	int HealCount(int64_t key, double now)
+	{
+		auto it = g_world.healN.find(key);
+		return it == g_world.healN.end() || now - it->second.second > 120.0 ? 0 : it->second.first;
+	}
+
 	void RayWindow(const WTile& t, int k, float& x, float& y, float& z0, float& z1)
 	{
 		const int    a = k % t.n, b = k / t.n;
@@ -5328,6 +5638,12 @@ namespace
 		// sign over the road became ground: the big walls in your screenshots), down WorldDownM (a ramp's slope, a deck's edge)
 		z0 = float(ref + g_cfg.worldUpM);
 		z1 = float(ref - g_cfg.worldDownM);
+		// v2.7: a tile that found no ground at all near the car, measured again: the level it was made for was wrong (your 2.63
+		// screenshots 5 and 6: hills beside the road, a highway deck after a jump). Only tiles with nothing in the normal window.
+		if (t.wide) {
+			z0 = float(ref + 25.0);
+			z1 = float(ref - 30.0);
+		}
 	}
 
 	// rays for the tiles being measured, the soonest needed first. v2.42: GTA's immediate rays first (your v2.41 log: they
@@ -5430,8 +5746,44 @@ namespace
 		const double spd = sqrt(w.vx * w.vx + w.vy * w.vy);
 		w.spd = spd;
 		w.path.clear();
+		if (w.air && w.landOk) {
+			// v2.51: in the air: the ground where it lands and on from there (the way it is flying), and a little around the car
+			const double hx = spd > 1.0 ? w.vx / spd : cos(w.hd), hy = spd > 1.0 ? w.vy / spd : sin(w.hd);
+			for (int s = 0; s <= 8; ++s) w.path.push_back({ w.landX + hx * spd * 0.2 * s, w.landY + hy * spd * 0.2 * s, w.landT + 0.2 * s });
+			// v2.63: and the ground under the whole flight (your tumbling crash: it came down 65 m short of the first guess,
+			// where nothing was built, and fell through)
+			const double fdx = w.landX - w.cx, fdy = w.landY - w.cy, fl = hypot(fdx, fdy);
+			auto planAir = [&](std::set<int64_t>& out, double extra) {
+				out.clear();
+				AddDisc(out, w.landX, w.landY, LandR() + extra);
+				for (const auto& p : w.path) AddDisc(out, p[0], p[1], g_cfg.worldWidth * 0.5 + extra);
+				AddDisc(out, w.cx, w.cy, std::max(8.0, 0.3 * spd) + extra);
+				for (double s = 4.0; s < fl; s += 4.0) AddDisc(out, w.cx + fdx * s / fl, w.cy + fdy * s / fl, 6.0 + extra);
+			};
+			planAir(w.wanted, 0.0);
+			planAir(w.keep, WTileM());
+			w.cost.clear();
+			for (int64_t k : w.wanted) {
+				int i, j;
+				WIJ(k, i, j);
+				const double tx = (i + 0.5) * WTileM(), ty = (j + 0.5) * WTileM();
+				double       best = 500.0 + hypot(tx - w.cx, ty - w.cy);  // (around the car: after the landing)
+				for (const auto& p : w.path) best = std::min(best, (p[2] - w.landT) * std::max(spd, 1.0) + hypot(tx - p[0], ty - p[1]));
+				if (fl > 1.0) {  // v2.63: under the flight: nearest the car first
+					const double s = std::clamp(((tx - w.cx) * fdx + (ty - w.cy) * fdy) / (fl * fl), 0.0, 1.0);
+					best = std::min(best, 10.0 + fl * s + 2.0 * hypot(tx - (w.cx + fdx * s), ty - (w.cy + fdy * s)));
+				}
+				w.cost[k] = best;
+			}
+			w.urgentM = std::max(24.0, g_cfg.worldUrgentS * spd + 12.0);
+			w.draftM = 0.0;  // (the landing is measured finely at once: no 2 m drafts)
+			return;
+		}
 		const int    N = 24;
-		const double T = g_cfg.worldAheadS, dt = T / N;
+		// v2.56: above 40 m/s (144 km/h) the road ahead is asked for earlier, growing with the speed (your 200 mph: the car reached
+		// road not built yet, "worst 0.00 s")
+		const double fast = std::max(1.0, spd / 40.0);
+		const double T = g_cfg.worldAheadS * fast, dt = T / N;
 		double       x = w.cx, y = w.cy, h = w.haveHd ? w.hd : 0.0;
 		w.path.push_back({ x, y, 0.0 });
 		if (spd > 1.0) {
@@ -5446,7 +5798,8 @@ namespace
 		auto plan = [&](std::set<int64_t>& out, double extra) {
 			out.clear();
 			const double R = g_cfg.worldRadius;
-			const double nearR = spd < 15 ? R : std::max(12.0, R - (spd - 15) * 0.25);
+			// v2.63: rolling or upside down (a crash tumbling on): the full radius all around it, whatever its speed
+			const double nearR = (spd < 15 || w.uz < 0.6) ? R : std::max(12.0, R - (spd - 15) * 0.25);
 			AddDisc(out, w.cx, w.cy, nearR + extra);
 			const double len = std::max(R, spd * T);
 			double       done = 0;
@@ -5470,8 +5823,8 @@ namespace
 			}
 			w.cost[k] = best;
 		}
-		w.urgentM = std::max(24.0, g_cfg.worldUrgentS * spd + 12.0);
-		w.draftM = spd > 6.0 ? g_cfg.worldDraftS * spd + 12.0 : 0.0;  // v2.42: drafts only at speed
+		w.urgentM = std::max(24.0, g_cfg.worldUrgentS * spd * fast + 12.0);
+		w.draftM = spd > 6.0 ? g_cfg.worldDraftS * spd * fast + 12.0 : 0.0;  // v2.42: drafts only at speed
 	}
 
 	std::string TileIdStr(int64_t k)
@@ -5579,7 +5932,7 @@ namespace
 	} g_map;
 
 	constexpr uint32_t kMapMagic = 0x314D4247;  // "GBM1"
-	constexpr uint32_t kMapVersion = 3;         // v2.5: walls (v2.43's files are measured again: barriers were humps in the ground)
+	constexpr uint32_t kMapVersion = 5;         // v2.62: no overpass decks as the road's ground, deck joints closed (v2.52: 4; older files are measured again)
 	inline int64_t MapRegionOf(int i, int j) { return WKey(int(floor(i / 16.0)), int(floor(j / 16.0))); }
 
 	std::string MapPath(int64_t rk)
@@ -5721,13 +6074,13 @@ namespace
 		put(&nn, 1);
 		put(&K, 1);
 		std::vector<uint8_t> pidx(np, 0), kind(np, 0);
-		std::vector<int16_t> zc(np, INT16_MIN);
+		std::vector<int32_t> zc(np, INT32_MIN);
 		for (int k = 0; k < np; ++k) {
 			if (!std::isfinite(t.z[k])) {
 				kind[k] = 2;
 				continue;
 			}
-			zc[k] = int16_t(std::clamp<long>(lround((t.z[k] - zmin) * 100.0), -32767, 32767));
+			zc[k] = int32_t(lround((t.z[k] - zmin) * 1000.0));  // v2.52: mm (2.51: cm)
 			kind[k] = t.src[k] == 2 ? 0 : 1;
 			size_t q = 0;
 			while (q < pal.size() && pal[q] != t.mat[k]) ++q;
@@ -5740,7 +6093,7 @@ namespace
 		const uint8_t pn = uint8_t(pal.size());
 		put(&pn, 1);
 		put(pal.data(), pal.size() * 4);
-		put(zc.data(), size_t(np) * 2);
+		put(zc.data(), size_t(np) * 4);
 		put(pidx.data(), np);
 		put(kind.data(), np);
 		put(t.leaf.data(), t.leaf.size());
@@ -5779,11 +6132,11 @@ namespace
 		const int n = nn, np = n * n;
 		if (n != int(WTileM() / g_cfg.worldStepNear + 0.5) + 1) return false;
 		std::vector<uint32_t> pal(pn);
-		std::vector<int16_t>  zc(np);
+		std::vector<int32_t>  zc(np);
 		std::vector<uint8_t>  pidx(np), kind(np);
 		t = WTile{};
 		t.leaf.assign(size_t(n - 1) * (n - 1), 1);
-		if (!get(pal.data(), size_t(pn) * 4) || !get(zc.data(), size_t(np) * 2) || !get(pidx.data(), np) || !get(kind.data(), np) || !get(t.leaf.data(), t.leaf.size()))
+		if (!get(pal.data(), size_t(pn) * 4) || !get(zc.data(), size_t(np) * 4) || !get(pidx.data(), np) || !get(kind.data(), np) || !get(t.leaf.data(), t.leaf.size()))
 			return false;
 		t.i = i;
 		t.j = j;
@@ -5798,7 +6151,7 @@ namespace
 		t.fl.assign(np, 0);
 		for (int k = 0; k < np; ++k) {
 			if (kind[k] == 2) continue;
-			t.z[k] = zmin + zc[k] / 100.0f;
+			t.z[k] = zmin + float(zc[k] / 1000.0);
 			t.mat[k] = pidx[k] < pal.size() ? pal[pidx[k]] : 0;
 			t.ps[k] = 2;
 			t.src[k] = kind[k] == 1 ? 0 : 2;
@@ -5976,7 +6329,7 @@ namespace
 				} else if (j.path == "!old") {
 					if (!m.oldLogged) {
 						m.oldLogged = true;
-						Log("ground: the saved map from v2.43 or older isn't used (no walls; barriers were humps in the ground): those roads are measured again once");
+						Log("ground: the saved map from v2.61 or older isn't used (v2.62: roads under overpasses had the deck as their ground): those roads are measured again once");
 					}
 				}
 				for (auto& rec : j.recs) MapRecPut(r.recs[rec.first], std::move(rec.second), false);  // what was measured meanwhile wins
@@ -6063,7 +6416,10 @@ namespace
 			size_t mine = 0;
 			for (auto& kv : w.tiles) mine += kv.second.sent || kv.second.draft;
 			Log("ground: BeamNG mod %s took the mapping (tile set %.0f, it has %.0f tiles; tile mode %s: %s)", v.c_str(), epoch, n, mode.c_str(), check.c_str());
-			if (v.empty() || v < std::string("2.5")) Log("ground: WARNING: the BeamNG mod is %s, not 2.5: copy the new gtaBridge.lua (walls, dents, props need it)", v.empty() ? "old" : v.c_str());
+			if (v.empty() || v < std::string("2.53")) {
+				Log("ground: WARNING: the BeamNG mod is %s, not 2.53: copy the new gtaBridge.lua (the dents need it; 2.52: the vehicles folder too)", v.empty() ? "old" : v.c_str());
+				Notify("BeamNG mod %s is old: copy the 2.53 gtaBridge.lua and restart BeamNG", v.empty() ? "?" : v.c_str());
+			}
 			if (n == 0 && mine > 0) {
 				Log("ground: BeamNG has none of the %zu tiles sent before (restarted or the map loaded again?): sending them again from the cache", mine);
 				for (auto it = w.tiles.begin(); it != w.tiles.end();) {
@@ -6159,14 +6515,24 @@ namespace
 		g_map.readTiles = g_map.regionsRead = g_map.wroteTiles = 0;
 		Log("ground: levels: %u tiles swapped for the car's level, %u wanted tiles known only at another level (measured), %u points left out under edges (%u tiles "
 		    "all another level's); static world: %u far tiles taken out of BeamNG (budget %d triangles), %u sent while standing; v2.5: %u tiles with nothing at "
-		    "the car's level (left empty), %u levels moved onto their own ground",
-			w.swaps, w.levelMiss, w.voidPts, w.voidTiles, w.keptRm, g_cfg.worldKeepTris, w.idleSent, w.noLevelTiles, w.levelMoved);
-		w.swaps = w.levelMiss = w.voidPts = w.voidTiles = w.keptRm = w.idleSent = w.noLevelTiles = w.levelMoved = 0;
+		    "the car's level (left empty), %u levels moved onto their own ground; v2.54: %u swaps held (that spot was swapped under 5 s ago), %u swapped tiles "
+		    "taken out after 2 s without a new one, %zu waiting for their new one; v2.55: %d points lifted out of narrow pits, %d lowered from narrow spikes; "
+		    "v2.62: %u points under an overpass (the road under it, not its deck), %u points across gaps in a deck (joints) joined; v2.63: %u tiles near the car "
+		    "sent at once with their empty cells left out",
+			w.swaps, w.levelMiss, w.voidPts, w.voidTiles, w.keptRm, g_cfg.worldKeepTris, w.idleSent, w.noLevelTiles, w.levelMoved, w.swapHeld, w.staleGone, w.stale.size(), w.pitPts, w.spikePts,
+			w.underPts, w.jointPts, w.soonPartial);
+		w.swaps = w.levelMiss = w.voidPts = w.voidTiles = w.keptRm = w.idleSent = w.noLevelTiles = w.levelMoved = w.swapHeld = w.staleGone = 0;
+		w.pitPts = w.spikePts = 0;
+		w.underPts = w.jointPts = w.soonPartial = 0;
+		if (w.jumps || w.noFall)
+			Log("ground: jumps (v2.51): %u times in the air, %u rays following flights; %u times under the ground it left while still over GTA's (no reset)", w.jumps, w.landRays,
+				w.noFall);
+		w.jumps = w.landRays = w.noFall = 0;
 		if (g_cfg.worldWalls)
 			Log("ground: walls (v2.5): %u tiles scanned, %u wall boxes, %u rays (%.0f us a tile, max %.0f), %u ground points under walls flattened, %u tiles "
-			    "sent before their scan (the car was close)",
-				w.wallTiles, w.wallBoxes, w.wallRaysN, w.wallTiles ? w.wallUs / w.wallTiles : 0.0, w.wallUsMax, w.wallFlat, w.wallLate);
-		w.wallTiles = w.wallBoxes = w.wallRaysN = w.wallFlat = w.wallLate = 0;
+			    "sent before their scan (the car was close); v2.54: %u faces met too low over their foot and nothing higher up (curbs, joints, a ramp's crest: not walls)",
+				w.wallTiles, w.wallBoxes, w.wallRaysN, w.wallTiles ? w.wallUs / w.wallTiles : 0.0, w.wallUsMax, w.wallFlat, w.wallLate, w.wallLow);
+		w.wallTiles = w.wallBoxes = w.wallRaysN = w.wallFlat = w.wallLate = w.wallLow = 0;
 		w.wallUs = w.wallUsMax = 0;
 		if (!w.ws.empty()) {
 			double n = 0, b = 0, bms = 0, bmx = 0, rn = 0, rms = 0, rmx = 0, fp95 = 0, fmx = 0, q = 0, tris = 0;
@@ -6324,10 +6690,11 @@ namespace
 		double nx, ny;  // the face's normal (flat, unit), pointing out of the solid
 		double thick;   // how far the solid goes on behind the face, along the normal (0 = not known)
 		bool   paired;  // the other side of the same solid was seen too (a thin wall, a barrier)
+		double z;       // v2.54: the ray's height there
 	};
 
 	// one immediate ray of GTA's map: 1 hit (p, n), 0 nothing, -1 GTA didn't answer at once
-	int WallRay(const double a[3], const double b[3], double p[3], double n[3])
+	int WallRay(const double a[3], const double b[3], double p[3], double n[3], uint32_t* matOut)
 	{
 		const int h = Call<int>(N::START_EXPENSIVE_SYNCHRONOUS_SHAPE_TEST_LOS_PROBE, float(a[0]), float(a[1]), float(a[2]), float(b[0]), float(b[1]), float(b[2]), 1,
 			g_drv.veh, 7);
@@ -6339,6 +6706,7 @@ namespace
 		if (st != 2) return -1;
 		++g_world.wallRaysN;
 		if (!hit) return 0;
+		if (matOut) *matOut = uint32_t(mat & 0xFFFFFFFFu);
 		p[0] = end.x;
 		p[1] = end.y;
 		p[2] = end.z;
@@ -6400,12 +6768,12 @@ namespace
 			if (e0) {
 				const double x = a[0] + ux * u0, y = a[1] + uy * u0;
 				const double th = e1 ? (u1 - u0) * fabs(ux * e0->nx + uy * e0->ny) : 0.0;
-				if (inTile(x, y)) out.push_back({ x, y, e0->nx, e0->ny, th, e1 != nullptr });
+				if (inTile(x, y)) out.push_back({ x, y, e0->nx, e0->ny, th, e1 != nullptr, a[2] + dz * u0 / L });
 			}
 			if (e1) {
 				const double x = a[0] + ux * u1, y = a[1] + uy * u1;
 				const double th = e0 ? (u1 - u0) * fabs(ux * e1->nx + uy * e1->ny) : 0.0;
-				if (inTile(x, y)) out.push_back({ x, y, e1->nx, e1->ny, th, e0 != nullptr });
+				if (inTile(x, y)) out.push_back({ x, y, e1->nx, e1->ny, th, e0 != nullptr, a[2] + dz * u1 / L });
 			}
 		};
 		for (const E& e : m) {
@@ -6565,24 +6933,54 @@ namespace
 			wl.dx = float(tx);
 			wl.dy = float(ty);
 			wl.len = float(bx.t1 - bx.t0);
-			wl.thick = float(bx.thick);
+			// v2.52: thicker in BeamNG (BeamNG's developers: thin walls grab cars): one seen from one side goes on at least 0.6 m
+			// behind its face, a thin one seen from both sides is at least 0.25 m
+			double thB = bx.thick, back = 0;
+			if (bx.thin) thB = std::max(thB, 0.25);
+			else {
+				const double t1 = std::max(thB, 0.6);
+				back = (t1 - thB) * 0.5;
+				thB = t1;
+			}
+			wl.thick = float(thB);
 			// (cx, cy) is the middle of the along-range only when t0 = -t1; put it there
 			const double tm = (bx.t0 + bx.t1) * 0.5;
-			wl.cx = float(bx.cx + tx * tm);
-			wl.cy = float(bx.cy + ty * tm);
+			wl.cx = float(bx.cx + tx * tm - bx.nx * back);
+			wl.cy = float(bx.cy + ty * tm - bx.ny * back);
 			if (wl.len < 0.1f || wl.thick < 0.05f) continue;
 			t.walls.push_back(wl);
 			// the ground points measured on it go back onto the road: inside it, and up to 0.3 m past its faces and ends (a
 			// wall seen from one side only (cut by the tile's edge, a building): not past its back, where the ground may be high)
 			const double mBack = bx.thin ? 0.3 : 0.05;
+			// v2.56: down to the road beside it (the nearest point in front of its face, or behind a thin one), not to the tile's
+			// plane: on a crowned or banked road the plane is under the road at the barrier: 2.55 left a row of dips along every
+			// barrier there (your freeway "teeth")
+			auto inBand = [&](double ax, double ac) {
+				return ax >= bx.t0 - 0.3 && ax <= bx.t1 + 0.3 && ac <= bx.thick * 0.5 + 0.3 && ac >= -bx.thick * 0.5 - mBack;
+			};
+			auto roadZ = [&](int a0, int b0, double x, double y) {
+				double best = 1e30, z = TileGroundZ(t, x, y);
+				const int rr = std::clamp(int(1.5 / t.step + 0.5), 1, 6);
+				for (int bb = std::max(0, b0 - rr); bb <= std::min(n - 1, b0 + rr); ++bb)
+					for (int aa = std::max(0, a0 - rr); aa <= std::min(n - 1, a0 + rr); ++aa) {
+						const int kk = bb * n + aa;
+						if (!std::isfinite(t.z[kk]) || t.src[kk] == 3) continue;
+						const double qx = X0 + aa * t.step, qy = Y0 + bb * t.step;
+						const double qa = (qx - bx.cx) * tx + (qy - bx.cy) * ty, qc = (qx - bx.cx) * bx.nx + (qy - bx.cy) * bx.ny;
+						if (inBand(qa, qc) || (qc < 0 && !bx.thin)) continue;  // (not on it; not behind a one-sided one)
+						const double d2 = (qx - x) * (qx - x) + (qy - y) * (qy - y);
+						if (d2 < best) best = d2, z = t.z[kk];
+					}
+				return std::min(z, TileGroundZ(t, x, y) + 0.5);
+			};
 			for (int b = 0; b < n; ++b)
 				for (int a = 0; a < n; ++a) {
 					const int k = b * n + a;
 					if (!std::isfinite(t.z[k])) continue;
 					const double x = X0 + a * t.step, y = Y0 + b * t.step;
 					const double ax = (x - bx.cx) * tx + (y - bx.cy) * ty, ac = (x - bx.cx) * bx.nx + (y - bx.cy) * bx.ny;
-					if (ax < bx.t0 - 0.3 || ax > bx.t1 + 0.3 || ac > bx.thick * 0.5 + 0.3 || ac < -bx.thick * 0.5 - mBack) continue;
-					const double gz = TileGroundZ(t, x, y);
+					if (!inBand(ax, ac)) continue;
+					const double gz = roadZ(a, b, x, y);
 					if (t.z[k] <= gz + 0.2) continue;
 					t.z[k] = float(gz);
 					t.src[k] = 3;  // flattened (under a wall)
@@ -6617,6 +7015,30 @@ namespace
 					WallLine(A, B, t, hits, rays);
 				}
 			}
+			// v2.54: a face only counts when the ray met it well above the ground at its foot. The rays run along the tile's
+			// plane; where the road curves up (a ramp meeting a bridge's deck) the plane runs under the road, so a ray met a
+			// curb, a joint or the deck's own front edge from below: a wall across the road (your "invisible wall driving onto
+			// a bridge"). Too low: one ray down 10 cm out from the face finds its foot; a second flat ray WorldWallProbeM over
+			// that foot says whether a real wall goes on higher up (kept) or not (left out).
+			size_t keep = 0;
+			for (const WallHit& hh : hits) {
+				const double fx = hh.x + hh.nx * 0.1, fy = hh.y + hh.ny * 0.1;
+				const double A[3] = { fx, fy, hh.z + 1.0 }, B[3] = { fx, fy, hh.z - 3.0 };
+				double       p[3], nn[3];
+				++rays;
+				if (WallRay(A, B, p, nn) == 1 && hh.z - p[2] < 0.5 * h) {
+					const double z2 = p[2] + h;
+					const double C[3] = { hh.x + hh.nx * 1.0, hh.y + hh.ny * 1.0, z2 }, D[3] = { hh.x - hh.nx * 1.0, hh.y - hh.ny * 1.0, z2 };
+					double       q[3], qn[3];
+					++rays;
+					if (!(WallRay(C, D, q, qn) == 1 && fabs(qn[2]) < 0.5 && hypot(q[0] - hh.x, q[1] - hh.y) < 0.3)) {
+						++g_world.wallLow;
+						continue;
+					}
+				}
+				hits[keep++] = hh;
+			}
+			hits.resize(keep);
 			if (!hits.empty()) WallBoxes(t, hits);
 		}
 		t.wallsDone = true;
@@ -6664,6 +7086,101 @@ namespace
 	}
 
 	// every script tick (drive mode or not: rays still out are always collected)
+	// v2.51: one immediate ray against GTA's map (not cars, not props): 1 hit (p, n), 0 nothing, -1 GTA didn't answer at once
+	int MapRay(const double a[3], const double b[3], double p[3], double n[3])
+	{
+		const int h = Call<int>(N::START_EXPENSIVE_SYNCHRONOUS_SHAPE_TEST_LOS_PROBE, float(a[0]), float(a[1]), float(a[2]), float(b[0]), float(b[1]), float(b[2]), 1,
+			g_drv.veh, 7);
+		if (!h) return -1;
+		int       hit = 0, ent = 0;
+		NVec3     end{}, nrm{};
+		if (Call<int>(N::GET_SHAPE_TEST_RESULT, h, &hit, &end, &nrm, &ent) != 2) return -1;
+		++g_world.landRays;
+		if (!hit) return 0;
+		p[0] = end.x;
+		p[1] = end.y;
+		p[2] = end.z;
+		const double l = sqrt(double(nrm.x) * nrm.x + double(nrm.y) * nrm.y + double(nrm.z) * nrm.z);
+		n[0] = l > 1e-6 ? nrm.x / l : 0.0;
+		n[1] = l > 1e-6 ? nrm.y / l : 0.0;
+		n[2] = l > 1e-6 ? nrm.z / l : 1.0;
+		return 1;
+	}
+
+	// v2.51 (your jump note: the car fell under the ground after a jump and was put back): in the air (GTA's ground more than 1.2 m
+	// under it), its flight is followed against GTA's map (BeamNG's speed and gravity, 0.1 s steps, immediate rays) to where it
+	// lands; the tiles there get the landing's level and are built first (v2.5 kept the ramp's level ahead: the landing was
+	// "another level", left out). 20 times a second while driving (one ray), the flight 10 times a second while in the air.
+	void WorldAir()
+	{
+		WorldState&  w = g_world;
+		const double now = NowSeconds();
+		if (!g_cfg.worldLanding) {
+			w.air = w.landOk = false;
+			return;
+		}
+		if (now - w.airCheckT < 0.05) return;
+		w.airCheckT = now;
+		double       p[3], n[3];
+		const double a[3] = { w.cx, w.cy, w.cz + 0.5 }, b[3] = { w.cx, w.cy, w.cz - 80.0 };
+		const int    r = MapRay(a, b, p, n);
+		if (r < 0) return;
+		w.airH = r == 1 ? w.cz - p[2] : 80.0;
+		const bool air = w.airH > 1.2;
+		if (air && !w.air) {
+			++w.jumps;
+			w.airT = now;
+			w.landAt = 0;
+		}
+		if (!air) {
+			if (w.air) w.groundT = now;
+			w.air = false;
+			if (w.landOk && now - w.groundT > 0.3) {
+				if (w.landLogs < 20) {
+					++w.landLogs;
+					Log("ground: landed after %.1f s in the air, %.1f m from where the first guess said", now - w.airT, hypot(w.cx - w.landFirstX, w.cy - w.landFirstY));
+				}
+				w.landOk = false;
+			}
+			return;
+		}
+		w.air = true;
+		w.grounded = false;
+		if (now - w.landAt < 0.1) return;
+		w.landAt = now;
+		// the flight: drawn origin (bottom of the tyres) + speed x t + gravity
+		const double g = 9.81 * g_cfg.driveGravity;
+		double       q0[3] = { w.cx, w.cy, w.cz }, t = 0;
+		for (int s = 1; s <= 50; ++s) {
+			const double t1 = s * 0.1;
+			const double q1[3] = { w.cx + w.vx * t1, w.cy + w.vy * t1, w.cz + w.vz * t1 - 0.5 * g * t1 * t1 };
+			const int    h = MapRay(q0, q1, p, n);
+			if (h < 0) return;
+			if (h == 1) {
+				const bool first = !w.landOk;
+				w.landX = p[0];
+				w.landY = p[1];
+				w.landZ = p[2];
+				const double nz = std::max(0.3, n[2]);
+				w.landGx = n[2] > 0.3 ? std::clamp(-n[0] / nz, -1.2, 1.2) : 0.0;
+				w.landGy = n[2] > 0.3 ? std::clamp(-n[1] / nz, -1.2, 1.2) : 0.0;
+				w.landT = t + 0.1 * (hypot(p[0] - q0[0], p[1] - q0[1]) / std::max(1e-6, hypot(q1[0] - q0[0], q1[1] - q0[1])));
+				w.landOk = true;
+				if (first) {
+					w.landFirstX = p[0];
+					w.landFirstY = p[1];
+					if (w.landLogs < 20)
+						Log("ground: the car is in the air (%.1f m over GTA's ground): it lands in about %.1f s, %.0f m ahead, %.1f m %s the ground under it now: ground built there first",
+							w.airH, w.landT, hypot(p[0] - w.cx, p[1] - w.cy), fabs(p[2] - (w.cz - w.airH)), p[2] < w.cz - w.airH ? "under" : "over");
+				}
+				return;
+			}
+			memcpy(q0, q1, sizeof(q0));
+			t = t1;
+		}
+		w.landOk = false;  // (no landing within 5 s: the usual ground)
+	}
+
 	void WorldTick()
 	{
 		WorldState&  w = g_world;
@@ -6673,7 +7190,9 @@ namespace
 		WorldPoll();
 		MapTick();
 		if (w.active && w.carOk) {
-			if (w.tick % 3 == 0 || w.wanted.empty()) WorldPlan();
+			const bool wasAir = w.air && w.landOk;
+			WorldAir();  // v2.51: jumps
+			if (w.tick % 3 == 0 || w.wanted.empty() || (w.air && w.landOk) || wasAir) WorldPlan();
 			auto costOf = [&](int64_t k) {
 				auto c = w.cost.find(k);
 				return c == w.cost.end() ? 1e6 : c->second;
@@ -6723,12 +7242,21 @@ namespace
 					const double off = RefOff(t, pl);
 					if (off >= 0 ? off <= 1.5 : fabs(t.lvE - E) < 1.0) continue;  // measured for this level
 					bool wrong = fabs(t.lv - E) > tol && fabs(t.lvE - E) > tol;
-					// measured for another level and something doesn't fit (a ramp measured from the road beside it...)
-					if (!wrong && t.state == 2) wrong = !LevelFits(t, pl, from) && (t.voids > 0 || VoidCount(t) > 0 || fabs(t.lv - E) > 1.0 || CliffBelow(t, pl, g_cfg.worldDropM + 1.0) > 0 || !from || [&] {
-						int          cnt = 0;
-						const double d = EdgeDiff(t, *from, cnt);
-						return cnt >= 3 && d > 1.0;
-					}());
+					// measured for another level and something doesn't fit (a ramp measured from the road beside it...).
+					// v2.54: not again within 5 s of its last swap (your 2.53 log: 1371 swaps in 10 minutes, the same spots
+					// over and over; each one rebuilt in BeamNG)
+					if (!wrong && t.state == 2) {
+						wrong = !LevelFits(t, pl, from) && (t.voids > 0 || VoidCount(t) > 0 || fabs(t.lv - E) > 1.0 || CliffBelow(t, pl, g_cfg.worldDropM + 1.0) > 0 || !from || [&] {
+							int          cnt = 0;
+							const double d = EdgeDiff(t, *from, cnt);
+							return cnt >= 3 && d > 1.0;
+						}());
+						auto st = w.swapT.find(kv.first);
+						if (wrong && st != w.swapT.end() && t0 - st->second < 5.0) {
+							++w.swapHeld;
+							continue;
+						}
+					}
 					if (wrong) bad.push_back({ costOf(kv.first), kv.first });
 				}
 				std::sort(bad.begin(), bad.end());
@@ -6738,11 +7266,26 @@ namespace
 					if (w.swapLogged.size() < 40 && w.swapLogged.insert(bad[q].second).second)
 						Log("ground: tile %d,%d is on another level (%.1f m) than the car's there (%.1f m): swapped for the right one", t.i, t.j, t.lv,
 							ExpectZ(t.i, t.j));
-					if (t.sent || t.draft) RmAdd(rm, nrm, it->first);
+					if (t.sent || t.draft) w.stale[it->first] = t0 + 2.0;  // (BeamNG keeps it until the new one comes)
+					w.swapT[it->first] = t0;
 					if (t.state == 2) CacheTile(it->first, std::move(t));
 					w.tiles.erase(it);
 					++w.swaps;
 				}
+				// swapped tiles whose new measurement didn't come within 2 s (a gap, nothing at this level): out of BeamNG now
+				for (auto it = w.stale.begin(); it != w.stale.end();) {
+					if (t0 < it->second) {
+						++it;
+						continue;
+					}
+					auto tl = w.tiles.find(it->first);
+					if (tl == w.tiles.end() || !(tl->second.sent || tl->second.draft)) {
+						RmAdd(rm, nrm, it->first);
+						++w.staleGone;
+					}
+					it = w.stale.erase(it);
+				}
+				if (w.swapT.size() > 4000) w.swapT.clear();
 			}
 			if (g_cfg.worldKeepTris > 0 && w.tick % 10 == 0) WorldKeepBudget(rm, nrm);
 			if (nrm) DrvSend(("{\"t\":\"rm\",\"ids\":[" + rm + "]}").c_str());
@@ -6762,11 +7305,15 @@ namespace
 					continue;
 				}
 				if (t.state == 2 && !t.sent) {
-					if (t.draft && CarOnTile(t)) {
+					const double T = WTileM();
+					const bool   over = t.healOld ? (w.cx > t.i * T - 2.0 && w.cx < (t.i + 1) * T + 2.0 && w.cy > t.j * T - 2.0 && w.cy < (t.j + 1) * T + 2.0) : CarOnTile(t);
+					if (t.draft && over) {
 						if (!t.lastUse || t.lastUse + 1 != w.tick) ++w.deferred;
 						t.lastUse = w.tick;
 					} else {
 						WorldSendTile(t, false);
+						t.healOld = false;
+						std::vector<float>().swap(t.zOld);
 					}
 				} else if (t.state == 1 && !t.pre && !t.draft && !t.noDraft && t.pass > 0 && t.K > 1 && costOf(it->first) <= w.draftM) {
 					WorldSendTile(t, true);
@@ -6808,6 +7355,7 @@ namespace
 					}
 					const int got = fromStore < 24 ? MapGet(k, E, t, &pl, from) : (MapKnows(k, E) ? 2 : 0);
 					if (got == 1) {
+						w.pitPts += FillPits(t, w.spikePts);  // v2.55: (saved before 2.55: its pits too)
 						if (g_cfg.worldDebug) Log("ground dbg: %d,%d from the saved map: level %.2f, the car's there %.2f (from %s)", i, j, t.lv, E, from ? "a neighbour" : "the car");
 						auto& slot = w.tiles[k];
 						slot = std::move(t);
@@ -6822,6 +7370,13 @@ namespace
 					miss.push_back({ c.first, k });
 				} else if (it->second.state == 3 && it->second.gaps < 5 && now - it->second.tGap > 1.0) {
 					miss.push_back({ c.first + 0.5, k });
+				} else if (c.first <= std::max(24.0, 2.0 * w.urgentM) && now - it->second.tGap > 3.0 &&
+				           ((it->second.state == 3 && it->second.gaps >= 99 && it->second.noGround && HealCount(k, now) < 3) ||
+				            (it->second.state == 2 && it->second.sent && !it->second.pre && it->second.partial > 0 && HealCount(k, now) < 2))) {
+					// v2.7: empty or part-empty tiles stayed that way for good (v2.63: gaps = 99, partial tiles never again): game-breaking
+					// holes in your 2.63 test. Near the car they are measured again, for the car's level there now; the second time
+					// with a tall window
+					miss.push_back({ c.first + 0.7, k });
 				}
 			}
 			std::sort(miss.begin(), miss.end());
@@ -6833,6 +7388,30 @@ namespace
 				if (it != w.tiles.end()) {
 					// a gap: its empty points again, all passes (v2.43: for the car's level there now)
 					WTile&       t = it->second;
+					t.wide = false;
+					if (t.state == 2 || t.gaps >= 99) {
+						if (w.healN.size() > 4000) w.healN.clear();
+						auto& hn = w.healN[m.second];
+						hn.first = HealCount(m.second, now) + 1;
+						hn.second = now;
+						t.heal = hn.first;
+						t.wide = t.state == 3 && t.heal >= 2;
+						++w.healed;
+						if (w.healLogged.size() < 300 && w.healLogged.insert(m.second * 4 + t.heal).second)
+							Log("ground: tile %d,%d %s near the car: measured again (try %d%s)", i, j, t.state == 2 ? "has empty cells" : "is empty", t.heal, t.wide ? ", tall window" : "");
+						t.gaps = 2;  // (one go: what is still empty is sent without it)
+						t.partial = 0;
+						t.noGround = false;
+						if (t.sent) {
+							// its last version stays in BeamNG until the new one comes, kept like a draft (taken out with it, kept over
+							// a drive's end); replaced at once unless the car is on it. Its heights answer "ground here?" meanwhile
+							// (the fall check, the put-back spot)
+							t.draft = true;
+							t.healOld = true;
+							t.zOld = t.z;
+						}
+						t.sent = false;
+					}
 					const WTile* from = nullptr;
 					const WPlane ref = ExpectPlane(i, j, nullptr, &from);
 					t.rcx = ref.cx;
@@ -6847,6 +7426,11 @@ namespace
 					t.refCar = from == nullptr;
 					t.carAir = t.refCar && !w.grounded;
 					t.noLevel = false;
+					if (t.wide) {
+						// v2.7: its own ground decides its level (nothing was at the expected one), every point measured afresh
+						t.hasRef = false;
+						for (size_t q = 0; q < t.ps.size(); ++q) t.ps[q] = 0, t.src[q] = 0;
+					}
 					t.walls.clear();
 					t.wallsDone = false;
 					t.kKey = -1;
@@ -6993,6 +7577,7 @@ namespace
 		w.carOk = false;
 		w.haveHd = false;
 		w.yawRate = 0;
+		w.air = w.landOk = false;  // v2.51
 		w.wanted.clear();
 		w.cap = g_cfg.worldInFlight;
 		size_t mine = 0;
@@ -7054,6 +7639,7 @@ namespace
 		} else {
 			w.yawRate *= 0.9;
 		}
+		if (!w.carOk || hypot(O[0] - w.cx, O[1] - w.cy) > 30.0) w.placedT = now;
 		w.cx = O[0];
 		w.cy = O[1];
 		w.cz = O[2];
@@ -7066,7 +7652,32 @@ namespace
 		// v2.43: on its ground (not jumping or falling): the level under the car is the car's level
 		double     gz = 0;
 		const bool have = WorldGroundAt(O[0], O[1], gz, nullptr, O[2]);
-		w.grounded = fabs(V[2]) < 3.0 && (!have || (O[2] - gz < 1.5 && O[2] - gz > -2.0));
+		// v2.54: a hard hit (BeamNG's car lost 8 m/s within 0.3 s; v2.54: 4): the wall boxes around it (an invisible wall: which box, how
+		// high, which tile)
+		{
+			const double sp3 = sqrt(V[0] * V[0] + V[1] * V[1] + V[2] * V[2]);
+			w.spdHist.push_back({ now, sp3 });
+			size_t old = 0;
+			while (old < w.spdHist.size() && now - w.spdHist[old].first > 0.3) ++old;
+			w.spdHist.erase(w.spdHist.begin(), w.spdHist.begin() + ptrdiff_t(old));
+			double before = sp3;
+			for (const auto& h : w.spdHist) before = std::max(before, h.second);
+			if (before - sp3 > 8.0 && now - w.hitLogT > 3.0 && w.hitLogs < 30) {  // v2.56: 8 m/s (4 fired on hard braking)
+				w.hitLogT = now;
+				++w.hitLogs;
+				std::string nearW;
+				for (const auto& kv : w.tiles)
+					for (const WTile::Wall& wl : kv.second.walls) {
+						if (hypot(wl.cx - O[0], wl.cy - O[1]) > 6.0 + wl.len * 0.5 || nearW.size() > 900) continue;
+						char b[160];
+						snprintf(b, sizeof(b), " [tile %d,%d: at %.1f %.1f, %.1f m long, %.2f m thick, z %.1f to %.1f]", kv.second.i, kv.second.j, wl.cx, wl.cy, wl.len, wl.thick, wl.z0, wl.z1);
+						nearW += b;
+					}
+				Log("crash: BeamNG's car lost %.1f m/s (from %.1f) at GTA %.1f %.1f %.1f, heading %.0f deg; ground under it %s%.1f; wall boxes near it:%s", before - sp3, before,
+					O[0], O[1], O[2], atan2(V[1], V[0]) / kDeg, have ? "" : "(not known) ", have ? gz : 0.0, nearW.empty() ? " none" : nearW.c_str());
+			}
+		}
+		w.grounded = !w.air && fabs(V[2]) < 3.0 && (!have || (O[2] - gz < 1.5 && O[2] - gz > -2.0));  // v2.51: and not in the air (WorldAir)
 		w.carOk = true;
 	}
 
@@ -7099,8 +7710,12 @@ namespace
 		return h;
 	}
 
-	enum PropKind { kPropSoft = 0, kPropSolid = 1, kPropIgnore = 2 };
-	const char* PropKindName(int k) { return k == kPropSoft ? "soft" : k == kPropSolid ? "solid" : "ignored"; }
+	// v2.51: kinds. soft: small things (bins, cones, boxes): GTA knocks them over when the drawn car touches them, BeamNG's car
+	// loses a little speed (not in BeamNG). breakaway: breakable posts and poles, signs, traffic lights, fences: a box in BeamNG
+	// (their trunk at bumper height, measured with rays: no arms over the road) that BeamNG's car really hits; when the car has
+	// lost "break" m/s against it the box goes and GTA knocks the prop over. solid: big or unbreakable ones: a box that stays.
+	enum PropKind { kPropSoft = 0, kPropSolid = 1, kPropIgnore = 2, kPropBreak = 3 };
+	const char* PropKindName(int k) { return k == kPropSoft ? "soft" : k == kPropSolid ? "solid" : k == kPropBreak ? "breakaway" : "ignored"; }
 
 	struct PropModel
 	{
@@ -7108,27 +7723,47 @@ namespace
 		float       mn[3] = {}, mx[3] = {};
 		int         kind = kPropSoft;
 		std::string why, name;
-		float       bump = -1, push = -1;  // from the json (-1: by its size)
-		uint32_t    seen = 0, hits = 0;
+		float       bump = -1, push = -1, brk = -1;  // from the json (-1: by its size)
+		float       mass = -1;                       // v2.52: from the json (kg; -1: by its size)
+		std::string fx;                              // v2.7: from the json ("": by what it is)
+		uint32_t    seen = 0, hits = 0, breaks = 0;
+		// v2.51: what of it BeamNG's car can hit (model frame boxes x0 x1 y0 y1): its trunk at bumper height (rays), else its box
+		int         nb = 0;
+		float       tb[4][4] = {};
+		int         meas = 0;  // 0 not yet, 1 measured with rays, 2 its whole box (short), 3 a post at its foot (rays found nothing)
+		int         tries = 0, rays = 0;
 	};
 	struct PropLive
 	{
 		int      ent = 0;
 		uint32_t model = 0;
 		double   c[3] = {}, ax[3][3] = {}, he[3] = {};  // box centre, axes (right, forward, up), half sizes along them
+		double   ps[3] = {};                            // its origin (GET_ENTITY_MATRIX)
 		double   lastHit = -100;
-		bool     sent = false;     // a solid box of it is in BeamNG
+		bool     sent = false;     // its boxes are in BeamNG
 		double   sentC[3] = {}, sentYaw = 0;
 		uint32_t scan = 0;
+		bool     broken = false;   // v2.51: BeamNG's car broke it: knocked over in GTA, never sent again
+		// v2.52: a physics prop (BeamNG simulates its box; GTA's prop copies it): where it was when it went in (origin, axes,
+		// the box's middle), whether GTA's own physics is frozen on it
+		bool     phys = false, physFailed = false, frozen = false, knocked = false, anchored = false;
+		double   P0[3] = {}, A0[3][3] = {}, Cg0[3] = {};
+		double   brokenT = 0, brokenC[3] = {};
+		bool     checked = true;
 	};
 	struct PropCfg
 	{
 		int   kind = kPropSoft;
-		float bump = -1, push = -1;
+		float bump = -1, push = -1, brk = -1, mass = -1;
 		std::string name;
+		std::string fx;  // v2.7: "sparks", "water", "none" ("": by what it is)
 	};
 	struct PropState
 	{
+		// v2.7: GTA particle effects when BeamNG's car breaks a prop (asset, effect; GtaBeamD1_props.json "fxSparks" / "fxWater")
+		std::string                   fxSparks[2] = { "core", "ent_brk_sparking_wires" }, fxWater[2] = { "core", "ent_sht_water" };
+		std::vector<std::pair<int, double>> fxLoops;  // running water jets: handle, when they stop
+		uint32_t                      fxN = 0, fxFail = 0;
 		bool                          cfgLoaded = false;
 		std::map<uint32_t, PropCfg>   cfg;
 		std::string                   cfgSource;
@@ -7139,22 +7774,29 @@ namespace
 		uint32_t                      scan = 0;
 		bool                          seenDirty = false;
 		ULONGLONG                     seenMs = 0, logMs = 0;
+		int                           movedLogs = 0;
 		// stats (10 s)
-		uint32_t pool = 0, nearN = 0, hits = 0, bumps = 0, sentN = 0, rmN = 0, scans = 0;
-		double   bumpSum = 0, scanUs = 0, scanUsMax = 0;
+		uint32_t pool = 0, nearN = 0, hits = 0, bumps = 0, sentN = 0, rmN = 0, scans = 0, breaks = 0, measured = 0, measRays = 0;
+		// v2.52: physics props: -1 not known yet, 1 BeamNG spawns them, 0 it can't (fixed boxes instead)
+		int           physOk = -1;
+		std::set<int> knockedEnts;  // knocked over by BeamNG's car: loose when they go in again
+		uint32_t      physSent = 0, physPoses = 0, physKnocked = 0, physFails = 0, physLogs = 0;
+		double   bumpSum = 0, scanUs = 0, scanUsMax = 0, measUs = 0;
 	} g_props;
 
 	const char* kPropsDefault = R"JSON({
-  "about": "GTA x Beam v2.5: GTA's props near BeamNG's car. 'soft' (the default for props not listed): GTA knocks it over or breaks it and BeamNG's car loses a little speed ('bump', m/s; by its size when not given). 'solid': a solid box in BeamNG (big props are solid by default). 'ignore': nothing. 'model' is the prop's model name (or its hash, 0x...). GtaBeamD1_props_seen.txt lists the models your drives met. Ctrl+F11 re-reads this file.",
+  "about": "GTA x Beam v2.7: GTA's props near BeamNG's car. v2.7: a broken prop gives GTA's particle effect named by its 'fx' (sparks, water, none; not given: hydrants water, breakaway props sparks); fxSparks / fxWater = [asset, effect]. v2.52: the nearest breakaway and soft ones are physics props (weighted boxes BeamNG simulates, GTA's prop copies them; PropPhysics in the ini): 'mass' (kg) sets one's weight (not listed: by its size), 'break' how hard a post must be hit to snap. kind: 'soft' (bins, cones, boxes: GTA knocks it over and BeamNG's car loses a little speed, 'bump' m/s), 'breakaway' (posts, poles, signs, traffic lights, fences: a box in BeamNG your car really hits; it breaks when the car has lost 'break' m/s against it, then GTA knocks it over), 'solid' (a box that never breaks), 'ignore'. Not listed: breakable and tall or wide = breakaway, big or tall = solid, the rest soft. 'model' is the model name or its hash (0x...). GtaBeamD1_props_seen.txt lists the models your drives met. Ctrl+F11 re-reads this file.",
+  "fxSparks": ["core", "ent_brk_sparking_wires"],
+  "fxWater": ["core", "ent_sht_water"],
   "props": [
     { "model": "prop_container_01a", "kind": "solid" },
     { "model": "prop_container_05a", "kind": "solid" },
     { "model": "prop_bollard_02a", "kind": "solid" },
     { "model": "prop_bollard_03a", "kind": "solid" },
-    { "model": "prop_streetlight_01", "kind": "soft", "bump": 1.5 },
-    { "model": "prop_streetlight_03", "kind": "soft", "bump": 1.5 },
-    { "model": "prop_traffic_01a", "kind": "soft", "bump": 1.5 },
-    { "model": "prop_fire_hydrant_1", "kind": "soft", "bump": 1.0 },
+    { "model": "prop_streetlight_01", "kind": "breakaway", "break": 3.0 },
+    { "model": "prop_streetlight_03", "kind": "breakaway", "break": 3.0 },
+    { "model": "prop_traffic_01a", "kind": "breakaway", "break": 4.0 },
+    { "model": "prop_fire_hydrant_1", "kind": "breakaway", "break": 4.0, "fx": "water" },
     { "model": "prop_bin_01a", "kind": "soft", "bump": 0.6 },
     { "model": "prop_roadcone02a", "kind": "soft", "bump": 0.1 }
   ]
@@ -7179,7 +7821,8 @@ namespace
 			JsonStr(obj, "model", model);
 			JsonStr(obj, "kind", kind);
 			for (char& ch : kind) ch = char(tolower((unsigned char)ch));
-			if (model.empty() || (kind != "soft" && kind != "solid" && kind != "ignore")) {
+			if (kind == "break") kind = "breakaway";
+			if (model.empty() || (kind != "soft" && kind != "solid" && kind != "ignore" && kind != "breakaway")) {
 				++bad;
 				continue;
 			}
@@ -7187,10 +7830,13 @@ namespace
 			if (model.size() > 2 && model[0] == '0' && (model[1] == 'x' || model[1] == 'X')) h = uint32_t(strtoul(model.c_str(), nullptr, 16));
 			else h = Joaat(model.c_str());
 			PropCfg c;
-			c.kind = kind == "soft" ? kPropSoft : kind == "solid" ? kPropSolid : kPropIgnore;
+			c.kind = kind == "soft" ? kPropSoft : kind == "solid" ? kPropSolid : kind == "breakaway" ? kPropBreak : kPropIgnore;
 			double v = 0;
 			if (JsonNumC(obj.c_str(), "bump", v)) c.bump = float(v);
 			if (JsonNumC(obj.c_str(), "push", v)) c.push = float(v);
+			if (JsonNumC(obj.c_str(), "break", v)) c.brk = float(v);
+			if (JsonNumC(obj.c_str(), "mass", v)) c.mass = float(v);
+			JsonStr(obj, "fx", c.fx);
 			c.name = model;
 			out[h] = c;
 		}
@@ -7214,6 +7860,7 @@ namespace
 		int bad = 0;
 		if (fromFile && ParseProps(js, P.cfg, bad)) {
 			P.cfgSource = path;
+			if (js.find("breakaway") == std::string::npos) Log("props: GtaBeamD1_props.json is the 2.5 one (no breakaway props listed): copy the 2.51 one from the kit");
 		} else {
 			if (fromFile) Log("props: GtaBeamD1_props.json not usable (no \"props\" list): the built-in list is used");
 			ParseProps(kPropsDefault, P.cfg, bad);
@@ -7226,8 +7873,15 @@ namespace
 				}
 			}
 		}
-		if (bad) Log("props: %d entries in GtaBeamD1_props.json not understood (each needs \"model\" and \"kind\": soft, solid or ignore)", bad);
+		if (bad) Log("props: %d entries in GtaBeamD1_props.json not understood (each needs \"model\" and \"kind\": soft, breakaway, solid or ignore)", bad);
 		P.models.clear();  // classified again with the new list
+		{
+			std::string fx[2];
+			if (JsonStrs(js, "fxSparks", fx, 2) == 2) P.fxSparks[0] = fx[0], P.fxSparks[1] = fx[1];
+			if (JsonStrs(js, "fxWater", fx, 2) == 2) P.fxWater[0] = fx[0], P.fxWater[1] = fx[1];
+		}
+		CallVoid(N::REQUEST_NAMED_PTFX_ASSET, P.fxSparks[0].c_str());  // v2.7: loaded before the first hit
+		CallVoid(N::REQUEST_NAMED_PTFX_ASSET, P.fxWater[0].c_str());
 		P.cfgLoaded = true;
 		Log("props: %zu models listed (%s)", P.cfg.size(), P.cfgSource.c_str());
 	}
@@ -7255,6 +7909,9 @@ namespace
 			m.kind = it->second.kind;
 			m.bump = it->second.bump;
 			m.push = it->second.push;
+			m.brk = it->second.brk;
+			m.mass = it->second.mass;
+			m.fx = it->second.fx;
 			m.name = it->second.name;
 			m.why = "listed";
 		} else if (!m.dimsOk) {
@@ -7266,26 +7923,240 @@ namespace
 		} else if (std::max({ sx, sy, sz }) < 0.25f) {
 			m.kind = kPropIgnore;
 			m.why = "tiny";
-		} else if (m.frag) {
-			m.kind = kPropSoft;
-			m.why = "breakable";
+		} else if (m.frag && (sz >= 1.8f || (std::max(sx, sy) >= 1.0f && sz >= 0.6f))) {  // v2.52: wide ones only when not low
+			m.kind = kPropBreak;  // v2.51: lamp posts, signs, traffic lights, fences, bus stops
+			m.why = "breakable, tall or wide";
 		} else if (std::min(sx, sy) >= 1.5f && std::max(sx, sy) >= 2.5f && sz >= 1.0f) {
 			m.kind = kPropSolid;
 			m.why = "big";
+		} else if (!m.frag && sz >= 1.8f) {
+			m.kind = kPropSolid;  // v2.51: a tall post GTA can't break
+			m.why = "tall, not breakable";
 		} else {
 			m.kind = kPropSoft;
-			m.why = "small";
+			m.why = m.frag ? "small, breakable" : "small";
 		}
 		g_props.seenDirty = true;
 		return m;
 	}
 
-	// BeamNG's box of a solid prop: id, centre x y, bottom, top, along x y (its forward), length, thickness, slope 0
-	void PropBoxMsg(std::string& out, const PropLive& L)
+	// v2.51: the prop's model frame -> GTA world
+	inline void PropWorld(const PropLive& L, double a, double b, double h, double out[3])
 	{
-		double c[3];
-		GtaToBeam(L.c, c);
-		double fx = L.ax[1][0], fy = L.ax[1][1];
+		for (int k = 0; k < 3; ++k) out[k] = L.ps[k] + L.ax[0][k] * a + L.ax[1][k] * b + L.ax[2][k] * h;
+	}
+
+	// v2.51: what of a tall prop BeamNG's car can hit: rays across it at 0.6 m over its foot that see this prop only, from both
+	// sides, on lines 0.15-0.45 m apart; the cells they hit, grouped, are its parts (your v2.5 log: traffic lights' arms over the
+	// road, 10 m long, counted as hits). Once per model (props of a model are the same shape). false: nothing seen (its
+	// collision may not be loaded yet: tried again on the next one met)
+	bool PropMeasure(PropModel& m, const PropLive& L)
+	{
+		const double t0 = NowSeconds();
+		const double sx = m.mx[0] - m.mn[0], sy = m.mx[1] - m.mn[1];
+		const double cell = std::max(0.1, std::max(sx, sy) / 64.0);
+		const double x0 = m.mn[0] - 0.2, y0 = m.mn[1] - 0.2;
+		const int    gx = std::clamp(int((sx + 0.4) / cell) + 1, 1, 80), gy = std::clamp(int((sy + 0.4) / cell) + 1, 1, 80);
+		std::vector<uint8_t> occ(size_t(gx) * gy, 0);
+		std::vector<std::array<double, 2>> pts;  // the points met (the parts' boxes are fitted to them, not to whole cells)
+		std::vector<size_t>                ptCell;
+		auto mark = [&](double a, double b) {
+			const int i = int(floor((a - x0) / cell)), j = int(floor((b - y0) / cell));
+			if (i < 0 || j < 0 || i >= gx || j >= gy) return;
+			occ[size_t(j) * gx + i] = 1;
+			pts.push_back({ a, b });
+			ptCell.push_back(size_t(j) * gx + i);
+		};
+		const double h = m.mn[2] + std::min(0.6, (m.mx[2] - m.mn[2]) * 0.5);
+		int          rays = 0, hits = 0;
+		// one ray from (a0, b0) to (a1, b1) in the model frame: where it first meets this prop
+		auto ray = [&](double a0, double b0, double a1, double b1, double& ha, double& hb) -> bool {
+			double A[3], B[3];
+			PropWorld(L, a0, b0, h, A);
+			PropWorld(L, a1, b1, h, B);
+			++rays;
+			const int hnd = Call<int>(N::START_EXPENSIVE_SYNCHRONOUS_SHAPE_TEST_LOS_PROBE, float(A[0]), float(A[1]), float(A[2]), float(B[0]), float(B[1]), float(B[2]), 16,
+				g_drv.veh, 7);
+			if (!hnd) return false;
+			int   hit = 0, ent = 0;
+			NVec3 end{}, nrm{};
+			if (Call<int>(N::GET_SHAPE_TEST_RESULT, hnd, &hit, &end, &nrm, &ent) != 2 || !hit || ent != L.ent) return false;
+			const double d[3] = { end.x - L.ps[0], end.y - L.ps[1], end.z - L.ps[2] };
+			ha = d[0] * L.ax[0][0] + d[1] * L.ax[0][1] + d[2] * L.ax[0][2];
+			hb = d[0] * L.ax[1][0] + d[1] * L.ax[1][1] + d[2] * L.ax[1][2];
+			++hits;
+			return true;
+		};
+		for (int dir = 0; dir < 2; ++dir) {
+			const double across = dir == 0 ? sy : sx;
+			const int    nl = std::clamp(int(ceil(across / 0.15)), 2, 24);
+			for (int k = 0; k < nl; ++k) {
+				const double t = (k + 0.5) / nl;
+				double       a0, b0, a1, b1;
+				if (dir == 0) {
+					b0 = b1 = m.mn[1] + t * sy;
+					a0 = m.mn[0] - 0.3;
+					a1 = m.mx[0] + 0.3;
+				} else {
+					a0 = a1 = m.mn[0] + t * sx;
+					b0 = m.mn[1] - 0.3;
+					b1 = m.mx[1] + 0.3;
+				}
+				double     fa = 0, fb = 0, ba = 0, bb = 0;
+				const bool f = ray(a0, b0, a1, b1, fa, fb), bk = ray(a1, b1, a0, b0, ba, bb);
+				if (f && bk) {
+					const double len = hypot(ba - fa, bb - fb);
+					// one solid between them (a post, a container), unless a ray from just inside the first face meets this prop again
+					// (two things far apart: a gantry's legs; a ray starting inside a solid doesn't see it)
+					bool two = false;
+					if (len > 1.5) {
+						const double ux = (ba - fa) / len, uy = (bb - fb) / len;
+						double       ma = 0, mb = 0;
+						two = ray(fa + ux * 0.05, fb + uy * 0.05, ba - ux * 0.05, bb - uy * 0.05, ma, mb);
+						if (two) mark(ma, mb);
+					}
+					if (!two) {
+						const int steps = int(len / (cell * 0.5)) + 1;
+						for (int s = 0; s <= steps; ++s) mark(fa + (ba - fa) * s / steps, fb + (bb - fb) * s / steps);
+					} else {
+						mark(fa, fb);
+						mark(ba, bb);
+					}
+				} else if (f) {
+					mark(fa, fb);
+				} else if (bk) {
+					mark(ba, bb);
+				}
+			}
+		}
+		// the cells met, grouped (touching ones are one part), the 4 biggest as boxes
+		std::vector<int>                       comp(occ.size(), -1);
+		std::vector<std::pair<int, std::array<int, 4>>> parts;  // cells, i0 i1 j0 j1
+		for (int j = 0; j < gy; ++j)
+			for (int i = 0; i < gx; ++i) {
+				const size_t s0 = size_t(j) * gx + i;
+				if (!occ[s0] || comp[s0] >= 0) continue;
+				const int                  id = int(parts.size());
+				std::array<int, 4>         bb = { i, i, j, j };
+				int                        cnt = 0;
+				std::vector<std::pair<int, int>> st{ { i, j } };
+				comp[s0] = id;
+				while (!st.empty()) {
+					const auto q = st.back();
+					st.pop_back();
+					++cnt;
+					bb[0] = std::min(bb[0], q.first);
+					bb[1] = std::max(bb[1], q.first);
+					bb[2] = std::min(bb[2], q.second);
+					bb[3] = std::max(bb[3], q.second);
+					for (int dj = -1; dj <= 1; ++dj)
+						for (int di = -1; di <= 1; ++di) {
+							const int a = q.first + di, b = q.second + dj;
+							if (a < 0 || b < 0 || a >= gx || b >= gy) continue;
+							const size_t s1 = size_t(b) * gx + a;
+							if (occ[s1] && comp[s1] < 0) {
+								comp[s1] = id;
+								st.push_back({ a, b });
+							}
+						}
+				}
+				parts.push_back({ cnt, bb });
+			}
+		// each part's box: around the points met in it (a thin post: its real width, not whole cells)
+		std::vector<std::array<double, 4>> pb(parts.size(), std::array<double, 4>{ 1e9, -1e9, 1e9, -1e9 });
+		for (size_t q = 0; q < pts.size(); ++q) {
+			auto& b = pb[size_t(comp[ptCell[q]])];
+			b[0] = std::min(b[0], pts[q][0]);
+			b[1] = std::max(b[1], pts[q][0]);
+			b[2] = std::min(b[2], pts[q][1]);
+			b[3] = std::max(b[3], pts[q][1]);
+		}
+		std::vector<int> ord(parts.size());
+		for (size_t q = 0; q < ord.size(); ++q) ord[q] = int(q);
+		std::sort(ord.begin(), ord.end(), [&](int x, int y) { return parts[size_t(x)].first > parts[size_t(y)].first; });
+		m.nb = 0;
+		for (size_t q = 0; q < ord.size() && m.nb < 4; ++q) {
+			const auto& b = pb[size_t(ord[q])];
+			float*      t = m.tb[m.nb++];
+			// (at least 10 cm across: a ray meets a post's faces, not its middle)
+			const double cx = (b[0] + b[1]) * 0.5, cy = (b[2] + b[3]) * 0.5, hx = std::max(0.05, (b[1] - b[0]) * 0.5), hy = std::max(0.05, (b[3] - b[2]) * 0.5);
+			t[0] = float(cx - hx);
+			t[1] = float(cx + hx);
+			t[2] = float(cy - hy);
+			t[3] = float(cy + hy);
+		}
+		m.rays += rays;
+		g_props.measRays += uint32_t(rays);
+		g_props.measUs += (NowSeconds() - t0) * 1e6;
+		++g_props.measured;
+		if (m.nb > 0) {
+			m.meas = 1;
+			char   b[160];
+			double w = 0, l = 0;
+			for (int q = 0; q < m.nb; ++q) {
+				w = std::max(w, double(m.tb[q][1] - m.tb[q][0]));
+				l = std::max(l, double(m.tb[q][3] - m.tb[q][2]));
+			}
+			snprintf(b, sizeof(b), "%d part(s), the biggest %.2f x %.2f m (%d of %d rays)", m.nb, w, l, hits, rays);
+			m.why += std::string("; trunk measured: ") + b;
+			g_props.seenDirty = true;
+			if (g_props.measured <= 40)
+				Log("props: model 0x%08X %s (%.1f x %.1f x %.1f m): what a car hits at 0.6 m: %s", L.model, m.name.empty() ? "" : m.name.c_str(), sx, sy,
+					m.mx[2] - m.mn[2], b);
+			return true;
+		}
+		return false;
+	}
+
+	// v2.51: a model's parts BeamNG's car can hit (model frame): measured (tall ones), or its whole box. canMeasure: rays allowed now
+	bool PropParts(PropModel& m, const PropLive& L, bool canMeasure)
+	{
+		if (m.meas) return m.nb > 0;
+		const bool tall = m.mx[2] - m.mn[2] >= 1.8f;
+		if (!tall) {
+			m.nb = 1;
+			m.tb[0][0] = m.mn[0], m.tb[0][1] = m.mx[0], m.tb[0][2] = m.mn[1], m.tb[0][3] = m.mx[1];
+			m.meas = 2;
+			return true;
+		}
+		if (!canMeasure) return false;  // (next scan: each model costs up to ~100 rays)
+		if (PropMeasure(m, L)) return true;
+		if (++m.tries < 3) return false;
+		// nothing seen three times: a post at its foot (GTA's poles stand on their model's origin) if that is inside it, else its box
+		m.nb = 1;
+		if (m.mn[0] <= 0 && m.mx[0] >= 0 && m.mn[1] <= 0 && m.mx[1] >= 0) {
+			const float r = std::min(0.2f, std::min(m.mx[0] - m.mn[0], m.mx[1] - m.mn[1]) * 0.5f);
+			m.tb[0][0] = -r, m.tb[0][1] = r, m.tb[0][2] = -r, m.tb[0][3] = r;
+			m.why += "; trunk not seen by rays: a post at its foot";
+		} else {
+			m.tb[0][0] = m.mn[0], m.tb[0][1] = m.mx[0], m.tb[0][2] = m.mn[1], m.tb[0][3] = m.mx[1];
+			m.why += "; trunk not seen by rays: its whole box";
+		}
+		m.meas = 3;
+		g_props.seenDirty = true;
+		return true;
+	}
+
+	// how hard BeamNG's car must hit it (the speed it loses against it, m/s): the json's, else by its thickness (a thin post
+	// 2.8, a traffic light pole 4, a fence 2)
+	double PropBreakDv(const PropModel& m)
+	{
+		if (m.kind != kPropBreak) return 0.0;
+		double v = m.brk;
+		if (!(v > 0)) {
+			double t = 0;
+			for (int q = 0; q < m.nb; ++q) t = std::max(t, double(std::min(m.tb[q][1] - m.tb[q][0], m.tb[q][3] - m.tb[q][2])));
+			v = std::clamp(1.0 + 6.0 * t, 1.5, 4.0);
+		}
+		return std::max(0.3, v * g_cfg.propBreak);
+	}
+
+	// BeamNG's boxes of a prop ("pb"): id, break (m/s, 0 = never), count, then per box: centre x y, bottom, top, along x y (its
+	// forward), length, thickness (BeamNG world)
+	void PropBoxMsg(std::string& out, const PropLive& L, const PropModel& m)
+	{
+		const double sz = m.mx[2] - m.mn[2];
+		double       fx = L.ax[1][0], fy = L.ax[1][1];
 		const double fl = sqrt(fx * fx + fy * fy);
 		if (fl < 1e-6) {
 			fx = 1;
@@ -7295,9 +8166,17 @@ namespace
 			fy /= fl;
 		}
 		char b[200];
-		snprintf(b, sizeof(b), "%s%d,%.3f,%.3f,%.3f,%.3f,%.4f,%.4f,%.3f,%.3f,0", out.empty() ? "" : ",", L.ent, c[0], c[1], c[2] - L.he[2] - 0.2, c[2] + L.he[2], fx, fy,
-			2.0 * L.he[1], 2.0 * L.he[0]);
+		snprintf(b, sizeof(b), "%s%d,%.2f,%d", out.empty() ? "" : ",", L.ent, PropBreakDv(m), m.nb);
 		out += b;
+		for (int q = 0; q < m.nb; ++q) {
+			const float* t = m.tb[q];
+			double       g[3], c[3];
+			PropWorld(L, (t[0] + t[1]) * 0.5, (t[2] + t[3]) * 0.5, m.mn[2], g);
+			GtaToBeam(g, c);
+			snprintf(b, sizeof(b), ",%.3f,%.3f,%.3f,%.3f,%.4f,%.4f,%.3f,%.3f", c[0], c[1], c[2] - 0.25, c[2] + std::min(sz, 3.0), fx, fy, double(t[3] - t[2]),
+				double(t[1] - t[0]));
+			out += b;
+		}
 	}
 
 	void PropsSeenWrite();
@@ -7308,13 +8187,13 @@ namespace
 		std::string ids;
 		int         n = 0;
 		for (auto& kv : P.live)
-			if (kv.second.sent) {
+			if (kv.second.sent || kv.second.phys) {
 				ids += (n ? "," : "") + std::to_string(kv.first);
 				++n;
 			}
 		if (n) {
 			DrvSend(("{\"t\":\"prm\",\"ids\":[" + ids + "]}").c_str());
-			Log("props: %d solid prop boxes taken out of BeamNG (%s)", n, why);
+			Log("props: %d prop boxes taken out of BeamNG (%s)", n, why);
 		}
 		P.live.clear();
 	}
@@ -7356,18 +8235,237 @@ namespace
 		FILE* f = fopen(path, "wb");
 		if (!f) return;
 		fprintf(f, "GTA props your drives met (GtaBeamD1 %s): model (hash; name when GtaBeamD1_props.json lists it), how it was treated and why, its size (m), breakable, "
-		           "times seen near the car, times BeamNG's car hit it. Copy a line's model into GtaBeamD1_props.json to change it.\r\n\r\n",
+		           "times seen near the car, times BeamNG's car hit it (soft) or broke it (breakaway). Copy a line's model into GtaBeamD1_props.json to change it.\r\n\r\n",
 			D1_VERSION);
 		std::vector<std::pair<uint32_t, uint32_t>> order;
 		for (auto& kv : P.models) order.push_back({ kv.second.seen, kv.first });
 		std::sort(order.rbegin(), order.rend());
 		for (auto& o : order) {
 			const PropModel& m = P.models[o.second];
-			fprintf(f, "0x%08X  %-24s %-7s (%s)  %.2f x %.2f x %.2f m  breakable %d  seen %u  hit %u\r\n", o.second, m.name.empty() ? "-" : m.name.c_str(), PropKindName(m.kind),
-				m.why.c_str(), m.mx[0] - m.mn[0], m.mx[1] - m.mn[1], m.mx[2] - m.mn[2], int(m.frag), m.seen, m.hits);
+			fprintf(f, "0x%08X  %-24s %-9s (%s)  %.2f x %.2f x %.2f m  breakable %d  seen %u  hit %u  broken %u\r\n", o.second, m.name.empty() ? "-" : m.name.c_str(),
+				PropKindName(m.kind), m.why.c_str(), m.mx[0] - m.mn[0], m.mx[1] - m.mn[1], m.mx[2] - m.mn[2], int(m.frag), m.seen, m.hits, m.breaks);
 		}
 		fclose(f);
 		P.seenDirty = false;
+	}
+
+	// v2.51: knock a prop over in GTA (BeamNG's car broke it, or the drawn car touched a soft one): its physics woken up, pushed
+	// along the car's way (a little up, high on it so it tips over)
+	// v2.7: sparks from a metal post, a water jet from a hydrant (GTA's own particle effects)
+	void PropFx(const PropLive& L, const PropModel& m)
+	{
+		PropState&   P = g_props;
+		std::string  how = m.fx;
+		std::string  nm = m.name;
+		for (char& ch : nm) ch = char(tolower((unsigned char)ch));
+		if (how.empty()) how = nm.find("hydrant") != std::string::npos ? "water" : m.kind == kPropBreak ? "sparks" : "none";
+		if (how != "water" && how != "sparks") return;
+		const std::string* fx = how == "water" ? P.fxWater : P.fxSparks;
+		CallVoid(N::REQUEST_NAMED_PTFX_ASSET, fx[0].c_str());
+		if (!Call<int>(N::HAS_NAMED_PTFX_ASSET_LOADED, fx[0].c_str())) {
+			if (P.fxFail++ < 5) Log("props: particle asset '%s' not loaded yet (%s skipped)", fx[0].c_str(), how.c_str());
+			return;
+		}
+		CallVoid(N::USE_PARTICLE_FX_ASSET, fx[0].c_str());
+		const float z = float(L.c[2] - L.he[2] + (how == "water" ? 0.3 : 0.6));
+		bool        ok = false;
+		if (how == "water") {
+			const int h = Call<int>(N::START_PARTICLE_FX_LOOPED_AT_COORD, fx[1].c_str(), float(L.c[0]), float(L.c[1]), z, 0.0f, 0.0f, 0.0f, 2.0f, 0, 0, 0, 0);
+			if (h) P.fxLoops.push_back({ h, NowSeconds() + 12.0 });
+			ok = h != 0;
+		} else {
+			ok = Call<int>(N::START_PARTICLE_FX_NON_LOOPED_AT_COORD, fx[1].c_str(), float(L.c[0]), float(L.c[1]), z, 0.0f, 0.0f, 0.0f, 1.5f, 0, 0, 0) != 0;
+		}
+		// (the effect names are a guess: the log says whether GTA started one; change them in GtaBeamD1_props.json)
+		if (P.fxN++ < 20) Log("props: %s at the broken prop 0x%08X (%s/%s): %s", how.c_str(), L.model, fx[0].c_str(), fx[1].c_str(), ok ? "started" : "GTA didn't start it");
+	}
+
+	void PropKnock(PropLive& L, const PropModel& m, const double V[3])
+	{
+		const double spd = sqrt(V[0] * V[0] + V[1] * V[1] + V[2] * V[2]);
+		const double vx = spd > 0.1 ? V[0] / spd : L.ax[1][0], vy = spd > 0.1 ? V[1] / spd : L.ax[1][1];
+		const double s = std::max(spd, 3.0);
+		const double k = g_cfg.propPush * (m.push >= 0 ? m.push : 1.0);
+		CallVoid(N::SET_ENTITY_DYNAMIC, L.ent, 1);
+		CallVoid(N::ACTIVATE_PHYSICS, L.ent);
+		if (m.kind == kPropBreak && L.he[2] > 0.8) {
+			// v2.7: a post, sign or lamp falls the way the car hit it: pushed at its top along the car's way, little lift (2.63 threw it up)
+			CallVoid(N::APPLY_FORCE_TO_ENTITY, L.ent, 1, float(vx * s * 0.9 * k), float(vy * s * 0.9 * k), float(0.3 * k), 0.0f, 0.0f, float(L.he[2] * 1.6), 0, 0, 1, 1, 0, 1);
+		} else {
+			CallVoid(N::APPLY_FORCE_TO_ENTITY, L.ent, 1, float(vx * s * 0.8 * k), float(vy * s * 0.8 * k), float((1.0 + 0.1 * s) * k), 0.0f, 0.0f, float(L.he[2] * 0.5), 0, 0,
+				1, 1, 0, 1);
+		}
+		PropFx(L, m);
+	}
+
+	// ---------------------------------------------------------------------------------------
+	// v2.52: physics props (your choice): the BeamNG mod spawns a weighted box per prop (its own jbeam "vehicle"): posts tied to
+	// the ground by beams that snap, bins loose. GTA's prop copies the box ("pp": how far its middle moved and how it turned
+	// since it went in). The box: what a car hits of it (PropParts), up to 6 m tall. The mass: the json's, else by its size.
+	// ---------------------------------------------------------------------------------------
+	struct PropPhysBox
+	{
+		double x0, x1, y0, y1, h, mass, brkN;
+		bool   anchor;
+	};
+	bool PropPhysShape(PropModel& m, PropLive& L, bool canMeasure, PropPhysBox& b)
+	{
+		if (!PropParts(m, L, canMeasure) || m.nb <= 0) return false;
+		b.x0 = b.y0 = 1e9;
+		b.x1 = b.y1 = -1e9;
+		for (int q = 0; q < m.nb; ++q) {
+			b.x0 = std::min(b.x0, double(m.tb[q][0]));
+			b.x1 = std::max(b.x1, double(m.tb[q][1]));
+			b.y0 = std::min(b.y0, double(m.tb[q][2]));
+			b.y1 = std::max(b.y1, double(m.tb[q][3]));
+		}
+		const double sx = b.x1 - b.x0, sy = b.y1 - b.y0, sz = m.mx[2] - m.mn[2];
+		if (sx > 3.0 || sy > 3.0) return false;  // (parts far apart: a gantry: a fixed box)
+		// at least 12 cm a side (a thinner box is not steady in BeamNG)
+		if (sx < 0.12) b.x0 -= (0.12 - sx) * 0.5, b.x1 += (0.12 - sx) * 0.5;
+		if (sy < 0.12) b.y0 -= (0.12 - sy) * 0.5, b.y1 += (0.12 - sy) * 0.5;
+		b.h = std::clamp(double(sz), 0.12, 6.0);
+		const double thick = std::max(b.x1 - b.x0, b.y1 - b.y0);
+		b.anchor = m.kind == kPropBreak && (sz >= 1.8 ? thick <= 0.8 : m.listed) && !g_props.knockedEnts.count(L.ent);
+		if (m.mass > 0) b.mass = m.mass;
+		else if (b.anchor) b.mass = std::clamp(130.0 * thick, 6.0, 60.0) * std::min(double(sz), 12.0);  // a pole: kg per metre by its thickness
+		else b.mass = std::clamp(double(m.mx[0] - m.mn[0]) * (m.mx[1] - m.mn[1]) * sz * (m.frag ? 50.0 : 120.0), 4.0, 2000.0);  // hollow bins, solid stuff
+		b.mass = std::clamp(b.mass, 4.0, 5000.0);
+		// the ground beams' strength: ~15 kN per m/s the car must lose (PropBreak scales it)
+		b.brkN = b.anchor ? std::max(2000.0, 15000.0 * PropBreakDv(m)) : 1.0;
+		return true;
+	}
+	// one "pq" entry: id, anchored, mass, strength, bottom middle (BeamNG), rotation (x y z w), size
+	void PropPhysStart(std::string& out, PropLive& L, const PropModel& m, const PropPhysBox& b)
+	{
+		const double cx = (b.x0 + b.x1) * 0.5, cy = (b.y0 + b.y1) * 0.5;
+		double       g[3], bb[3], q[4];
+		PropWorld(L, cx, cy, m.mn[2], g);
+		GtaToBeam(g, bb);
+		BasisQuat(L.ax[0], L.ax[1], L.ax[2], q);
+		char t[320];
+		snprintf(t, sizeof(t), "%s%d,%d,%.1f,%.0f,%.3f,%.3f,%.3f,%.5f,%.5f,%.5f,%.5f,%.3f,%.3f,%.3f", out.empty() ? "" : ",", L.ent, b.anchor ? 1 : 0, b.mass, b.brkN, bb[0],
+			bb[1], bb[2], q[0], q[1], q[2], q[3], b.x1 - b.x0, b.y1 - b.y0, b.h);
+		out += t;
+		L.phys = true;
+		L.anchored = b.anchor;
+		memcpy(L.P0, L.ps, sizeof(L.P0));
+		memcpy(L.A0, L.ax, sizeof(L.A0));
+		// the box's middle, as BeamNG measures it once it settled (a tied one stays 5 cm up)
+		PropWorld(L, cx, cy, m.mn[2] + b.h * 0.5, L.Cg0);
+		if (b.anchor) L.Cg0[2] += 0.05;
+		++g_props.physSent;
+	}
+	// BeamNG's answers: poses ("pp"), knocked ("pk"), one failed ("pqf"), they work or not ("pqs")
+	void PropPhysMsgs()
+	{
+		PropState&               P = g_props;
+		std::vector<std::string> q;
+		AcquireSRWLockExclusive(&g_dnet.lock);
+		q.swap(g_dnet.ppQ);
+		ReleaseSRWLockExclusive(&g_dnet.lock);
+		for (const std::string& s : q) {
+			std::string ty;
+			JsonStr(s, "t", ty);
+			if (ty == "pqs") {
+				const int ok = int(JsonNum(s, "ok", 0));
+				if (ok != P.physOk) {
+					std::string why;
+					JsonStr(s, "why", why);
+					if (ok) Log("props: BeamNG spawns physics props (GTA's props copy them)");
+					else {
+						Log("props: BeamNG can't spawn physics props (%s): fixed boxes instead", why.c_str());
+						Notify("Props: BeamNG physics props didn't work - fixed boxes instead (see the BeamNG log)");
+						for (auto& kv : P.live) kv.second.phys = false;
+					}
+				}
+				P.physOk = ok;
+				continue;
+			}
+			if (ty == "pqf") {
+				auto it = P.live.find(int(JsonNum(s, "id", 0)));
+				if (it != P.live.end()) {
+					PropLive& L = it->second;
+					L.phys = false;
+					L.physFailed = true;
+					if (L.frozen) {
+						// (it fell through a gap in GTA's ground in BeamNG: GTA's prop back where it stood)
+						const double* R = L.A0[0];
+						const double* F = L.A0[1];
+						const double* U = L.A0[2];
+						CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, L.ent, float(L.P0[0]), float(L.P0[1]), float(L.P0[2]), 0, 0, 0);
+						CallVoid(N::SET_ENTITY_ROTATION, L.ent, float(asin(std::clamp(F[2], -1.0, 1.0)) / kDeg), float(atan2(-R[2], U[2]) / kDeg), float(atan2(-F[0], F[1]) / kDeg), 2, 1);
+					}
+					std::string why;
+					JsonStr(s, "why", why);
+					if (P.physLogs++ < 40) Log("props: BeamNG's physics prop for 0x%08X failed (%s)%s", L.model, why.c_str(), L.frozen ? ": GTA's prop put back" : "");
+				}
+				++P.physFails;
+				continue;
+			}
+			if (ty == "pk") {
+				auto it = P.live.find(int(JsonNum(s, "id", 0)));
+				if (it == P.live.end()) continue;
+				PropLive& L = it->second;
+				if (L.knocked) continue;
+				L.knocked = true;
+				P.knockedEnts.insert(L.ent);
+				++P.physKnocked;
+				++P.breaks;
+				auto mi = P.models.find(L.model);
+				if (mi != P.models.end()) {
+					++mi->second.breaks;
+					P.seenDirty = true;
+					if (P.physLogs++ < 40)
+						Log("props: BeamNG's car knocked a %s prop (model 0x%08X %s, %s) at %.0f km/h: GTA's copies its box", L.anchored ? "tied" : "loose", L.model,
+							mi->second.name.empty() ? "" : mi->second.name.c_str(), mi->second.why.c_str(), JsonNum(s, "v", 0) * 3.6);
+				}
+				continue;
+			}
+			// "pp": id, how far its middle moved (x y z), how it turned (x y z w), per prop
+			const size_t a = s.find('[');
+			if (a == std::string::npos) continue;
+			const char* p = s.c_str() + a + 1;
+			while (*p && *p != ']') {
+				double v[8];
+				int    k = 0;
+				for (; k < 8; ++k) {
+					char* e = nullptr;
+					v[k] = strtod(p, &e);
+					if (e == p) break;
+					p = e;
+					while (*p == ',' || *p == ' ') ++p;
+				}
+				if (k < 8) break;
+				auto it = P.live.find(int(v[0]));
+				if (it == P.live.end() || !it->second.phys) continue;
+				PropLive& L = it->second;
+				const double qq[4] = { v[4], v[5], v[6], v[7] };
+				auto rot = [&](const double* x, double* o) {  // the turn qq applied to x
+					const double t[3] = { 2 * (qq[1] * x[2] - qq[2] * x[1]), 2 * (qq[2] * x[0] - qq[0] * x[2]), 2 * (qq[0] * x[1] - qq[1] * x[0]) };
+					o[0] = x[0] + qq[3] * t[0] + (qq[1] * t[2] - qq[2] * t[1]);
+					o[1] = x[1] + qq[3] * t[1] + (qq[2] * t[0] - qq[0] * t[2]);
+					o[2] = x[2] + qq[3] * t[2] + (qq[0] * t[1] - qq[1] * t[0]);
+				};
+				// its origin goes where the box's move and turn take it; its axes turn with it
+				const double r0[3] = { L.P0[0] - L.Cg0[0], L.P0[1] - L.Cg0[1], L.P0[2] - L.Cg0[2] };
+				double       r1[3], R[3], F[3], U[3];
+				rot(r0, r1);
+				rot(L.A0[0], R);
+				rot(L.A0[1], F);
+				rot(L.A0[2], U);
+				const double O[3] = { L.Cg0[0] + v[1] + r1[0], L.Cg0[1] + v[2] + r1[1], L.Cg0[2] + v[3] + r1[2] };
+				if (!L.frozen) {
+					CallVoid(N::FREEZE_ENTITY_POSITION, L.ent, 1);  // (GTA's own physics off it: BeamNG moves it now)
+					L.frozen = true;
+				}
+				CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, L.ent, float(O[0]), float(O[1]), float(O[2]), 0, 0, 0);
+				// GTA rotation order 2 (as for the drawn car: DrvSetPuppet)
+				const double pitch = asin(std::clamp(F[2], -1.0, 1.0)) / kDeg, yaw = atan2(-F[0], F[1]) / kDeg, roll = atan2(-R[2], U[2]) / kDeg;
+				CallVoid(N::SET_ENTITY_ROTATION, L.ent, float(pitch), float(roll), float(yaw), 2, 1);
+				++P.physPoses;
+			}
+		}
 	}
 
 	// every tick (drive mode): the pool scanned 4 times a second; hits with the drawn car every tick
@@ -7378,11 +8476,50 @@ namespace
 		const ULONGLONG ms = GetTickCount64();
 		if (!g_cfg.props || d.state != 2 || !d.fixedMap || !d.carPoseOk) {
 			if (!P.live.empty()) PropsRemoveAll(d.state != 2 ? "drive mode off" : "props off");
+			AcquireSRWLockExclusive(&g_dnet.lock);
+			g_dnet.pbkQ.clear();
+			g_dnet.ppQ.clear();
+			ReleaseSRWLockExclusive(&g_dnet.lock);
 			return;
 		}
 		if (!P.cfgLoaded) LoadProps();
+		for (auto it = P.fxLoops.begin(); it != P.fxLoops.end();) {  // v2.7: water jets end
+			if (NowSeconds() < it->second) { ++it; continue; }
+			CallVoid(N::STOP_PARTICLE_FX_LOOPED, it->first, 0);
+			it = P.fxLoops.erase(it);
+		}
+		PropPhysMsgs();  // v2.52
 		const double now = NowSeconds();
 		const double w = std::max(1.0f, g_modelSize[0].load()), l = std::max(2.0f, g_modelSize[1].load()), h = std::max(0.8f, g_modelSize[2].load());
+		// ---- v2.51: BeamNG's car broke props' boxes: over they go in GTA
+		{
+			std::vector<std::string> q;
+			AcquireSRWLockExclusive(&g_dnet.lock);
+			q.swap(g_dnet.pbkQ);
+			ReleaseSRWLockExclusive(&g_dnet.lock);
+			for (const std::string& s : q) {
+				const int    id = int(JsonNum(s, "id", 0));
+				const double V[3] = { JsonNum(s, "vx", 0), JsonNum(s, "vy", 0), JsonNum(s, "vz", 0) }, dv = JsonNum(s, "dv", 0);
+				auto         it = P.live.find(id);
+				if (it == P.live.end()) continue;
+				PropLive& L = it->second;
+				auto      mi = P.models.find(L.model);
+				if (mi == P.models.end() || L.broken) continue;
+				PropModel& m = mi->second;
+				L.broken = true;
+				L.sent = false;  // (BeamNG took its box out)
+				L.brokenT = now;
+				memcpy(L.brokenC, L.c, sizeof(L.brokenC));
+				L.checked = false;
+				++m.breaks;
+				++P.breaks;
+				P.seenDirty = true;
+				PropKnock(L, m, V);
+				if (m.breaks + P.breaks <= 60)
+					Log("props: BeamNG's car broke a %s prop (model 0x%08X %s, %s) at %.0f km/h, losing %.1f km/h against it: knocked over in GTA", PropKindName(m.kind), L.model,
+						m.name.empty() ? "" : m.name.c_str(), m.why.c_str(), sqrt(V[0] * V[0] + V[1] * V[1] + V[2] * V[2]) * 3.6, dv * 3.6);
+			}
+		}
 		// ---- the pool, 4 times a second
 		if (now - P.scanT >= 0.25) {
 			P.scanT = now;
@@ -7393,8 +8530,11 @@ namespace
 			const int n = std::clamp(worldGetAllObjects(P.buf.data(), int(P.buf.size())), 0, int(P.buf.size()));
 			P.pool = uint32_t(n);
 			const double R = g_cfg.propRangeM;
-			std::string  add;
-			int          nAdd = 0;
+			std::string  add, ids;
+			int          nAdd = 0, nRm = 0;
+			const double measEnd = t0 + 0.002;  // models measured within 2 ms a scan (at least one)
+			const uint32_t meas0 = P.measured;
+			std::vector<std::pair<double, int>> cands;  // v2.52: physics prop candidates (distance squared, entity)
 			for (int q = 0; q < n; ++q) {
 				const int e = P.buf[q];
 				if (!e || !Call<int>(N::DOES_ENTITY_EXIST, e)) continue;
@@ -7414,42 +8554,132 @@ namespace
 				L.scan = P.scan;
 				const double ax[3][3] = { { rt.x, rt.y, rt.z }, { fw.x, fw.y, fw.z }, { up.x, up.y, up.z } };
 				memcpy(L.ax, ax, sizeof(ax));
+				L.ps[0] = ps.x;
+				L.ps[1] = ps.y;
+				L.ps[2] = ps.z;
 				// the box: the model's size, centred where it is (its corners in the model's frame, turned by the matrix)
 				const double mc[3] = { (m.mn[0] + m.mx[0]) * 0.5, (m.mn[1] + m.mx[1]) * 0.5, (m.mn[2] + m.mx[2]) * 0.5 };
 				for (int k = 0; k < 3; ++k) {
 					L.c[k] = (k == 0 ? ps.x : k == 1 ? ps.y : ps.z) + ax[0][k] * mc[0] + ax[1][k] * mc[1] + ax[2][k] * mc[2];
 					L.he[k] = (m.mx[k] - m.mn[k]) * 0.5;
 				}
-				if (m.kind == kPropSolid && g_cfg.propSolid) {
+				// v2.51: knocked over: did it really go in GTA (the log says, for the next fix)
+				if (L.broken && !L.checked && now - L.brokenT > 1.0) {
+					L.checked = true;
+					if (P.movedLogs++ < 12) {
+						const double mv = sqrt((L.c[0] - L.brokenC[0]) * (L.c[0] - L.brokenC[0]) + (L.c[1] - L.brokenC[1]) * (L.c[1] - L.brokenC[1]) +
+							(L.c[2] - L.brokenC[2]) * (L.c[2] - L.brokenC[2]));
+						Log("props: the broken prop 0x%08X 1 s later in GTA: moved %.2f m, upright %.2f, broken %d", L.model, mv, Call<float>(N::GET_ENTITY_UPRIGHT_VALUE, e),
+							Call<int>(N::HAS_OBJECT_BEEN_BROKEN, e, 0));
+					}
+				}
+				if (L.phys) continue;  // v2.52: BeamNG simulates it (its pose comes back as "pp")
+				{
+					// v2.52: posts, signs, bins: a physics prop when near enough (below); litter isn't
+					const double vol = 8.0 * L.he[0] * L.he[1] * L.he[2];
+					const double dx = L.c[0] - d.carO[0], dy = L.c[1] - d.carO[1], vl = sqrt(d.carV[0] * d.carV[0] + d.carV[1] * d.carV[1]);
+					const bool   behind = vl > 3.0 && (dx * d.carV[0] + dy * d.carV[1]) / vl < -8.0;
+					if (g_cfg.propPhysics && P.physOk != 0 && !L.physFailed && !L.broken && up.z >= 0.85f && !behind &&
+					    (m.kind == kPropBreak || (m.kind == kPropSoft && vol >= 0.02 && std::max({ L.he[0], L.he[1], L.he[2] }) >= 0.15)))
+						cands.push_back({ dx * dx + dy * dy, e });
+				}
+				if ((m.kind == kPropSolid && g_cfg.propSolid) || m.kind == kPropBreak) {
+					// fallen over or broken: not a box any more
+					const bool down = up.z < 0.85f || L.broken;
+					if (down) {
+						if (L.sent) {
+							ids += (nRm ? "," : "") + std::to_string(e);
+							++nRm;
+							++P.rmN;
+							L.sent = false;
+						}
+						continue;
+					}
+					if (!PropParts(m, L, P.measured == meas0 || NowSeconds() < measEnd)) continue;
 					const double yaw = atan2(fw.y, fw.x);
 					const double mv = sqrt((L.c[0] - L.sentC[0]) * (L.c[0] - L.sentC[0]) + (L.c[1] - L.sentC[1]) * (L.c[1] - L.sentC[1]) + (L.c[2] - L.sentC[2]) * (L.c[2] - L.sentC[2]));
 					double       dyaw = fabs(yaw - L.sentYaw);
 					dyaw = std::min(dyaw, 2 * kPi - dyaw);
 					if (!L.sent || mv > 0.2 || dyaw > 0.09) {
-						PropBoxMsg(add, L);
+						PropBoxMsg(add, L, m);
 						L.sent = true;
 						memcpy(L.sentC, L.c, sizeof(L.sentC));
 						L.sentYaw = yaw;
 						++nAdd;
 						++P.sentN;
-						if (nAdd >= 40) {
-							DrvSend(("{\"t\":\"pr\",\"b\":[" + add + "]}").c_str());
+						if (nAdd >= 20) {
+							DrvSend(("{\"t\":\"pb\",\"p\":[" + add + "]}").c_str());
 							add.clear();
 							nAdd = 0;
 						}
 					}
 				}
 			}
-			if (nAdd) DrvSend(("{\"t\":\"pr\",\"b\":[" + add + "]}").c_str());
-			// gone or out of range: forgotten (solid boxes out of BeamNG)
-			std::string ids;
-			int         nRm = 0;
+			if (nAdd) DrvSend(("{\"t\":\"pb\",\"p\":[" + add + "]}").c_str());
+			// v2.52: physics props: the nearest candidates go in (PropPhysicsMax at once), far ones come out (GTA's prop stays as it is)
+			if (g_cfg.propPhysics && P.physOk != 0) {
+				const double spd = sqrt(d.carV[0] * d.carV[0] + d.carV[1] * d.carV[1] + d.carV[2] * d.carV[2]);
+				const double Rp = std::clamp(10.0 + 2.0 * spd, 15.0, 45.0);
+				int          liveN = 0;
+				double       farD2 = -1;
+				int          farId = 0;
+				const double vl = std::max(1e-6, sqrt(d.carV[0] * d.carV[0] + d.carV[1] * d.carV[1]));
+				for (auto& kv : P.live) {
+					PropLive& L = kv.second;
+					if (!L.phys) continue;
+					const double dx = L.c[0] - d.carO[0], dy = L.c[1] - d.carO[1], d2 = dx * dx + dy * dy;
+					const bool   behind = spd > 3.0 && (dx * d.carV[0] + dy * d.carV[1]) / vl < -8.0;  // (passed: its slot goes to one ahead)
+					if (d2 > (Rp + 10.0) * (Rp + 10.0) || behind) {
+						ids += (nRm ? "," : "") + std::to_string(kv.first);
+						++nRm;
+						L.phys = false;
+					} else {
+						++liveN;
+						if (d2 > farD2) farD2 = d2, farId = kv.first;
+					}
+				}
+				std::sort(cands.begin(), cands.end());
+				// all slots taken and one waits much nearer than the farthest in BeamNG: that one comes out
+				if (liveN >= g_cfg.propPhysicsMax && !cands.empty() && cands[0].first < Rp * Rp && cands[0].first < farD2 * 0.4) {
+					ids += (nRm ? "," : "") + std::to_string(farId);
+					++nRm;
+					P.live[farId].phys = false;
+					--liveN;
+				}
+				std::string pq;
+				for (const auto& c : cands) {
+					if (liveN >= g_cfg.propPhysicsMax || c.first > Rp * Rp) break;
+					auto li = P.live.find(c.second);
+					if (li == P.live.end()) continue;
+					PropLive& L = li->second;
+					PropModel& m = P.models[L.model];
+					PropPhysBox b{};
+					if (!PropPhysShape(m, L, P.measured == meas0 || NowSeconds() < measEnd, b)) continue;
+					if (L.sent) {  // (its fixed box out first)
+						ids += (nRm ? "," : "") + std::to_string(L.ent);
+						++nRm;
+						++P.rmN;
+						L.sent = false;
+					}
+					PropPhysStart(pq, L, m, b);
+					++liveN;
+				}
+				if (!pq.empty()) {
+					if (nRm) {
+						DrvSend(("{\"t\":\"prm\",\"ids\":[" + ids + "]}").c_str());
+						ids.clear();
+						nRm = 0;
+					}
+					DrvSend(("{\"t\":\"pq\",\"p\":[" + pq + "]}").c_str());
+				}
+			}
+			// gone or out of range: forgotten (their boxes out of BeamNG)
 			for (auto it = P.live.begin(); it != P.live.end();) {
 				if (it->second.scan == P.scan) {
 					++it;
 					continue;
 				}
-				if (it->second.sent) {
+				if (it->second.sent || it->second.phys) {
 					ids += (nRm ? "," : "") + std::to_string(it->first);
 					++nRm;
 					++P.rmN;
@@ -7462,7 +8692,7 @@ namespace
 			P.scanUs += us;
 			P.scanUsMax = std::max(P.scanUsMax, us);
 		}
-		// ---- hits: the drawn car against the soft props near it
+		// ---- hits: the drawn car against the soft props near it (breakaway and solid ones are BeamNG's: real boxes there)
 		const double spd = sqrt(d.carV[0] * d.carV[0] + d.carV[1] * d.carV[1] + d.carV[2] * d.carV[2]);
 		if (!paused && spd > 1.5) {
 			for (auto& kv : P.live) {
@@ -7470,7 +8700,7 @@ namespace
 				auto      mi = P.models.find(L.model);
 				if (mi == P.models.end()) continue;  // (not classified yet: GtaBeamD1_props.json was just read again)
 				PropModel& m = mi->second;
-				if (m.kind != kPropSoft) continue;
+				if (m.kind != kPropSoft || L.broken || L.phys) continue;  // (v2.52: a physics prop is BeamNG's)
 				if (now - L.lastHit < 2.0) continue;
 				const double dx = L.c[0] - d.carO[0], dy = L.c[1] - d.carO[1];
 				if (dx * dx + dy * dy > (l + 4.0) * (l + 4.0)) continue;
@@ -7479,16 +8709,10 @@ namespace
 				++m.hits;
 				++P.hits;
 				P.seenDirty = true;
-				// GTA: its physics woken up, pushed along the car's way (a little up, high on it so it tips over)
-				const double vx = d.carV[0] / spd, vy = d.carV[1] / spd;
-				const double k = g_cfg.propPush * (m.push >= 0 ? m.push : 1.0);
-				CallVoid(N::SET_ENTITY_DYNAMIC, L.ent, 1);
-				CallVoid(N::ACTIVATE_PHYSICS, L.ent);
-				CallVoid(N::APPLY_FORCE_TO_ENTITY, L.ent, 1, float(vx * spd * 0.8 * k), float(vy * spd * 0.8 * k), float((1.0 + 0.1 * spd) * k), 0.0f, 0.0f,
-					float(L.he[2] * 0.5), 0, 0, 1, 1, 0, 1);
-				// BeamNG: a little speed lost (a bump), by its size unless the json says
+				PropKnock(L, m, d.carV);
+				// BeamNG: a little speed lost (a bump), by its size unless the json says; v2.51: litter (under 0.05 m3) costs nothing
 				const double vol = 8.0 * L.he[0] * L.he[1] * L.he[2];
-				double       dv = (m.bump >= 0 ? m.bump : std::clamp(0.3 + vol * 1.2, 0.3, 3.0)) * g_cfg.propBump;
+				double       dv = (m.bump >= 0 ? m.bump : (vol < 0.05 ? 0.0 : std::clamp(0.3 + vol * 1.2, 0.3, 3.0))) * g_cfg.propBump;
 				dv = std::min(dv, spd * 0.5);
 				if (dv > 0.01) {
 					char b[96];
@@ -7504,10 +8728,20 @@ namespace
 		}
 		if (ms - P.logMs >= 10000) {
 			P.logMs = ms;
-			Log("props: %u in GTA's pool, %u near the car, %u hits (%u bumps, %.1f km/h lost in all), %u solid boxes sent to BeamNG (%u taken out); pool scans %u (%.0f us each, max %.0f)",
-				P.pool, P.nearN, P.hits, P.bumps, P.bumpSum * 3.6, P.sentN, P.rmN, P.scans, P.scans ? P.scanUs / P.scans : 0.0, P.scanUsMax);
-			P.hits = P.bumps = P.sentN = P.rmN = P.scans = 0;
-			P.bumpSum = P.scanUs = P.scanUsMax = 0;
+			Log("props: %u in GTA's pool, %u near the car, %u soft hits (%u bumps, %.1f km/h lost in all), %u broken by BeamNG's car, %u prop boxes sent to BeamNG (%u taken out); "
+			    "%u models measured (%u rays, %.0f us); pool scans %u (%.0f us each, max %.0f)",
+				P.pool, P.nearN, P.hits, P.bumps, P.bumpSum * 3.6, P.breaks, P.sentN, P.rmN, P.measured, P.measRays, P.measUs, P.scans, P.scans ? P.scanUs / P.scans : 0.0,
+				P.scanUsMax);
+			if (g_cfg.propPhysics && (P.physSent || P.physPoses || P.physFails || P.physOk == 0)) {
+				int liveN = 0;
+				for (auto& kv : P.live) liveN += kv.second.phys;
+				Log("props: physics (v2.52): %s; %d in BeamNG now, %u sent, %u failed, %u knocked, %u pose updates applied (10 s)",
+					P.physOk == 1 ? "BeamNG spawns them" : P.physOk == 0 ? "BeamNG can't (fixed boxes instead)" : "not confirmed yet", liveN, P.physSent, P.physFails, P.physKnocked,
+					P.physPoses);
+			}
+			P.physSent = P.physPoses = P.physFails = P.physKnocked = 0;
+			P.hits = P.bumps = P.sentN = P.rmN = P.scans = P.breaks = P.measured = P.measRays = 0;
+			P.bumpSum = P.scanUs = P.scanUsMax = P.measUs = 0;
 		}
 		if (P.seenDirty && ms - P.seenMs >= 30000) {
 			P.seenMs = ms;
@@ -7651,6 +8885,1020 @@ namespace
 		L.on = false;
 	}
 
+	// ---------------------------------------------------------------------------------------
+	// v2.6: GTA's weapons and explosions on BeamNG's car (your picks: dents where it's hit, tyres pop, windows shatter, engine and
+	// radiator damage; a blast pushes it and can set it on fire; it burns in BeamNG and after a while blows up like GTA's; hard
+	// crashes and blasts hurt you). In drive mode GTA's car is hidden and has no collision, so GTA's bullets fly through it: the
+	// shots are found from the shooters (where each one's last bullet landed: GET_PED_LAST_WEAPON_IMPACT_COORD), and their line is
+	// tested against the drawn car's box. Explosions come from GTA's explosion list (IS_EXPLOSION_IN_SPHERE). BeamNG finds where its
+	// car was hit (its collision triangles) and does the rest; its fire, its explosion and its broken glass come back ("fx").
+	// The numbers are in GtaBeamD1_weapons.json (written with these defaults when missing; Ctrl+F11 reads it again).
+	// ---------------------------------------------------------------------------------------
+	struct WGroup
+	{
+		float       dent = 1.5f, tire = 1, glass = 1, eng = 0.002f, rad = 0.01f, driver = 15;  // dent: cm deep (v2.61; 2.6: a push in m/s)
+		std::string name;
+	};
+	struct WBlast
+	{
+		float       accel = 400, r = 1.5f, dt = 0.05f, ign = 0.3f, glassR = 5, hurt = 40, hurtR = 6;
+		float       explodeR = 0;  // v2.63: this close to the car's middle (m) it blows the car up at once (a rocket hit)
+		std::string name;
+	};
+	struct WShooter
+	{
+		double last[3] = {};
+		bool   have = false;
+		double shootT = -100;
+		double pendT = -1;     // a shot seen (IS_PED_SHOOTING going on) with no new impact yet
+		bool   was = false;
+	};
+	struct WeaponState
+	{
+		bool                               cfgLoaded = false;
+		std::string                        cfgSource;
+		std::map<uint32_t, WGroup>         groups;
+		WGroup                             def;
+		std::map<int, WBlast>              blasts;
+		WBlast                             other, car;
+		float                              burnS = 30, engineFire = 24, crashDv = 7, crashHp = 6, driverR = 0.35f, guess = 1;
+		float                              holeCm = 2.2f, fireScale = 0.35f;  // v2.62: bullet hole size; GTA's flames on the car (x the effect's own size)
+		int                                shatterHits = 3;                     // v2.63: hits on a cracked windscreen / lamp before it shatters out
+		uint32_t                           holeModel = 0;                      // v2.62: the car file the holes are on
+		std::vector<int>                   peds;
+		std::map<int, WShooter>            sh;
+		uint32_t                           scan = 0;
+		std::vector<std::array<double, 4>> recent;  // blasts handled: x, y, z (GTA), time
+		std::vector<double>                sentT;   // hits sent in the last second
+		int                                proofVeh = 0, proofPed = 0;  // the hidden car and you: GTA's own damage off
+		bool                               burning = false, boomed = false;
+		int                                fire = 0;  // GTA's fire where BeamNG's car burns
+		double                             fireP[3] = {};  // (v2.61: on the hidden car: its offset there)
+		bool                               fireFx = false;  // v2.61: fire is a particle effect on the hidden car (else a fire on the spot)
+		int                                fxPick = -1, fxTries = 0;  // which of kFireFx GTA has
+		std::vector<std::array<double, 4>> vh;  // the car's flat velocity: t, x, y, speed (hard crashes)
+		int                                crashRun = 0;  // v2.7: ticks in a row over crashDv
+		double                             crashT = 0;
+		uint32_t                           shots = 0, onCar = 0, guesses = 0, sent = 0, blastsN = 0, fxHits = 0, hurtN = 0, logs = 0, logs2 = 0;
+		std::string                        dgLast;  // the broken groups last logged
+		double                             hurtSum = 0, logT = 0;
+	} g_wpn;
+
+	const char* kWeaponsDefault = R"JSON({
+  "about": "GTA x Beam v2.63: GTA's weapons and explosions on BeamNG's car. groups (GTA's weapon groups), what one bullet does: dentCm = how deep it dents the car where it hits (cm), tire / glass = chance (0 to 1) that a tyre / window it hits breaks, engine / radiator = BeamNG's damage per hit near them (radiator 0.1 = destroyed), driver = health it takes from you when it goes through the cabin past your head (100 = all). A group with dentCm 0 and driver 0 is ignored. blasts (GTA's explosion types, -1 = any other): accel = push at 1 m (m/s2, less with the distance squared), r = its core (m), dt = how long it pushes (s), ignite = chance it sets the car on fire, glassR = windows within this break (m), hurt = health it takes from you at the car, none at hurtR (m), explodeR = this close to the car's middle (m) it blows the car up at once (a rocket hit; a car explosion that close is GTA's own explosion of your car). car = the car's own explosion. burnToExplodeS = how long the car burns before it blows up; engineFireHits = engine hits before the engine catches fire; bulletHoleCm = the size of a bullet hole on the drawn car (0 = none); fireScale = GTA's flames on the burning car (1 = the effect's own size); glassShatterHits = more hits on a cracked windscreen / lamp before it shatters out (0 = never); crashMinDv / crashHpPerDv = a crash hurts you when the car's speed changes more than this within 0.25 s (m/s), this much health per m/s more; guessChance = for shooters GTA gives no bullet impact for: x their accuracy. Ctrl+F11 reads this file again.",
+  "burnToExplodeS": 30,
+  "engineFireHits": 24,
+  "bulletHoleCm": 2.2,
+  "fireScale": 0.35,
+  "glassShatterHits": 3,
+  "crashMinDv": 7,
+  "crashHpPerDv": 6,
+  "guessChance": 1.0,
+  "groups": [
+    { "group": "GROUP_PISTOL", "dentCm": 0.75, "tire": 1, "glass": 1, "engine": 0.001, "radiator": 0.005, "driver": 15 },
+    { "group": "GROUP_SMG", "dentCm": 0.75, "tire": 1, "glass": 1, "engine": 0.001, "radiator": 0.005, "driver": 12 },
+    { "group": "GROUP_RIFLE", "dentCm": 1.25, "tire": 1, "glass": 1, "engine": 0.0015, "radiator": 0.0075, "driver": 20 },
+    { "group": "GROUP_MG", "dentCm": 1.25, "tire": 1, "glass": 1, "engine": 0.0015, "radiator": 0.0075, "driver": 20 },
+    { "group": "GROUP_SHOTGUN", "dentCm": 2, "tire": 1, "glass": 1, "engine": 0.002, "radiator": 0.01, "driver": 30 },
+    { "group": "GROUP_SNIPER", "dentCm": 2.5, "tire": 1, "glass": 1, "engine": 0.004, "radiator": 0.02, "driver": 60 },
+    { "group": "GROUP_HEAVY", "dentCm": 1.5, "tire": 1, "glass": 1, "engine": 0.0015, "radiator": 0.0075, "driver": 20 },
+    { "group": "GROUP_MELEE", "dentCm": 0, "driver": 0 },
+    { "group": "GROUP_THROWN", "dentCm": 0, "driver": 0 },
+    { "group": "GROUP_STUNGUN", "dentCm": 0, "driver": 0 },
+    { "group": "default", "dentCm": 0.75, "tire": 1, "glass": 1, "engine": 0.001, "radiator": 0.005, "driver": 15 }
+  ],
+  "blasts": [
+    { "type": 0, "name": "grenade", "accel": 700, "r": 1.2, "dt": 0.05, "ignite": 0.4, "glassR": 6, "hurt": 70, "hurtR": 7, "explodeR": 1.8 },
+    { "type": 1, "name": "grenade launcher", "accel": 700, "r": 1.2, "dt": 0.05, "ignite": 0.4, "glassR": 6, "hurt": 70, "hurtR": 7, "explodeR": 2.5 },
+    { "type": 2, "name": "sticky bomb", "accel": 1000, "r": 1.0, "dt": 0.05, "ignite": 0.6, "glassR": 7, "hurt": 90, "hurtR": 8, "explodeR": 2.5 },
+    { "type": 3, "name": "molotov", "accel": 60, "r": 1.5, "dt": 0.05, "ignite": 1.0, "glassR": 2, "hurt": 15, "hurtR": 3 },
+    { "type": 4, "name": "rocket", "accel": 1200, "r": 1.0, "dt": 0.05, "ignite": 0.8, "glassR": 8, "hurt": 100, "hurtR": 9, "explodeR": 3.5 },
+    { "type": 5, "name": "tank shell", "accel": 1800, "r": 1.0, "dt": 0.06, "ignite": 0.9, "glassR": 10, "hurt": 150, "hurtR": 10, "explodeR": 4.5 },
+    { "type": 7, "name": "car", "accel": 500, "r": 1.5, "dt": 0.06, "ignite": 0.7, "glassR": 6, "hurt": 60, "hurtR": 7, "explodeR": 2.5 },
+    { "type": 9, "name": "petrol pump", "accel": 800, "r": 1.5, "dt": 0.06, "ignite": 0.9, "glassR": 8, "hurt": 80, "hurtR": 9 },
+    { "type": 27, "name": "barrel", "accel": 400, "r": 1.5, "dt": 0.05, "ignite": 0.6, "glassR": 5, "hurt": 50, "hurtR": 6 },
+    { "type": 34, "name": "gas tank", "accel": 400, "r": 1.5, "dt": 0.05, "ignite": 0.6, "glassR": 5, "hurt": 50, "hurtR": 6 },
+    { "type": -1, "name": "other", "accel": 400, "r": 1.5, "dt": 0.05, "ignite": 0.3, "glassR": 5, "hurt": 40, "hurtR": 6 }
+  ],
+  "car": { "accel": 500, "r": 1.5, "dt": 0.06, "ignite": 1.0, "glassR": 10, "hurt": 200, "hurtR": 6 }
+})JSON";
+
+	// the objects of an array ("key": [ {...}, {...} ]); objects without nested braces
+	std::vector<std::string> JsonObjects(const std::string& js, const char* key)
+	{
+		std::vector<std::string> out;
+		const size_t             a = js.find(std::string("\"") + key + "\"");
+		if (a == std::string::npos) return out;
+		size_t       p = js.find('[', a);
+		const size_t close = p == std::string::npos ? p : js.find(']', p);
+		while (p != std::string::npos) {
+			const size_t o = js.find('{', p);
+			if (o == std::string::npos || (close != std::string::npos && o > close)) break;
+			const size_t e = js.find('}', o);
+			if (e == std::string::npos) break;
+			out.push_back(js.substr(o, e - o + 1));
+			p = e + 1;
+		}
+		return out;
+	}
+
+	void WBlastOf(const std::string& o, WBlast& b)
+	{
+		double v;
+		if (JsonNumC(o.c_str(), "accel", v)) b.accel = float(std::clamp(v, 0.0, 20000.0));
+		if (JsonNumC(o.c_str(), "r", v)) b.r = float(std::clamp(v, 0.05, 10.0));
+		if (JsonNumC(o.c_str(), "dt", v)) b.dt = float(std::clamp(v, 0.01, 0.5));
+		if (JsonNumC(o.c_str(), "ignite", v)) b.ign = float(std::clamp(v, 0.0, 1.0));
+		if (JsonNumC(o.c_str(), "glassR", v)) b.glassR = float(std::clamp(v, 0.0, 50.0));
+		if (JsonNumC(o.c_str(), "hurt", v)) b.hurt = float(std::clamp(v, 0.0, 1000.0));
+		if (JsonNumC(o.c_str(), "hurtR", v)) b.hurtR = float(std::clamp(v, 0.1, 100.0));
+		if (JsonNumC(o.c_str(), "explodeR", v)) b.explodeR = float(std::clamp(v, 0.0, 30.0));
+		JsonStr(o, "name", b.name);
+	}
+
+	bool ParseWeapons(const std::string& js, WeaponState& W)
+	{
+		const std::vector<std::string> gs = JsonObjects(js, "groups"), bs = JsonObjects(js, "blasts");
+		if (gs.empty() && bs.empty()) return false;
+		W.groups.clear();
+		W.blasts.clear();
+		W.def = WGroup{};
+		W.other = WBlast{};
+		int oldDent = 0;
+		for (const std::string& o : gs) {
+			std::string n;
+			if (!JsonStr(o, "group", n) || n.empty()) continue;
+			WGroup g;
+			double v;
+			if (JsonNumC(o.c_str(), "dentCm", v)) g.dent = float(std::clamp(v, 0.0, 10.0));  // (v2.61; a 2.6 file's "dent" (m/s) is not read)
+			else if (o.find("\"dent\"") != std::string::npos) ++oldDent;
+			if (JsonNumC(o.c_str(), "tire", v)) g.tire = float(std::clamp(v, 0.0, 1.0));
+			if (JsonNumC(o.c_str(), "glass", v)) g.glass = float(std::clamp(v, 0.0, 1.0));
+			if (JsonNumC(o.c_str(), "engine", v)) g.eng = float(std::clamp(v, 0.0, 1.0));
+			if (JsonNumC(o.c_str(), "radiator", v)) g.rad = float(std::clamp(v, 0.0, 1.0));
+			if (JsonNumC(o.c_str(), "driver", v)) g.driver = float(std::clamp(v, 0.0, 1000.0));
+			g.name = n;
+			if (n == "default") W.def = g;
+			else W.groups[(n.size() > 2 && n[0] == '0' && (n[1] == 'x' || n[1] == 'X')) ? uint32_t(strtoul(n.c_str(), nullptr, 16)) : Joaat(n.c_str())] = g;
+		}
+		for (const std::string& o : bs) {
+			double t = -1;
+			JsonNumC(o.c_str(), "type", t);
+			WBlast b;
+			WBlastOf(o, b);
+			if (int(t) < 0) W.other = b;
+			else W.blasts[int(t)] = b;
+		}
+		size_t c = js.find("\"car\"");
+		while (c != std::string::npos && js.find_first_not_of(" \t\r\n", c + 5) != std::string::npos && js[js.find_first_not_of(" \t\r\n", c + 5)] != ':')
+			c = js.find("\"car\"", c + 5);  // (the key, not the blast named "car")
+		const size_t co = c == std::string::npos ? c : js.find('{', c);
+		const size_t ce = co == std::string::npos ? co : js.find('}', co);
+		if (ce != std::string::npos) WBlastOf(js.substr(co, ce - co + 1), W.car);
+		double v;
+		if (JsonNumC(js.c_str(), "burnToExplodeS", v)) W.burnS = float(std::clamp(v, 1.0, 600.0));
+		if (JsonNumC(js.c_str(), "bulletHoleCm", v)) W.holeCm = float(std::clamp(v, 0.0, 10.0));  // v2.62
+		if (JsonNumC(js.c_str(), "fireScale", v)) W.fireScale = float(std::clamp(v, 0.05, 3.0));
+		if (JsonNumC(js.c_str(), "glassShatterHits", v)) W.shatterHits = int(std::clamp(v, 0.0, 100.0));
+		if (JsonNumC(js.c_str(), "engineFireHits", v)) W.engineFire = float(std::clamp(v, 0.0, 1000.0));
+		if (JsonNumC(js.c_str(), "crashMinDv", v)) W.crashDv = float(std::clamp(v, 2.0, 100.0));
+		if (JsonNumC(js.c_str(), "crashHpPerDv", v)) W.crashHp = float(std::clamp(v, 0.0, 100.0));
+		if (JsonNumC(js.c_str(), "guessChance", v)) W.guess = float(std::clamp(v, 0.0, 1.0));
+		if (oldDent) Log("weapons: GtaBeamD1_weapons.json is the 2.6 one (\"dent\" in m/s): its %d dent numbers are not used (1.5 cm each); replace it with the 2.62 file (\"dentCm\")", oldDent);
+		else if (js.find("\"bulletHoleCm\"") == std::string::npos && js.find("\"fireScale\"") == std::string::npos)
+			Log("weapons: GtaBeamD1_weapons.json is from 2.61 or older: its full-strength dents are used (2.62's file has half the damage); replace it with the 2.62 file");
+		return true;
+	}
+
+	void LoadWeapons()
+	{
+		WeaponState& W = g_wpn;
+		char         path[MAX_PATH + 16];
+		PathNextToModule("_weapons.json", path, sizeof(path));
+		std::string js;
+		bool        fromFile = false;
+		if (FILE* f = fopen(path, "rb")) {
+			char   b[4096];
+			size_t n;
+			while ((n = fread(b, 1, sizeof(b), f)) > 0) js.append(b, n);
+			fclose(f);
+			fromFile = true;
+		}
+		if (fromFile && ParseWeapons(js, W)) {
+			W.cfgSource = path;
+		} else {
+			if (fromFile) Log("weapons: GtaBeamD1_weapons.json not usable (no \"groups\" or \"blasts\" list): the built-in numbers are used");
+			ParseWeapons(kWeaponsDefault, W);
+			W.cfgSource = "built-in numbers";
+			if (!fromFile) {
+				if (FILE* f = fopen(path, "wb")) {
+					fputs(kWeaponsDefault, f);
+					fclose(f);
+					W.cfgSource = std::string("built-in numbers (written to ") + path + ")";
+				}
+			}
+		}
+		W.cfgLoaded = true;
+		Log("weapons: %zu weapon groups, %zu explosion types (%s); the car burns %.0f s before it blows up, its engine catches fire after %.0f hits; crashes hurt above %.1f m/s",
+			W.groups.size(), W.blasts.size(), W.cfgSource.c_str(), W.burnS, W.engineFire, W.crashDv);
+	}
+
+	// GTA world -> BeamNG world (the drive's mapping, inverse of DrvMapPoint / DrvMapDir)
+	void DrvUnmapPoint(const double G[3], double out[3])
+	{
+		const DriveState& d = g_drv;
+		const double      dx = G[0] - d.Ag[0], dy = G[1] - d.Ag[1];
+		out[0] = d.Ab[0] + d.cth * dx + d.sth * dy;
+		out[1] = d.Ab[1] - d.sth * dx + d.cth * dy;
+		out[2] = d.Ab[2] + G[2] - d.Ag[2];
+	}
+	void DrvUnmapDir(const double v[3], double out[3])
+	{
+		const DriveState& d = g_drv;
+		out[0] = d.cth * v[0] + d.sth * v[1];
+		out[1] = -d.sth * v[0] + d.cth * v[1];
+		out[2] = v[2];
+	}
+
+	// what drive_start tells the BeamNG mod (the car's burning time, how it blows up and its own blast)
+	std::string WeaponsStartJson()
+	{
+		WeaponState& W = g_wpn;
+		if (!g_cfg.weapons) return ",\"wp\":0";
+		if (!W.cfgLoaded) LoadWeapons();
+		char b[200];
+		snprintf(b, sizeof(b), ",\"wp\":1,\"wb\":%.1f,\"wm\":%d,\"wx\":[%.1f,%.2f,%.3f,%.2f,%.1f]", W.burnS, g_cfg.carExplosion, W.car.accel, W.car.r, W.car.dt, W.car.ign,
+			W.car.glassR);
+		return b;
+	}
+
+	// your health down by hp (GTA's player: 200 full, dead at 100)
+	void WeaponsHurt(double hp, const char* why)
+	{
+		WeaponState& W = g_wpn;
+		const int    ped = Call<int>(N::PLAYER_PED_ID);
+		if (hp < 1.0 || Call<int>(N::IS_PED_DEAD_OR_DYING, ped, 1)) return;
+		const int h = Call<int>(N::GET_ENTITY_HEALTH, ped);
+		int       nh = int(h - hp);
+		if (nh <= 100) nh = 0;
+		CallVoid(N::SET_ENTITY_HEALTH, ped, nh, 0, 0);
+		++W.hurtN;
+		W.hurtSum += h - nh;
+		if ((strstr(why, "bullet") ? W.logs++ < 90 : W.logs2++ < 200)) Log("weapons: you lost %.0f health (%s): %d -> %d", hp, why, h, nh);
+	}
+
+	// drive mode on: the hidden car (and you in it) don't take GTA's own damage: BeamNG's car takes it, you get it from here
+	void WeaponsPuppet(bool on)
+	{
+		WeaponState& W = g_wpn;
+		DriveState&  d = g_drv;
+		const int    ped = Call<int>(N::PLAYER_PED_ID);
+		if (on) {
+			if (!g_cfg.weapons || !d.veh) return;
+			CallVoid(N::SET_ENTITY_PROOFS, d.veh, 1, 1, 1, 0, 1, 1, 0, 0);
+			CallVoid(N::SET_ENTITY_PROOFS, ped, 1, 1, 1, 0, 0, 0, 0, 0);
+			W.proofVeh = d.veh;
+			W.proofPed = ped;
+			W.boomed = false;
+			W.vh.clear();
+			Log("weapons: GTA's own bullet, fire and explosion damage off the hidden car and you while BeamNG drives (they hit BeamNG's car; you get hurt from here)");
+			return;
+		}
+		if (W.proofPed && Call<int>(N::DOES_ENTITY_EXIST, W.proofPed)) CallVoid(N::SET_ENTITY_PROOFS, W.proofPed, 0, 0, 0, 0, 0, 0, 0, 0);
+		W.proofPed = 0;
+		if (W.proofVeh && Call<int>(N::DOES_ENTITY_EXIST, W.proofVeh)) {
+			if (W.burning && !W.boomed) {
+				// still burning in BeamNG: GTA's fire there mustn't blow GTA's car up before BeamNG's does
+				CallVoid(N::SET_ENTITY_PROOFS, W.proofVeh, 0, 1, 1, 0, 0, 1, 0, 0);
+				Log("weapons: the drive ended with BeamNG's car on fire: it burns on and blows up when BeamNG says");
+				return;
+			}
+			CallVoid(N::SET_ENTITY_PROOFS, W.proofVeh, 0, 0, 0, 0, 0, 0, 0, 0);
+		}
+		W.proofVeh = 0;
+	}
+
+	// v2.61: you got out (foot mode) / back in: on foot GTA's own bullets, fire and explosions hurt you again (none from here)
+	void WeaponsFoot(bool out)
+	{
+		WeaponState& W = g_wpn;
+		const int    ped = Call<int>(N::PLAYER_PED_ID);
+		if (!g_cfg.weapons || !W.proofPed) return;
+		if (out) CallVoid(N::SET_ENTITY_PROOFS, ped, 0, 0, 0, 0, 0, 0, 0, 0);
+		else CallVoid(N::SET_ENTITY_PROOFS, ped, 1, 1, 1, 0, 0, 0, 0, 0);
+		W.proofPed = ped;
+		W.peds.clear();  // (you join / leave the shooters at once)
+		W.vh.clear();
+	}
+
+	void WeaponsFireOff()
+	{
+		WeaponState& W = g_wpn;
+		if (W.fire && W.fireFx) CallVoid(N::STOP_PARTICLE_FX_LOOPED, W.fire, 0);
+		else if (W.fire) CallVoid(N::REMOVE_SCRIPT_FIRE, W.fire);
+		W.fire = 0;
+	}
+
+	// v2.61: GTA's flames ON the hidden car where BeamNG's burns, so they move with it (2.6 lit a fire on one spot: it floated
+	// behind the car as it rolled, or didn't show inside it). GTA's particle effects: the first of these GTA has (logged).
+	// shortcut: effect names not checked against your GTA (no game here); none found = 2.6's fire on the spot
+	// v2.62: the plane cockpit fire first (smaller); your 2.61 test got the helicopter one: "way too much"
+	const char* const kFireFx[][2] = { { "core", "fire_wrecked_plane_cockpit" }, { "core", "ent_ray_heli_aprtmnt_l_fire" } };
+	void WeaponsFlames(int veh, const double pg[3])
+	{
+		WeaponState& W = g_wpn;
+		const int    nFx = int(sizeof(kFireFx) / sizeof(kFireFx[0]));
+		NVec3        off{};
+		if (veh && Call<int>(N::DOES_ENTITY_EXIST, veh)) off = Call<NVec3>(N::GET_OFFSET_FROM_ENTITY_GIVEN_WORLD_COORDS, veh, float(pg[0]), float(pg[1]), float(pg[2]));
+		const double o[3] = { off.x, off.y, off.z };
+		if (W.fire && W.fireFx && fabs(o[0] - W.fireP[0]) + fabs(o[1] - W.fireP[1]) + fabs(o[2] - W.fireP[2]) < 0.75) return;  // (still there)
+		if (W.fire && !W.fireFx && hypot(pg[0] - W.fireP[0], pg[1] - W.fireP[1]) < 1.5 && fabs(pg[2] - W.fireP[2]) < 1.5) return;
+		WeaponsFireOff();
+		if (veh && W.fxPick != -2 && W.fxTries < 20) {
+			for (int i = std::max(0, W.fxPick); i < nFx; ++i) {
+				CallVoid(N::REQUEST_NAMED_PTFX_ASSET, kFireFx[i][0]);
+				if (!Call<int>(N::HAS_NAMED_PTFX_ASSET_LOADED, kFireFx[i][0])) {
+					++W.fxTries;  // (asked for: tried again with the next fire report, half a second later)
+					return;
+				}
+				CallVoid(N::USE_PARTICLE_FX_ASSET, kFireFx[i][0]);
+				const int h = Call<int>(N::START_PARTICLE_FX_LOOPED_ON_ENTITY, kFireFx[i][1], veh, off.x, off.y, off.z, 0.0f, 0.0f, 0.0f, W.fireScale, 0, 0, 0);
+				if (h && Call<int>(N::DOES_PARTICLE_FX_LOOPED_EXIST, h)) {
+					if (W.fxPick != i) Log("weapons: GTA's flames on the car: particle effect %s/%s", kFireFx[i][0], kFireFx[i][1]);
+					W.fxPick = i;
+					W.fire = h;
+					W.fireFx = true;
+					memcpy(W.fireP, o, sizeof(W.fireP));
+					return;
+				}
+				if (W.fxPick == i) W.fxPick = -1;  // (it worked before: try the list again)
+				if (i == nFx - 1) {
+					W.fxPick = -2;
+					Log("weapons: none of GTA's fire effects started (%d tried): a fire on the spot instead (as 2.6)", nFx);
+				}
+			}
+		}
+		W.fire = Call<int>(N::START_SCRIPT_FIRE, float(pg[0]), float(pg[1]), float(pg[2]), 25, 0);
+		W.fireFx = false;
+		memcpy(W.fireP, pg, sizeof(W.fireP));
+	}
+
+	// BeamNG's reports: hits it took, its fire, its explosion, its broken glass (also after the drive: a car left burning)
+	void WeaponsFx(double now)
+	{
+		WeaponState&             W = g_wpn;
+		DriveState&              d = g_drv;
+		std::vector<std::string> q;
+		AcquireSRWLockExclusive(&g_dnet.lock);
+		q.swap(g_dnet.fxQ);
+		ReleaseSRWLockExclusive(&g_dnet.lock);
+		for (const std::string& s : q) {
+			std::string k;
+			JsonStr(s, "k", k);
+			double     pb[3], pg[3] = {};
+			const bool hasP = JsonNums(s.c_str(), "p", pb, 3) == 3 && (d.fixedMap || d.state == 2);
+			if (hasP) DrvMapPoint(pb, pg);
+			if (k == "fire") {
+				const bool on = JsonNum(s, "on", 0) > 0.5;
+				if (on && !W.boomed) {
+					if (!W.burning) {
+						Log("weapons: BeamNG's car is on fire (%d nodes burning)%s", int(JsonNum(s, "n", 0)), hasP ? "" : " (no place for GTA's fire: no mapping)");
+						Notify("Your car is on fire! It blows up in about %.0f s.", W.burnS);
+					}
+					W.burning = true;
+					if (hasP) WeaponsFlames(W.proofVeh ? W.proofVeh : (g_tgt.mode ? g_tgt.veh : 0), pg);
+				} else if (!on && W.burning) {
+					W.burning = false;
+					WeaponsFireOff();
+					Log("weapons: BeamNG's car stopped burning");
+					if (d.state == 0) WeaponsPuppet(false);
+				}
+			} else if (k == "boom") {
+				std::string why;
+				JsonStr(s, "why", why);
+				W.boomed = true;
+				W.burning = false;
+				WeaponsFireOff();
+				{
+					std::lock_guard<std::mutex> lk(g_holeMx);
+					g_burnt = 1.0f;  // v2.7: drawn charred, like GTA's wrecks
+					++g_holeGen;
+				}
+				const int veh = W.proofVeh ? W.proofVeh : (g_tgt.mode ? g_tgt.veh : 0);
+				if (veh && Call<int>(N::DOES_ENTITY_EXIST, veh)) {
+					NVec3 vp = Call<NVec3>(N::GET_ENTITY_COORDS, veh, 0);
+					W.recent.push_back({ vp.x, vp.y, vp.z, now + 1.0 });  // (its own explosion is no new blast for BeamNG's car)
+					const bool inCar = Call<int>(N::IS_PED_IN_VEHICLE, Call<int>(N::PLAYER_PED_ID), veh, 0) != 0;
+					CallVoid(N::SET_ENTITY_PROOFS, veh, 0, 0, 0, 0, 0, 0, 0, 0);
+					CallVoid(N::EXPLODE_VEHICLE, veh, 1, 0);
+					if (inCar) WeaponsHurt(W.car.hurt, "your car blew up with you in it");
+					W.proofVeh = 0;
+				}
+				Log("weapons: BeamNG's car blew up (%s): GTA's explosion at it", why.c_str());
+			} else if (k == "dg") {
+				// the car's broken groups (all of them, each time the list changes)
+				std::string g;
+				JsonStr(s, "g", g);
+				uint64_t                 mask[4] = {};
+				std::vector<std::string> names;
+				{
+					std::lock_guard<std::mutex> lk(g_modelMx);
+					names = g_drvModel.dgNames;
+				}
+				int known = 0, unknown = 0;
+				for (size_t a = 0; a <= g.size();) {
+					size_t e = g.find(',', a);
+					if (e == std::string::npos) e = g.size();
+					const std::string n = g.substr(a, e - a);
+					a = e + 1;
+					if (n.empty()) continue;
+					size_t i = 0;
+					while (i < names.size() && names[i] != n) ++i;
+					if (i < names.size() && i < 256) {
+						mask[i >> 6] |= 1ull << (i & 63);
+						++known;
+					} else {
+						++unknown;
+					}
+				}
+				for (int i = 0; i < 4; ++i) g_dgBroken[i].store(mask[i]);
+				const bool first = W.dgLast.empty() && g.empty();
+				if (g != W.dgLast && !first && W.logs2++ < 200)
+					Log("weapons: BeamNG broke %s%s (%d of the drawn car's groups%s)", g.empty() ? "nothing (repaired)" : g.substr(0, 300).c_str(), "", known,
+					unknown ? ", others the car file doesn't name: export the car again with the 2.6 mod" : "");
+				W.dgLast = g;
+			} else if (k == "hit") {
+				++W.fxHits;
+				std::string how, tire, glass;
+				JsonStr(s, "how", how);
+				JsonStr(s, "tire", tire);
+				JsonStr(s, "glass", glass);
+				if (W.logs++ < 90)
+					Log("weapons: BeamNG: a bullet hit its car (%s)%s%s%s%s%s", how.c_str(), tire.empty() ? "" : ", tyre popped: ", tire.c_str(), glass.empty() ? "" : ", glass broken: ",
+						glass.c_str(), JsonNum(s, "en", 0) > 0 ? ", engine hit" : JsonNum(s, "ra", 0) > 0 ? ", radiator hit" : "");
+				// v2.62: a bullet hole where it hit (the car's frame from BeamNG, less the drawn car's origin in it)
+				double hc[3];
+				if (W.holeCm > 0 && d.oDone && JsonNums(s.c_str(), "c", hc, 3) == 3) {
+					// v2.7: the bullet's direction too: the hole is drawn where its line meets the drawn panel (BeamNG's hit is on
+					// its collision triangles, a few cm inside the panel: most of 2.63's holes were inside it, unseen). One hit
+					// per spot (shots on the same spot don't push older holes out)
+					double dd[3] = { 0, 0, 0 };
+					JsonNums(s.c_str(), "dd", dd, 3);
+					std::lock_guard<std::mutex> lk(g_holeMx);
+					const float r = W.holeCm * 0.01f;
+					bool        dup = false;
+					for (int q = 0; q < g_holeN && !dup; ++q) {
+						const float* o = g_holes[q];
+						dup = std::hypot(o[0] - float(hc[0] - d.o[0]), o[1] - float(hc[1] - d.o[1]), o[2] - float(hc[2] - d.o[2])) < 0.5f * r;
+					}
+					if (!dup) {
+						float* h = g_holes[g_holeNext];
+						for (int q = 0; q < 3; ++q) h[q] = float(hc[q] - d.o[q]), h[4 + q] = float(dd[q]);
+						h[3] = r;
+						h[7] = 0;
+						g_holeNext = (g_holeNext + 1) % kHoles;
+						g_holeN = std::min(g_holeN + 1, kHoles);
+						++g_holeGen;
+					}
+				}
+				// v2.63: a hit on a cracked windscreen / lamp: after glassShatterHits of them it shatters out
+				if (W.shatterHits > 0 && d.oDone && JsonNums(s.c_str(), "c", hc, 3) == 3) {
+					std::lock_guard<std::mutex> lk(g_holeMx);
+					for (size_t gi = 0; gi < g_dgBox.size() && gi < 256; ++gi) {
+						const bool cracked = g_dgBroken[gi >> 6].load() >> (gi & 63) & 1, gone = g_dgShatter[gi >> 6].load() >> (gi & 63) & 1;
+						if (!cracked || gone) continue;
+						const auto& b = g_dgBox[gi];
+						bool        in = true;
+						for (int a = 0; a < 3; ++a) in = in && hc[a] - d.o[a] >= b[a] - 0.12 && hc[a] - d.o[a] <= b[3 + a] + 0.12;  // (BeamNG's hit vs the glass mesh: a few cm apart)
+						if (!in || ++g_dgHits[gi] < W.shatterHits) continue;
+						g_dgShatter[gi >> 6].fetch_or(1ull << (gi & 63));
+						if (W.logs2++ < 200) Log("weapons: the cracked glass / lamp group %zu shattered out after %d more hits", gi, g_dgHits[gi]);
+					}
+				}
+			} else if (k == "repaired") {
+				HolesClear("BeamNG's car repaired");
+			} else if (k == "dv" || k == "info" || k == "blast" || k == "ignite" || k == "dent") {
+				std::string t;
+				JsonStr(s, "s", t);
+				if (W.logs2++ < 200) Log("weapons: BeamNG: %s", t.c_str());
+			}
+		}
+	}
+
+	// the shot from A to B against the drawn car's box (inflated by m): where it enters it and its direction; false when it
+	// misses or starts inside (you shooting out of the car)
+	bool WeaponsRay(const DriveState& d, const double A[3], const double B[3], double m, double E[3], double D[3])
+	{
+		const double w = std::max(1.0f, g_modelSize[0].load()), l = std::max(2.0f, g_modelSize[1].load()), h = std::max(0.8f, g_modelSize[2].load());
+		const double half[3] = { w * 0.5 + m, l * 0.5 + m, h * 0.5 + m };
+		const double C[3] = { d.carO[0] + d.carU[0] * h * 0.5, d.carO[1] + d.carU[1] * h * 0.5, d.carO[2] + d.carU[2] * h * 0.5 };
+		const double* ax[3] = { d.carR, d.carF, d.carU };
+		double        t0 = 0, t1 = 1;
+		bool          inside = true;
+		for (int i = 0; i < 3; ++i) {
+			const double a = (A[0] - C[0]) * ax[i][0] + (A[1] - C[1]) * ax[i][1] + (A[2] - C[2]) * ax[i][2];
+			const double b = (B[0] - C[0]) * ax[i][0] + (B[1] - C[1]) * ax[i][1] + (B[2] - C[2]) * ax[i][2];
+			inside = inside && fabs(a) <= half[i];
+			const double dd = b - a;
+			if (fabs(dd) < 1e-9) {
+				if (fabs(a) > half[i]) return false;
+				continue;
+			}
+			double s0 = (-half[i] - a) / dd, s1 = (half[i] - a) / dd;
+			if (s0 > s1) std::swap(s0, s1);
+			t0 = std::max(t0, s0);
+			t1 = std::min(t1, s1);
+			if (t0 > t1) return false;
+		}
+		if (inside) return false;
+		double len = 0;
+		for (int k = 0; k < 3; ++k) {
+			E[k] = A[k] + (B[k] - A[k]) * t0;
+			D[k] = B[k] - A[k];
+			len += D[k] * D[k];
+		}
+		len = sqrt(len);
+		if (len < 1e-6) return false;
+		for (int k = 0; k < 3; ++k) D[k] /= len;
+		return true;
+	}
+
+	// one bullet into the drawn car: to BeamNG, and you hurt when it passes your head
+	void WeaponsHit(const double E[3], const double D[3], const double B[3], uint32_t weapon, bool guessed)
+	{
+		WeaponState& W = g_wpn;
+		DriveState&  d = g_drv;
+		const double now = NowSeconds();
+		while (!W.sentT.empty() && now - W.sentT.front() > 1.0) W.sentT.erase(W.sentT.begin());
+		if (W.sentT.size() >= 30) return;  // (30 a second at most: a minigun)
+		const uint32_t grp = Call<uint32_t>(N::GET_WEAPONTYPE_GROUP, weapon);
+		auto           it = W.groups.find(grp);
+		const WGroup&  g = it != W.groups.end() ? it->second : W.def;
+		if (g.dent <= 0 && g.driver <= 0) return;
+		W.sentT.push_back(now);
+		++W.sent;
+		double Eb[3], Db[3], S[3];
+		for (int k = 0; k < 3; ++k) S[k] = E[k] - D[k] * 1.0;  // (BeamNG looks from 1 m before the box)
+		DrvUnmapPoint(S, Eb);
+		DrvUnmapDir(D, Db);
+		char m[360];
+		snprintf(m, sizeof(m), "{\"t\":\"hit\",\"p\":[%.3f,%.3f,%.3f],\"d\":[%.4f,%.4f,%.4f],\"dv\":%.2f,\"ti\":%.2f,\"gl\":%.2f,\"en\":%.4f,\"ra\":%.4f,\"ef\":%.0f,\"w\":\"%s\"}",
+			Eb[0], Eb[1], Eb[2], Db[0], Db[1], Db[2], g.dent, g.tire, g.glass, g.eng, g.rad, W.engineFire, it != W.groups.end() ? g.name.c_str() : "default");
+		DrvSend(m);
+		if (W.logs++ < 90)
+			Log("weapons: a %sbullet (%s) hit the drawn car at %.2f %.2f %.2f going %.2f %.2f %.2f: to BeamNG", guessed ? "(guessed) " : "", it != W.groups.end() ? g.name.c_str() : "default",
+				E[0], E[1], E[2], D[0], D[1], D[2]);
+		// through the cabin past your head
+		if (g.driver > 0 && !d.foot) {
+			const NVec3  hd = Call<NVec3>(N::GET_PED_BONE_COORDS, Call<int>(N::PLAYER_PED_ID), 31086, 0.0f, 0.0f, 0.0f);  // SKEL_Head
+			const double H[3] = { hd.x, hd.y, hd.z };
+			double       t = 0, len2 = 0, dist2 = 0;
+			for (int k = 0; k < 3; ++k) {
+				t += (H[k] - E[k]) * D[k];
+				len2 += (B[k] - E[k]) * (B[k] - E[k]);
+			}
+			t = std::clamp(t, 0.0, sqrt(len2) + 0.3);
+			for (int k = 0; k < 3; ++k) dist2 += (H[k] - (E[k] + D[k] * t)) * (H[k] - (E[k] + D[k] * t));
+			if (sqrt(dist2) < W.driverR) WeaponsHurt(g.driver, "a bullet through the cabin");
+		}
+	}
+
+	// the shooters around: who fired since the last tick, and did the bullet go through the drawn car
+	void WeaponsShots(double now)
+	{
+		WeaponState& W = g_wpn;
+		DriveState&  d = g_drv;
+		const int    me = Call<int>(N::PLAYER_PED_ID);
+		if (W.peds.empty() || W.scan++ % 15 == 0) {
+			std::vector<int> all(1024);
+			const int        n = std::clamp(worldGetAllPeds(all.data(), int(all.size())), 0, int(all.size()));
+			W.peds.clear();
+			for (int i = 0; i < n; ++i) {
+				const int p = all[i];
+				if (!p || (p == me && !d.foot)) continue;  // (v2.61: your own shots too when you're out of the car)
+				const NVec3 pp = Call<NVec3>(N::GET_ENTITY_COORDS, p, 0);
+				if (hypot(pp.x - d.carO[0], pp.y - d.carO[1]) > 150.0) continue;
+				W.peds.push_back(p);
+				WShooter& S = W.sh[p];
+				if (!S.have) {
+					NVec3 imp{};
+					if (Call<int>(N::GET_PED_LAST_WEAPON_IMPACT_COORD, p, &imp)) {
+						S.last[0] = imp.x, S.last[1] = imp.y, S.last[2] = imp.z;
+						S.have = true;
+					}
+				}
+			}
+			if (W.sh.size() > 2048) W.sh.clear();
+		}
+		for (int p : W.peds) {
+			if (!Call<int>(N::DOES_ENTITY_EXIST, p) || (p == me && !d.foot)) continue;
+			WShooter&  S = W.sh[p];
+			const bool shooting = Call<int>(N::IS_PED_SHOOTING, p) != 0;
+			const bool edge = shooting && !S.was;  // (a new shot, or a burst starting)
+			S.was = shooting;
+			if (shooting) S.shootT = now;
+			if (now - S.shootT > 1.0) continue;
+			NVec3      imp{};
+			const bool ok = Call<int>(N::GET_PED_LAST_WEAPON_IMPACT_COORD, p, &imp) != 0;
+			const bool fresh = ok && S.have && fabs(imp.x - S.last[0]) + fabs(imp.y - S.last[1]) + fabs(imp.z - S.last[2]) > 0.01;
+			if (ok) {
+				S.last[0] = imp.x, S.last[1] = imp.y, S.last[2] = imp.z;
+				S.have = true;
+			}
+			const NVec3    hd = Call<NVec3>(N::GET_PED_BONE_COORDS, p, 31086, 0.0f, 0.0f, 0.0f);
+			const double   A[3] = { hd.x, hd.y, hd.z };
+			const uint32_t wpn = Call<uint32_t>(N::GET_SELECTED_PED_WEAPON, p);
+			double         E[3], D[3];
+			if (fresh) {
+				++W.shots;
+				S.pendT = -1;
+				double B[3] = { imp.x, imp.y, imp.z };
+				if (d.foot) {
+					// v2.61: parked, GTA's hidden car is solid: the bullet stops on its outside, which may be short of the drawn car
+					const double L = sqrt((B[0] - A[0]) * (B[0] - A[0]) + (B[1] - A[1]) * (B[1] - A[1]) + (B[2] - A[2]) * (B[2] - A[2]));
+					if (L > 0.1) for (int k = 0; k < 3; ++k) B[k] += (B[k] - A[k]) / L * 1.0;
+				}
+				if (WeaponsRay(d, A, B, 0.15, E, D)) {
+					++W.onCar;
+					WeaponsHit(E, D, B, wpn, false);
+				}
+				continue;
+			}
+			if (edge && S.pendT < 0) S.pendT = now;
+			if (S.pendT >= 0 && now - S.pendT > 0.25) {
+				// (a shot with no new impact from GTA within 0.25 s (it hit nothing GTA has, or GTA gave none): aimed at you, it hits
+				// as often as the shooter is accurate, if it's fighting you; still firing with none: one such shot every 0.25 s)
+				S.pendT = shooting ? now : -1;
+				const double acc = std::clamp(Call<int>(N::GET_PED_ACCURACY, p) / 100.0, 0.0, 1.0) * W.guess;
+				const double h = std::max(0.8f, g_modelSize[2].load());
+				const double C[3] = { d.carO[0] + d.carU[0] * h * 0.6, d.carO[1] + d.carU[1] * h * 0.6, d.carO[2] + d.carU[2] * h * 0.6 };
+				double       B[3];
+				for (int k = 0; k < 3; ++k) B[k] = A[k] + (C[k] - A[k]) * 1.5;
+				if (Call<int>(N::IS_PED_IN_COMBAT, p, me) && double(rand()) / RAND_MAX < acc && WeaponsRay(d, A, B, 0.0, E, D)) {   // (only one fighting you)
+					++W.guesses;
+					WeaponsHit(E, D, B, wpn, true);
+				}
+			}
+		}
+	}
+
+	// GTA's explosions near the car: where, which kind; BeamNG pushes its car, you get hurt by how close it was
+	void WeaponsBlasts(double now)
+	{
+		WeaponState& W = g_wpn;
+		DriveState&  d = g_drv;
+		const double h = std::max(0.8f, g_modelSize[2].load());
+		const double C[3] = { d.carO[0] + d.carU[0] * h * 0.5, d.carO[1] + d.carU[1] * h * 0.5, d.carO[2] + d.carU[2] * h * 0.5 };
+		auto         any = [&](int type, const double* P, double r) { return Call<int>(N::IS_EXPLOSION_IN_SPHERE, type, float(P[0]), float(P[1]), float(P[2]), float(r)) != 0; };
+		W.recent.erase(std::remove_if(W.recent.begin(), W.recent.end(), [&](const std::array<double, 4>& r) { return now - r[3] > 1.2; }), W.recent.end());
+		if (!any(-1, C, 30.0)) return;
+		// how far: the smallest sphere around the car's middle that has it
+		double lo = 0, hi = 30;
+		for (int i = 0; i < 9; ++i) {
+			const double mid = (lo + hi) * 0.5;
+			(any(-1, C, mid) ? hi : lo) = mid;
+		}
+		const double dist = hi;
+		// which way: spheres at that distance around it (26 directions)
+		double sum[3] = {};
+		int    nIn = 0;
+		for (int x = -1; x <= 1; ++x)
+			for (int y = -1; y <= 1; ++y)
+				for (int z = -1; z <= 1; ++z) {
+					if (!x && !y && !z) continue;
+					const double l = sqrt(double(x * x + y * y + z * z));
+					const double P[3] = { C[0] + x / l * dist, C[1] + y / l * dist, C[2] + z / l * dist };
+					if (any(-1, P, std::max(0.5, dist * 0.45))) {
+						sum[0] += x / l, sum[1] += y / l, sum[2] += z / l;
+						++nIn;
+					}
+				}
+		const double sl = sqrt(sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2]);
+		const double u[3] = { nIn && sl > 1e-6 ? sum[0] / sl : 0.0, nIn && sl > 1e-6 ? sum[1] / sl : 0.0, nIn && sl > 1e-6 ? sum[2] / sl : -1.0 };
+		const double P[3] = { C[0] + u[0] * dist, C[1] + u[1] * dist, C[2] + u[2] * dist };
+		for (const auto& r : W.recent)
+			if (hypot(P[0] - r[0], P[1] - r[1]) < 4.0 && fabs(P[2] - r[2]) < 4.0) return;  // (the same one, still in GTA's list)
+		W.recent.push_back({ P[0], P[1], P[2], now });
+		// which kind: v2.63: the strongest one there (your RPG shots were taken for the "car" explosion GTA makes of the hidden
+		// car, next to the rocket's own, and only burned)
+		int type = -1;
+		for (const auto& kv : W.blasts)
+			if ((type < 0 || kv.second.accel > W.blasts[type].accel) && (any(kv.first, P, std::max(1.5, dist * 0.6 + 0.5)) || any(kv.first, C, dist + 0.5))) type = kv.first;
+		const WBlast& b = type >= 0 ? W.blasts[type] : W.other;
+		const bool    boom = b.explodeR > 0 && dist <= b.explodeR;  // v2.63: close enough to blow the car up at once
+		++W.blastsN;
+		double Pb[3];
+		DrvUnmapPoint(P, Pb);
+		char m[320];
+		snprintf(m, sizeof(m), "{\"t\":\"blast\",\"p\":[%.3f,%.3f,%.3f],\"a\":%.1f,\"r\":%.2f,\"dt\":%.3f,\"ig\":%.2f,\"gr\":%.1f,\"ty\":%d,\"xp\":%d}", Pb[0], Pb[1], Pb[2], b.accel, b.r, b.dt, b.ign,
+			b.glassR, type, boom ? 1 : 0);
+		DrvSend(m);
+		Log("weapons: an explosion (%s, type %d) %.1f m from the car's middle at %.1f %.1f %.1f (%d of 26 directions saw it): to BeamNG%s", b.name.empty() ? "?" : b.name.c_str(), type, dist,
+			P[0], P[1], P[2], nIn, boom ? " (close enough: the car blows up)" : "");
+		if (!d.foot) WeaponsHurt(b.hurt * std::clamp(1.0 - dist / b.hurtR, 0.0, 1.0), "an explosion near the car");  // (on foot GTA's own explosion hurts you)
+	}
+
+	// hard crashes hurt you: the car's speed changing faster than any brake can
+	void WeaponsCrash(double now)
+	{
+		WeaponState& W = g_wpn;
+		DriveState&  d = g_drv;
+		if (now < d.fallGraceT) {  // (put back after a fall or repaired: no crash)
+			W.vh.clear();
+			return;
+		}
+		// v2.7: your 2.63 log: each time you were hurt BeamNG's car really lost 8-10 m/s, but the hurt went by the change of its
+		// velocity (a glance off a wall that turned it, or a bump of the ground, counted in full: 77 km/h "gone" for 32 km/h lost,
+		// you died). Now: flat (the ground's bumps up and down don't count), the speed lost, or half the sideways change if that is
+		// more (speeding up never counts); it must last 3 ticks (one bad reading doesn't), and impossible speeds are thrown away
+		const double vx = d.carV[0], vy = d.carV[1], sp = sqrt(vx * vx + vy * vy);
+		if (!std::isfinite(sp) || sp > 120.0) {
+			W.vh.clear();
+			W.crashRun = 0;
+			return;
+		}
+		W.vh.push_back({ now, vx, vy, sp });
+		while (!W.vh.empty() && now - W.vh.front()[0] > 0.25) W.vh.erase(W.vh.begin());
+		double loss = 0, turn = 0;
+		for (const auto& v : W.vh) {
+			loss = std::max(loss, v[3] - sp);
+			if (v[3] > 1.0) {  // (sideways to the way it went then: a turn; speeding up along it never counts)
+				const double ux = v[1] / v[3], uy = v[2] / v[3], ax = vx - v[1], ay = vy - v[2], al = ax * ux + ay * uy;
+				turn = std::max(turn, sqrt(std::max(0.0, ax * ax + ay * ay - al * al)));
+			}
+		}
+		const double dv = std::max(loss, 0.5 * turn);
+		W.crashRun = dv > W.crashDv ? W.crashRun + 1 : 0;
+		if (W.crashRun >= 3 && now - W.crashT > 1.0) {
+			W.crashT = now;
+			char why[64];
+			snprintf(why, sizeof(why), "a crash: %.0f km/h gone in a moment", dv * 3.6);
+			WeaponsHurt((dv - W.crashDv) * W.crashHp, why);
+		}
+	}
+
+	// ---------------------------------------------------------------------------------------
+	// v2.7: traffic and pedestrians (your choice: GTA-side contact now, BeamNG proxy cars later). Every tick, GTA's cars and people
+	// near the drawn car are boxes (their model's size, turned like them); one that overlaps the drawn car while they close in is a
+	// hit: both get the push of a collision of their two masses (GTA's car: its velocity and GTA's damage at the spot; BeamNG's car:
+	// its speed changes and it takes a dent there), people are knocked down and hurt, riders knocked off their bikes. The numbers
+	// are in GtaBeamD1_traffic.json (written next to the ini the first time; Ctrl+F11 reads it again). TrafficCollision=0: off.
+	// ---------------------------------------------------------------------------------------
+	const char* kTrafficDefault = R"JSON({
+  "about": "GTA x Beam v2.7 traffic: how GTA's cars and people and BeamNG's car push each other when they touch. Ctrl+F11 in game reads it again.",
+  "rangeM": 40,
+  "beamMassKg": 1500,
+  "classMassKg": [1300, 1400, 1700, 2100, 1600, 1400, 1400, 1500, 250, 2000, 9000, 3000, 2500, 90, 1500, 5000, 5000, 3000, 2200, 6000, 9000, 20000, 1000],
+  "bounce": 0.15,
+  "pushGta": 1.0,
+  "pushBeam": 1.0,
+  "dentPerMs": 0.006,
+  "dentMaxM": 0.12,
+  "gtaDamagePerMs": 25,
+  "pedKnockMs": 2.0,
+  "pedHurtPerMs": 6,
+  "pedThrow": 1.0,
+  "pedSlowMs": 0.4,
+  "riderKnockMs": 4.0,
+  "cooldownS": 0.5
+}
+)JSON";
+	struct TrafficState
+	{
+		bool                    cfgLoaded = false;
+		std::string             cfgSource;
+		double                  rangeM = 40, beamMass = 1500, bounce = 0.15, pushGta = 1, pushBeam = 1, dentPerMs = 0.006, dentMax = 0.12, gtaDmg = 25;
+		double                  pedKnock = 2.0, pedHurt = 6, pedThrow = 1.0, pedSlow = 0.4, riderKnock = 4.0, cooldown = 0.5;
+		double                  classMass[23] = { 1300, 1400, 1700, 2100, 1600, 1400, 1400, 1500, 250, 2000, 9000, 3000, 2500, 90, 1500, 5000, 5000, 3000, 2200, 6000, 9000, 20000, 1000 };
+		std::vector<int>        buf;
+		std::vector<int>        nearV, nearP;  // the cars / people within rangeM (rescanned every 10 ticks)
+		std::map<int, double>   lastHit;
+		uint32_t                tick = 0, carHits = 0, pedHits = 0, riders = 0, logs = 0;
+		double                  logT = 0, dvSum = 0;
+	};
+	TrafficState g_traffic;
+
+	void LoadTraffic()
+	{
+		TrafficState& T = g_traffic;
+		char          path[MAX_PATH + 16];
+		PathNextToModule("_traffic.json", path, sizeof(path));
+		std::string js;
+		if (FILE* f = fopen(path, "rb")) {
+			char   b[4096];
+			size_t n;
+			while ((n = fread(b, 1, sizeof(b), f)) > 0) js.append(b, n);
+			fclose(f);
+			T.cfgSource = path;
+		} else {
+			js = kTrafficDefault;
+			T.cfgSource = "built-in numbers";
+			if (FILE* o = fopen(path, "wb")) {
+				fputs(kTrafficDefault, o);
+				fclose(o);
+				T.cfgSource = std::string("built-in numbers (written to ") + path + ")";
+			}
+		}
+		const char* s = js.c_str();
+		double      v;
+		auto        num = [&](const char* k, double& out, double lo, double hi) {
+            if (JsonNumC(s, k, v)) out = std::clamp(v, lo, hi);
+		};
+		num("rangeM", T.rangeM, 5, 120);
+		num("beamMassKg", T.beamMass, 100, 50000);
+		num("bounce", T.bounce, 0, 1);
+		num("pushGta", T.pushGta, 0, 5);
+		num("pushBeam", T.pushBeam, 0, 5);
+		num("dentPerMs", T.dentPerMs, 0, 0.05);
+		num("dentMaxM", T.dentMax, 0, 0.3);
+		num("gtaDamagePerMs", T.gtaDmg, 0, 500);
+		num("pedKnockMs", T.pedKnock, 0, 30);
+		num("pedHurtPerMs", T.pedHurt, 0, 100);
+		num("pedThrow", T.pedThrow, 0, 5);
+		num("pedSlowMs", T.pedSlow, 0, 5);
+		num("riderKnockMs", T.riderKnock, 0, 30);
+		num("cooldownS", T.cooldown, 0.1, 5);
+		double cm[23];
+		const int n = JsonNums(s, "classMassKg", cm, 23);
+		for (int i = 0; i < n; ++i) T.classMass[i] = std::clamp(cm[i], 20.0, 100000.0);
+		T.cfgLoaded = true;
+		Log("traffic (v2.7): %s; range %.0f m, BeamNG's car taken as %.0f kg, pushes x%.1f (GTA) / x%.1f (BeamNG), dents %.1f mm per m/s (max %.0f mm)%s", T.cfgSource.c_str(), T.rangeM,
+			T.beamMass, T.pushGta, T.pushBeam, T.dentPerMs * 1000, T.dentMax * 1000, g_cfg.trafficCollision ? "" : "; TrafficCollision=0: off");
+	}
+
+	void TrafficTick(bool paused)
+	{
+		TrafficState& T = g_traffic;
+		DriveState&   d = g_drv;
+		if (!g_cfg.trafficCollision || d.state != 2 || !d.fixedMap || !d.carPoseOk || paused) return;
+		if (!T.cfgLoaded) LoadTraffic();
+		const double now = NowSeconds();
+		const int    me = Call<int>(N::PLAYER_PED_ID);
+		// the cars and people near the car (the pools every 10 ticks)
+		if (T.tick++ % 10 == 0) {
+			T.buf.resize(1024);
+			T.nearV.clear();
+			T.nearP.clear();
+			const double R2 = T.rangeM * T.rangeM;
+			auto isNear = [&](int e) {
+				const NVec3  p = Call<NVec3>(N::GET_ENTITY_COORDS, e, 0);
+				const double dx = p.x - d.carO[0], dy = p.y - d.carO[1];
+				return dx * dx + dy * dy < R2 && fabs(p.z - d.carO[2]) < 15.0;
+			};
+			int n = std::clamp(worldGetAllVehicles(T.buf.data(), int(T.buf.size())), 0, int(T.buf.size()));
+			for (int q = 0; q < n; ++q) {
+				const int e = T.buf[q];
+				if (e && e != d.veh && e != g_tgt.veh && Call<int>(N::DOES_ENTITY_EXIST, e) && isNear(e)) T.nearV.push_back(e);
+			}
+			n = std::clamp(worldGetAllPeds(T.buf.data(), int(T.buf.size())), 0, int(T.buf.size()));
+			for (int q = 0; q < n; ++q) {
+				const int e = T.buf[q];
+				if (e && e != me && Call<int>(N::DOES_ENTITY_EXIST, e) && !Call<int>(N::IS_PED_IN_ANY_VEHICLE, e, 0) && isNear(e)) T.nearP.push_back(e);
+			}
+		}
+		const double w = std::max(1.0f, g_modelSize[0].load()), l = std::max(2.0f, g_modelSize[1].load()), h = std::max(0.8f, g_modelSize[2].load());
+		const double cc[3] = { d.carO[0] + d.carU[0] * h * 0.5, d.carO[1] + d.carU[1] * h * 0.5, d.carO[2] + h * 0.5 };
+		// the drawn car's surface towards a direction (flat), for the dent and GTA's damage
+		auto edge = [&](const double n[2]) {
+			const double fr = sqrt(d.carR[0] * d.carR[0] + d.carR[1] * d.carR[1]), ff = sqrt(d.carF[0] * d.carF[0] + d.carF[1] * d.carF[1]);
+			const double ar = fr > 1e-6 ? fabs((d.carR[0] * n[0] + d.carR[1] * n[1]) / fr) : 0, af = ff > 1e-6 ? fabs((d.carF[0] * n[0] + d.carF[1] * n[1]) / ff) : 1;
+			return std::min(ar > 1e-6 ? w * 0.5 / ar : 1e9, af > 1e-6 ? l * 0.5 / af : 1e9);
+		};
+		auto send = [&](const double dvB[3], const double P[3], const double n[2], double dent, const char* who) {
+			double vb[3], pb[3], db[3];
+			const double dir[3] = { -n[0], -n[1], 0 };  // into the car
+			DrvUnmapDir(dvB, vb);
+			DrvUnmapPoint(P, pb);
+			DrvUnmapDir(dir, db);
+			char m[360];
+			snprintf(m, sizeof(m), "{\"t\":\"tc\",\"dv\":[%.3f,%.3f,%.3f],\"p\":[%.3f,%.3f,%.3f],\"d\":[%.4f,%.4f,%.4f],\"dent\":%.3f,\"w\":\"%s\"}", vb[0], vb[1], vb[2], pb[0], pb[1], pb[2],
+				db[0], db[1], db[2], dent, who);
+			DrvSend(m);
+		};
+		auto touching = [&](int e, const double c[3], const double ax[3][3], const double he[3], double n[2], double& vn, NVec3& ve) {
+			PropLive L;
+			memcpy(L.c, c, sizeof(L.c));
+			memcpy(L.ax, ax, sizeof(L.ax));
+			memcpy(L.he, he, sizeof(L.he));
+			if (!PropTouch(d, L, w, l, h)) return false;
+			auto lh = T.lastHit.find(e);
+			if (lh != T.lastHit.end() && now - lh->second < T.cooldown) return false;
+			const double dx = c[0] - cc[0], dy = c[1] - cc[1], dl = sqrt(dx * dx + dy * dy);
+			if (dl < 1e-3) return false;
+			n[0] = dx / dl;
+			n[1] = dy / dl;
+			ve = Call<NVec3>(N::GET_ENTITY_VELOCITY, e);
+			vn = (d.carV[0] - ve.x) * n[0] + (d.carV[1] - ve.y) * n[1];  // closing speed
+			return vn > 0.5;
+		};
+		for (int e : T.nearV) {
+			if (!Call<int>(N::DOES_ENTITY_EXIST, e)) continue;
+			const uint32_t model = uint32_t(Call<int>(N::GET_ENTITY_MODEL, e));
+			NVec3          mn{}, mx{}, fw{}, rt{}, up{}, ps{};
+			CallVoid(N::GET_MODEL_DIMENSIONS, model, &mn, &mx);
+			CallVoid(N::GET_ENTITY_MATRIX, e, &fw, &rt, &up, &ps);
+			const double ax[3][3] = { { rt.x, rt.y, rt.z }, { fw.x, fw.y, fw.z }, { up.x, up.y, up.z } };
+			const double mc[3] = { (mn.x + mx.x) * 0.5, (mn.y + mx.y) * 0.5, (mn.z + mx.z) * 0.5 };
+			double       c[3], he[3] = { (mx.x - mn.x) * 0.5, (mx.y - mn.y) * 0.5, (mx.z - mn.z) * 0.5 };
+			const double pp[3] = { ps.x, ps.y, ps.z };
+			for (int k = 0; k < 3; ++k) c[k] = pp[k] + ax[0][k] * mc[0] + ax[1][k] * mc[1] + ax[2][k] * mc[2];
+			double n[2], vn = 0;
+			NVec3  ve{};
+			if (!touching(e, c, ax, he, n, vn, ve)) continue;
+			T.lastHit[e] = now;
+			const int    cls = std::clamp(Call<int>(N::GET_VEHICLE_CLASS, e), 0, 22);
+			const double mE = T.classMass[cls], mB = T.beamMass;
+			const double J = (1.0 + T.bounce) * vn / (1.0 / mB + 1.0 / mE);  // the impulse along n (N s)
+			const double dvE = J / mE * T.pushGta, dvBn = J / mB * T.pushBeam;
+			// (on foot the hidden car is solid: GTA's own physics pushes its cars; a train keeps to its rails)
+			if (!d.foot && cls != 21) CallVoid(N::SET_ENTITY_VELOCITY, e, float(ve.x + n[0] * dvE), float(ve.y + n[1] * dvE), float(ve.z + 0.05 * dvE));
+			const double ex = edge(n);
+			const double P[3] = { cc[0] + n[0] * ex, cc[1] + n[1] * ex, d.carO[2] + std::min(0.6, h * 0.4) };
+			if (T.gtaDmg > 0 && vn > 2.0) {
+				// GTA's damage at the spot (in its frame)
+				const double rel[3] = { P[0] - pp[0], P[1] - pp[1], P[2] - pp[2] };
+				CallVoid(N::SET_VEHICLE_DAMAGE, e, float(rel[0] * rt.x + rel[1] * rt.y + rel[2] * rt.z), float(rel[0] * fw.x + rel[1] * fw.y + rel[2] * fw.z),
+					float(rel[0] * up.x + rel[1] * up.y + rel[2] * up.z), float(T.gtaDmg * vn), 1.2f, 1);
+			}
+			if ((cls == 8 || cls == 13) && vn > T.riderKnock) {
+				const int rider = Call<int>(N::GET_PED_IN_VEHICLE_SEAT, e, -1, 0);
+				if (rider && rider != me) {
+					CallVoid(N::KNOCK_PED_OFF_VEHICLE, rider);
+					Call<int>(N::SET_PED_TO_RAGDOLL, rider, 2000, 4000, 0, 0, 0, 0);
+					++T.riders;
+				}
+			}
+			const double dvB[3] = { -n[0] * dvBn, -n[1] * dvBn, 0 };
+			const double dent = vn > 3.0 ? std::min(T.dentMax, T.dentPerMs * vn * std::min(1.0, mE / mB)) : 0.0;
+			send(dvB, P, n, dent, cls == 8 ? "a motorcycle" : cls == 13 ? "a bicycle" : "a GTA car");
+			++T.carHits;
+			T.dvSum += dvBn;
+			if (T.logs++ < 40)
+				Log("traffic: BeamNG's car and a GTA car (class %d, %.0f kg) met at %.0f km/h closing: GTA's car pushed %.1f km/h, BeamNG's %.1f km/h, dent %.0f mm", cls, mE, vn * 3.6,
+					dvE * 3.6, dvBn * 3.6, dent * 1000);
+		}
+		// people: only by a moving car (on foot the parked car is solid in GTA: people walk around it)
+		for (int e : (d.foot || sqrt(d.carV[0] * d.carV[0] + d.carV[1] * d.carV[1]) < 2.0) ? std::vector<int>{} : T.nearP) {
+			if (!Call<int>(N::DOES_ENTITY_EXIST, e) || Call<int>(N::IS_PED_DEAD_OR_DYING, e, 1)) continue;
+			const NVec3  p = Call<NVec3>(N::GET_ENTITY_COORDS, e, 0);
+			const double c[3] = { p.x, p.y, p.z }, ax[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } }, he[3] = { 0.3, 0.3, 0.9 };
+			double n[2], vn = 0;
+			NVec3  ve{};
+			if (!touching(e, c, ax, he, n, vn, ve) || vn < T.pedKnock) continue;
+			T.lastHit[e] = now;
+			Call<int>(N::SET_PED_TO_RAGDOLL, e, 1500, 4000, 0, 0, 0, 0);
+			const double k = T.pedThrow * std::min(vn, 30.0);
+			CallVoid(N::APPLY_FORCE_TO_ENTITY, e, 1, float(n[0] * k * 0.9), float(n[1] * k * 0.9), float(1.0 + 0.15 * k), 0.0f, 0.0f, 0.0f, 0, 0, 1, 1, 0, 1);
+			const int hp = int((vn - T.pedKnock) * T.pedHurt);
+			if (hp > 0) CallVoid(N::APPLY_DAMAGE_TO_PED, e, hp, 0, 0, 0);
+			const double dvB[3] = { -n[0] * T.pedSlow, -n[1] * T.pedSlow, 0 };
+			const double P[3] = { cc[0], cc[1], cc[2] };
+			send(dvB, P, n, 0.0, "a person");
+			++T.pedHits;
+			if (T.logs++ < 40) Log("traffic: BeamNG's car hit a person at %.0f km/h: knocked down, %d health", vn * 3.6, hp);
+		}
+		if (now - T.logT > 10.0) {
+			if (T.carHits + T.pedHits > 0 || T.logT == 0)
+				Log("traffic: 10 s: %zu cars and %zu people near, %u car hits (BeamNG's car pushed %.1f km/h in all), %u people hit, %u riders knocked off", T.nearV.size(), T.nearP.size(),
+					T.carHits, T.dvSum * 3.6, T.pedHits, T.riders);
+			T.logT = now;
+			T.carHits = T.pedHits = T.riders = 0;
+			T.dvSum = 0;
+			for (auto it = T.lastHit.begin(); it != T.lastHit.end();) it = now - it->second > 10.0 ? T.lastHit.erase(it) : std::next(it);
+		}
+	}
+
+	void WeaponsTick(bool paused)
+	{
+		WeaponState& W = g_wpn;
+		DriveState&  d = g_drv;
+		if (!g_cfg.weapons) return;
+		if (!W.cfgLoaded) LoadWeapons();
+		const double now = NowSeconds();
+		if (g_modelGen.load() != W.holeModel) {
+			W.holeModel = g_modelGen.load();
+			HolesClear("another car file");  // v2.62
+		}
+		WeaponsFx(now);
+		if (d.state == 2 && d.carPoseOk && !paused && !d.beamPaused) {
+			WeaponsShots(now);
+			WeaponsBlasts(now);
+			if (!d.foot) WeaponsCrash(now);
+			else W.vh.clear();
+		} else {
+			W.vh.clear();
+		}
+		if (now - W.logT >= 10.0) {
+			if (W.shots + W.guesses + W.blastsN + W.fxHits + W.hurtN > 0)
+				Log("weapons: 10 s: %u bullets seen landing near (%u through the car), %u guessed hits, %u hits to BeamNG (%u it found on its car), %u explosions, you hurt %u times "
+				    "(%.0f health); %zu shooters watched; %d bullet holes on the drawn car",
+					W.shots, W.onCar, W.guesses, W.sent, W.fxHits, W.blastsN, W.hurtN, W.hurtSum, W.peds.size(), g_holeN);
+			W.shots = W.onCar = W.guesses = W.sent = W.fxHits = W.blastsN = W.hurtN = 0;
+			W.hurtSum = 0;
+			W.logT = now;
+		}
+	}
+
 	void DriveStop(const char* why, bool notify)
 	{
 		DriveState& d = g_drv;
@@ -7672,6 +9920,7 @@ namespace
 		// (v2.4: not in session mode: the option stays off, BeamNG's volume goes down instead)
 		if (d.sw && g_cfg.soundWake != 3 && strncmp(why, "no ", 3) != 0) SoundWake("drive end");
 		WorldEnd(why);  // v2.4: GTA's ground stops streaming (the tiles stay in BeamNG, the car on them)
+		WeaponsPuppet(false);  // v2.6: GTA's own damage back on (a car still burning in BeamNG stays fire- and explosion-proof)
 		PropsRemoveAll(why);  // v2.5: solid prop boxes out of BeamNG
 		d.carPoseOk = false;
 		if (d.puppet && d.veh && Call<int>(N::DOES_ENTITY_EXIST, d.veh)) {
@@ -7713,7 +9962,7 @@ namespace
 					memcpy(L.V, d.lastV, sizeof(L.V));
 				}
 			}
-			if (d.frozen) {
+			if (d.frozen || d.foot) {
 				CallVoid(N::FREEZE_ENTITY_POSITION, d.veh, 0);
 				d.frozen = false;
 			}
@@ -8137,7 +10386,11 @@ namespace
 		CallVoid(N::SET_ENTITY_COLLISION, d.veh, 0, 1);
 		CallVoid(N::SET_ENTITY_HAS_GRAVITY, d.veh, 0);
 		CallVoid(N::SET_ENTITY_VELOCITY, d.veh, 0.0f, 0.0f, 0.0f);
+		// v2.61: GTA deletes a car nobody sees once you're out of it (your 2.6 test: gone 0.3 s after you got out, the drawn car with it)
+		// shortcut: it stays a mission car (never cleaned up by GTA) for the rest of the session; fine for one car
+		CallVoid(N::SET_ENTITY_AS_MISSION_ENTITY, d.veh, 1, 1);
 		d.puppet = true;
+		WeaponsPuppet(true);  // v2.6
 		// v2.42: the pose log (one file per GTA session, each drive appended)
 		if (g_cfg.drivePoseLog && !d.plog) {
 			static bool fresh = true;
@@ -8212,6 +10465,12 @@ namespace
 					Log("drive: car origin in BeamNG's vehicle frame %.3f %.3f %.3f m from %d wheel readings (spread %.3f m); the car file says %.3f %.3f %.3f (%s), %.2f m apart%s",
 						d.o[0], d.o[1], d.o[2], d.oN, spread, fo[0], fo[1], fo[2], d.m.originHow.c_str(), diff,
 						diff > 0.3 ? " - a different car than the export?" : "");
+					// v2.52: scattered readings = a wrecked car (wheels off, parts on the road): the car file's value (your 2.51 log: 130 m off,
+					// the car fell 3 times)
+					if (spread > 0.5) {
+						memcpy(d.o, fo, sizeof(d.o));
+						Log("drive: the wheel readings are scattered (a wrecked car?): the car file's origin is used");
+					}
 				} else {
 					memcpy(d.o, fo, sizeof(d.o));
 					Log("drive: no wheels matched; car origin from the car file: %.3f %.3f %.3f m (%s)", fo[0], fo[1], fo[2], d.m.originHow.c_str());
@@ -8257,11 +10516,14 @@ namespace
 			auto it = w.tiles.find(k);
 			if (it == w.tiles.end()) continue;
 			// built in BeamNG, or (v2.41) GTA found no ground there (water, a hole): nothing to wait for
-			if ((it->second.state == 2 && it->second.sent && it->second.acked) || (it->second.state == 3 && it->second.gaps >= 1)) ++have;
+			// (v2.7: one being measured again near the car still has its last version in BeamNG)
+			if ((it->second.state == 2 && it->second.sent && it->second.acked) || (it->second.healOld && it->second.acked) ||
+			    (it->second.state == 3 && it->second.gaps >= 1))
+				++have;
 		}
 		// v2.41: the tile right under the car must be built
 		auto u = w.tiles.find(WKey(int(floor(w.cx / WTileM())), int(floor(w.cy / WTileM()))));
-		const bool under = u != w.tiles.end() && u->second.state == 2 && u->second.sent && u->second.acked;
+		const bool under = u != w.tiles.end() && ((u->second.state == 2 && u->second.sent) || u->second.healOld) && u->second.acked;
 		return need > 0 && have == need && under;
 	}
 
@@ -8307,6 +10569,7 @@ namespace
 			Log("drive: BeamNG's car is on GTA's ground (%s): %.0f cm off sideways, %.0f cm %s, speed after %.2f m/s; rotation %s via %s (%s), %.0f tries; %.1f s after asking",
 				d.tpWhy, eh * 100.0, fabs(ev) * 100.0, ev >= 0 ? "high" : "low", v, conv.c_str(), api.c_str(), keep > 0 ? "damage kept" : "BeamNG's reset: repaired", tries,
 				now - d.tpFirstT);
+			d.fallGraceT = std::max(d.fallGraceT, now + 1.5);  // v2.7: no crash damage while it settles
 			// the fixed mapping from here on: GTA = BeamNG + origin, WorldZLift lower (no rotation)
 			d.fixedMap = true;
 			d.Ag[0] = g_world.ox;
@@ -8363,6 +10626,32 @@ namespace
 		if (now - d.tpFirstT > 20.0) DriveStop("GTA's ground wasn't ready in BeamNG after 20 s (send GtaBeamD1.log and gtabridge_log.txt)", true);
 	}
 
+	// v2.61: you got out with drive mode on (or back in): BeamNG keeps its car (parked: brake, then parking brake); GTA's
+	// hidden car stands solid (frozen) where BeamNG's is, so you, peds and traffic bump into it and your bullets hit it
+	void WeaponsFoot(bool out);
+	void DriveFoot(bool out)
+	{
+		DriveState& d = g_drv;
+		d.foot = out;
+		const int ped = Call<int>(N::PLAYER_PED_ID);
+		if (out) {
+			CallVoid(N::SET_ENTITY_COLLISION, d.veh, 1, 1);
+			CallVoid(N::FREEZE_ENTITY_POSITION, d.veh, 1);
+			CallVoid(N::SET_ENTITY_VISIBLE, ped, 1, 0);
+			CallVoid(N::RESET_ENTITY_ALPHA, ped);
+			Log("drive: you got out: BeamNG keeps the car (parked), GTA's hidden car stands solid where BeamNG's is; get back in to drive, %s ends drive mode",
+				KeyName(g_cfg.driveKey));
+			Notify("You got out: your BeamNG car stays. Get back in to drive. %s: drive mode off.", KeyName(g_cfg.driveKey));
+		} else {
+			CallVoid(N::SET_ENTITY_COLLISION, d.veh, 0, 1);
+			CallVoid(N::FREEZE_ENTITY_POSITION, d.veh, d.frozen ? 1 : 0);
+			if (d.engineOff) CallVoid(N::SET_VEHICLE_ENGINE_ON, d.veh, 0, 1, 1);  // (getting in starts GTA's engine)
+			Log("drive: back in: BeamNG drives again");
+			Notify("Back in: your BeamNG controls drive it.");
+		}
+		WeaponsFoot(out);
+	}
+
 	// one script tick of drive mode (after SampleCar: c holds the GTA car as GTA has it now)
 	void DriveTick(CamSample& c, bool paused)
 	{
@@ -8374,9 +10663,21 @@ namespace
 			DriveStop("the GTA car is gone or detached", true);
 			return;
 		}
-		if (Call<int>(N::GET_PED_IN_VEHICLE_SEAT, d.veh, -1, 0) != ped) {
-			DriveStop("you left the driver's seat", true);
-			return;
+		{
+			// v2.61: out of the driver's seat while BeamNG drives: foot mode (BeamNG keeps its car parked; back in = drive)
+			const bool out = Call<int>(N::GET_PED_IN_VEHICLE_SEAT, d.veh, -1, 0) != ped;
+			if (out && d.state != 2) {
+				DriveStop("you left the driver's seat", true);
+				return;
+			}
+			if (out != d.foot) DriveFoot(out);
+			if (d.foot) {
+				const NVec3 pp = Call<NVec3>(N::GET_ENTITY_COORDS, ped, 0);
+				if (hypot(pp.x - d.carO[0], pp.y - d.carO[1]) > 300.0) {  // (GTA stops loading the world there: BeamNG's ground with it)
+					DriveStop("you went more than 300 m from your car", true);
+					return;
+				}
+			}
 		}
 		if (g_modelGen.load() != d.modelGen) {
 			DriveStop("a new car file was loaded", true);
@@ -8409,6 +10710,7 @@ namespace
 				Log("drive: BeamNG is paused (%s)", pzUser ? "by you, in BeamNG" : "because GTA is");
 			} else if (!bp && d.beamPaused) {
 				Log("drive: BeamNG runs again (paused %.1f s)", now - d.beamPauseT0);
+				d.fallGraceT = std::max(d.fallGraceT, now + 1.0);  // v2.7: (its speed jumps back: not a crash)
 			}
 			d.beamPaused = bp;
 			d.beamPausedUser = bp && pzUser;
@@ -8442,6 +10744,7 @@ namespace
 			ReleaseSRWLockShared(&g_dnet.lock);
 			if (rc != d.repSeen) {
 				d.repSeen = rc;
+				HolesClear("your repair binding");  // v2.62
 				std::string act;
 				JsonStr(rp, "a", act);
 				Log("drive: BeamNG: your %s binding repaired the car where it is", act.c_str());
@@ -8493,7 +10796,7 @@ namespace
 		if (rawIn && pad.ok && g_cfg.padToggle >= 0 && g_cfg.padToggle < 14) {
 			const bool t = (pad.btn & kPadBit[g_cfg.padToggle]) != 0;
 			const bool toBeam = PadOwner(d, g_cfg.padToggle) == 1;  // one of your BeamNG combinations (e.g. RB + D-pad down)
-			if (t && !d.toggleWas && !toBeam && d.state == 2 && focused && !paused) {
+			if (t && !d.toggleWas && !toBeam && d.state == 2 && focused && !paused && !d.foot) {
 				d.padGta = !d.padGta;
 				if (d.padGta) {
 					d.modMask = 0;
@@ -8516,7 +10819,7 @@ namespace
 		d.ownerPrev = own;
 		d.padSupp &= held;  // let go: usable again
 		d.owner = own;
-		std::string keys = (rawIn && focused && !paused) ? ReadKeys() : std::string(" ");
+		std::string keys = (rawIn && focused && !paused && !d.foot) ? ReadKeys() : std::string(" ");
 		if (keys.size() > 1) {
 			g_in.keyT = now;
 			d.kbUsed = true;
@@ -8536,7 +10839,7 @@ namespace
 		const bool kbActive = rawIn && (!padActive || now - g_in.keyT < 20.0 || Call<int>(N::IS_USING_KEYBOARD_AND_MOUSE, 2) != 0);
 		// v2.3: pad buttons that are GTA's but run a BeamNG action (PadGtaActions; v2.4: none by default)
 		d.handled = 0;
-		if (pad.ok && d.state == 2) {
+		if (pad.ok && d.state == 2 && !d.foot) {
 			for (int i = 0; i < g_cfg.padActN; ++i) {
 				const int  ctl = g_cfg.padActCtl[i];
 				if (PadOwner(d, ctl) != 0) continue;
@@ -8555,7 +10858,7 @@ namespace
 				if (pad.btn & kPadBit[g_cfg.padActCtl[i]]) d.actWas |= 1u << g_cfg.padActCtl[i];
 			// v2.4: the plugin's radio button is gone: GTA's own radio controls (radio wheel on D-pad left) work in GTA mode
 		}
-		d.blocked = BlockGtaControls(d, rawIn, padActive, kbActive);
+		d.blocked = d.foot ? 0 : BlockGtaControls(d, rawIn, padActive, kbActive);
 		if (pad.ok && held) d.padUsed = true;
 
 		// answers from BeamNG
@@ -8605,7 +10908,7 @@ namespace
 			brk = gBrk;
 			lr = gLr;
 			hb = gHb;
-		} else if (!paused && d.anchored) {
+		} else if (!paused && d.anchored && !d.foot) {
 			const uint32_t use = own & ~d.padSupp;
 			if (pad.ok) {
 				auto  on = [&](int c) { return (use >> c & 1u) != 0; };
@@ -8645,14 +10948,14 @@ namespace
 		thr = std::isfinite(thr) ? std::clamp(thr, 0.0f, 1.0f) : 0.0f;
 		brk = std::isfinite(brk) ? std::clamp(brk, 0.0f, 1.0f) : 0.0f;
 		lr = std::isfinite(lr) ? std::clamp(lr, -1.0f, 1.0f) : 0.0f;
-		if (paused || !d.anchored) {
-			// paused: brake to a stop, then the parking brake (a parking brake at speed would spin the car,
+		if (paused || !d.anchored || d.foot) {
+			// paused (v2.61: or you got out): brake to a stop, then the parking brake (a parking brake at speed would spin the car,
 			// and a held brake at a standstill makes BeamNG's automatic gearbox reverse). v2.01: "p" tells
 			// the BeamNG mod to let go of your bindings and do the same.
 			const bool fast = fabs(d.speed) > 3.0;
 			thr = lr = 0.0f;
-			brk = paused && fast ? 0.6f : 0.0f;
-			hb = paused && !fast;
+			brk = (paused || d.foot) && fast ? 0.6f : 0.0f;
+			hb = (paused || d.foot) && !fast;
 		}
 		const int  flt = g_cfg.driveFilter >= 0 ? g_cfg.driveFilter
 		                 : rawIn ? std::max(0, d.lastDev)
@@ -8660,9 +10963,9 @@ namespace
 		const float str = d.sign * lr;
 		{
 			char msg[1024];
-			snprintf(msg, sizeof(msg), "{\"t\":\"drive\",\"q\":%u,\"thr\":%.3f,\"brk\":%.3f,\"str\":%.3f,\"hb\":%d,\"flt\":%d,\"pad\":\"%s\",\"keys\":\"%s\",\"m\":%d,\"p\":%d,\"gp\":%d}",
-				++d.sendSeq, thr, brk, str, hb ? 1 : 0, flt, padStr, keyStr.c_str(), d.padGta ? 1 : 0, (paused || d.state == 3) ? 1 : 0,  // v2.4: state 3 = GTA's ground being built: brakes on
-				(paused && g_cfg.pauseSync) ? 1 : 0);  // v2.43: GTA paused: BeamNG pauses too
+			snprintf(msg, sizeof(msg), "{\"t\":\"drive\",\"q\":%u,\"thr\":%.3f,\"brk\":%.3f,\"str\":%.3f,\"hb\":%d,\"flt\":%d,\"pad\":\"%s\",\"keys\":\"%s\",\"m\":%d,\"p\":%d,\"gp\":%d,\"out\":%d}",
+				++d.sendSeq, thr, brk, str, hb ? 1 : 0, flt, padStr, keyStr.c_str(), d.padGta ? 1 : 0, (paused || d.state == 3 || d.foot) ? 1 : 0,  // v2.4: state 3 = GTA's ground being built: brakes on
+				(paused && g_cfg.pauseSync) ? 1 : 0, d.foot ? 1 : 0);  // v2.43: GTA paused: BeamNG pauses too; v2.61: you got out
 			DrvSend(msg);
 		}
 		d.thr = thr;
@@ -8772,8 +11075,10 @@ namespace
 					d.delay = want;
 					d.delayInit = true;
 				} else {
-					// v2.3: up at most 3 % of real time, down at most 0.5 % (no visible speed change)
-					d.delay += std::clamp(want - d.delay, -0.005 * ftc, 0.03 * ftc);
+					// v2.3: up at most 3 % of real time, down at most 0.5 % (no visible speed change). v2.54: down 1.5 %: your
+					// 2.53 log had it creep from 50 to 140 ms behind and stay there (BeamNG's hitches while it rebuilt swapped
+					// tiles); that much delay is felt as lag when steering slowly
+					d.delay += std::clamp(want - d.delay, -0.015 * ftc, 0.03 * ftc);
 				}
 				d.delayLo = std::min(d.delayLo, d.delay);
 				d.delayHi = std::max(d.delayHi, d.delay);
@@ -9008,8 +11313,31 @@ namespace
 				gz = d.goodX[2];
 				have = O[2] < gz - g_cfg.worldFallM;
 			}
+			if (have && O[2] < gz - g_cfg.worldFallM && now > d.fallGraceT && gz - O[2] < 80.0) {
+				// v2.51: only a fall THROUGH GTA's ground counts: still over GTA's ground (a jump off a ramp or a deck's edge, onto ground
+				// not built yet) is no reset (your v2.5 jump: put back onto the ramp). Its ground there comes first (WorldAir).
+				// v2.62: checked down to 80 m under (was 25: a fall off a high bridge was put back)
+				double       p[3], nrm[3];
+				const double a[3] = { O[0], O[1], O[2] + 1.0 }, b[3] = { O[0], O[1], O[2] - 80.0 };
+				if (MapRay(a, b, p, nrm) == 1) {
+					have = false;
+					++g_world.noFall;
+				}
+			}
+			// v2.62: put back only after it stays under GTA's ground for WorldFallWaitS (your 2.61 crashes: a car tumbling or
+			// flying low was put back before you could watch it), or at once when it is 40 m under (it really fell through)
+			const bool under = have && O[2] < gz - g_cfg.worldFallM && now > d.fallGraceT;
+			if (!under) {
+				if (d.underT > 0 && now - d.underT > 0.2 && d.underLogs < 20) {
+					++d.underLogs;
+					Log("drive: BeamNG's car was under GTA's ground for %.1f s and came back up: not put back (WorldFallWaitS %.1f)", now - d.underT, g_cfg.worldFallWaitS);
+				}
+				d.underT = 0;
+			} else if (d.underT <= 0) d.underT = now;
 			if (have) {
-				if (O[2] < gz - g_cfg.worldFallM && now > d.fallGraceT) {
+				if (under && (now - d.underT >= g_cfg.worldFallWaitS || gz - O[2] > 40.0)) {
+					const double underFor = now - d.underT;
+					d.underT = 0;
 					// v2.41: your v2.4 test looped here: the ground was measured where the fallen car was, not where it was put
 					// back, so it fell again at once (the GTA car floating, BeamNG's car hurt). Now the hidden GTA car goes to the
 					// last good spot first, the ground is built there (from the measured tiles: no rays), BeamNG's car follows
@@ -9018,8 +11346,8 @@ namespace
 					++d.falls;
 					d.fallLog.push_back(now);
 					while (!d.fallLog.empty() && d.fallLog.front() < now - 30.0) d.fallLog.erase(d.fallLog.begin());
-					Log("drive: BeamNG's car fell through GTA's ground (%.1f m under it at %.1f %.1f; tile there %s; fall %zu in 30 s)", gz - O[2], O[0], O[1],
-						acked ? "built" : "NOT built yet", d.fallLog.size());
+					Log("drive: BeamNG's car fell through GTA's ground (%.1f m under it at %.1f %.1f for %.1f s; tile there %s; fall %zu in 30 s)", gz - O[2], O[0], O[1],
+						underFor, acked ? "built" : "NOT built yet", d.fallLog.size());
 					if (d.fallLog.size() >= 3) {
 						DriveStop("BeamNG's car fell through GTA's ground 3 times in 30 s: send GtaBeamD1.log", true);
 						return;
@@ -9320,6 +11648,8 @@ namespace
 			LoadConfig();  // placement/look/shadow/hide settings can be tuned in the ini, then Ctrl+F11
 			LoadSurfaces();  // v2.4: GtaBeamD1_surfaces.json (tiles sent from now on use it)
 			g_props.cfgLoaded = false;  // v2.5: GtaBeamD1_props.json read again
+			g_wpn.cfgLoaded = false;    // v2.6: GtaBeamD1_weapons.json too
+			g_traffic.cfgLoaded = false;  // v2.7: GtaBeamD1_traffic.json too
 			if (g_tgt.mode == 1) {
 				SetVisible(g_tgt.veh, false);  // the hide mode may have changed
 			}
@@ -9530,7 +11860,7 @@ namespace
 			c.yaw = gr.z;
 		}
 		const int slip = useGame ? sG : sF;
-		const bool slipFixOn = g_drv.state == 2 ? g_cfg.driveSlipFix : g_cfg.camSlipFix;  // v2.2: drive mode has its own switch
+		const bool slipFixOn = g_drv.state == 2 ? (g_cfg.driveSlipFix && !g_drv.foot) : g_cfg.camSlipFix;  // v2.2: drive mode has its own switch (v2.61: not on foot)
 		g_dset.slipApplied = (slip && slipFixOn) ? slip : 0;
 		if (slip && slipFixOn) {
 			c.px -= slip * g_carVelW[0] * ft;
@@ -9753,6 +12083,8 @@ namespace
 		RadioAfterTick();      // v2.41: the car's radio follows what played in drive mode
 		WorldTick();           // v2.4: GTA's ground for BeamNG (rays out are collected even when not driving)
 		PropsTick(paused);     // v2.5: GTA's props and BeamNG's car
+		WeaponsTick(paused);   // v2.6: GTA's bullets and explosions on BeamNG's car, its fire, you hurt
+		TrafficTick(paused);   // v2.7: GTA's cars and people against BeamNG's car
 		DentsTick();           // v2.5: BeamNG's dents on the drawn car
 		DriveHud(paused);      // v2.01
 		DriveGauge(paused);    // v2.1
@@ -10429,12 +12761,18 @@ cbuffer Mat : register(b1)
 	LayerP lay[4];
 	float4 matInfo;    // x layers, y alpha cutout (0 off), z see-through (1/0), w lowest alpha for see-through
 	float4 matKind;    // x mirror, y blend op (0 lerp, 1 premul, 2 add-alpha, 3 add, 4 mul), z no reflections, w material number
+	float4 matFx;      // v2.61: x broken (BeamNG broke this glass / lamp: cracked); v2.63: y a wheel (no bullet holes)
 };
 cbuffer Part : register(b2)
 {
 	float4 pm0;        // car-space transform of this part (wheels spin/steer/travel), rows
 	float4 pm1;
 	float4 pm2;
+};
+cbuffer Holes : register(b4)
+{
+	float4 holes[256];  // v2.62: bullet holes: car-space centre, radius; v2.7: then the bullet's direction (2 per hole)
+	float4 holeInfo;   // x how many, y (v2.7) charred 0..1
 };
 cbuffer Occl : register(b3)
 {
@@ -10484,38 +12822,87 @@ SamplerState clampSamp : register(s2);
 SamplerComparisonState cmpSamp : register(s3);
 SamplerState llSamp : register(s4);
 
-// v2.5 (dents): each vertex follows up to 4 of BeamNG's nodes (si: which, sw: how much; all 0 = it stays as drawn)
-struct VSIn { float3 p : POSITION; float3 n : NORMAL; float2 uv0 : TEXCOORD0; float2 uv1 : TEXCOORD1; uint4 si : BLENDINDICES; float4 sw : BLENDWEIGHT; };
-Texture2D<float4> nodeTex : register(t35);  // v2.5: per node 2 texels: xyz how far it moved (car space), then its turn (quaternion)
+// v2.5 (dents), v2.53: each vertex sits in a triangle of 3 of BeamNG's nodes, like BeamNG's flexbodies (si.xyz: the
+// nodes; sc: where along the 1st->2nd edge, the 1st->3rd edge and the triangle's normal; si.w: 1 = in it, 2 = it only moves
+// with the 1st node, 3 = carried rigidly by the 3 nodes (v2.55: props, as BeamNG does), 0 = it stays as drawn)
+struct VSIn { float3 p : POSITION; float3 n : NORMAL; float2 uv0 : TEXCOORD0; float2 uv1 : TEXCOORD1; uint4 si : BLENDINDICES; float3 sc : BLENDWEIGHT; };
+Texture2D<float4> nodeTex : register(t35);  // per node 2 texels (v2.53): xyz how far it moved, xyz where it was (car space)
 float4 NodeD(uint k) { return nodeTex.Load(int3(k % 1024, k / 1024, 0)); }  // (a texture, 1024 wide: every shader compiler reads it)
-float3 QRot(float4 q, float3 v) { float3 t = 2.0 * cross(q.xyz, v); return v + q.w * t + cross(q.xyz, t); }
-// a node more than 1.5 m from its place came off the car (w = 1; a bumper on the road): a vertex that also follows nodes
-// still on the car follows only those (no long spikes); one that follows only nodes that came off goes with them
-float4 DentW(uint4 si, float4 sw)
+float3 NodeMv(uint k) { return NodeD(k * 2).xyz; }
+float3 NodeAt(uint k) { return NodeD(k * 2 + 1).xyz; }
+float3 SafeN(float3 v) { return v * rsqrt(max(dot(v, v), 1e-12)); }  // (a triangle crushed flat: no normal, no NaN)
+// the vertex's triangle of nodes as drawn (r0; edges x0, y0) and now (moved by m0; edges x1, y1)
+void NodeTri(uint4 si, out float3 r0, out float3 x0, out float3 y0, out float3 m0, out float3 x1, out float3 y1)
 {
-	float4 off = float4(NodeD(si.x * 2).w, NodeD(si.y * 2).w, NodeD(si.z * 2).w, NodeD(si.w * 2).w);
-	float4 on = sw * (1.0 - off);
-	float  s = on.x + on.y + on.z + on.w;
-	return s > 0.001 ? on * ((sw.x + sw.y + sw.z + sw.w) / s) : sw;
+	r0 = NodeAt(si.x);
+	x0 = NodeAt(si.y) - r0;
+	y0 = NodeAt(si.z) - r0;
+	m0 = NodeMv(si.x);
+	x1 = x0 + NodeMv(si.y) - m0;
+	y1 = y0 + NodeMv(si.z) - m0;
 }
-float3 SkinPos(float3 p, uint4 si, float4 sw)
+// how that triangle turned, applied to v
+float3 TriTurn(float3 v, float3 x0, float3 y0, float3 x1, float3 y1)
 {
-	[branch] if (sw.x + sw.y + sw.z + sw.w < 0.001)
+	float3 e1 = SafeN(x0), e3 = SafeN(cross(x0, y0)), e2 = cross(e3, e1);
+	float3 f1 = SafeN(x1), f3 = SafeN(cross(x1, y1)), f2 = cross(f3, f1);
+	return f1 * dot(v, e1) + f2 * dot(v, e2) + f3 * dot(v, e3);
+}
+// the vertex as drawn + how far its triangle moved it: at rest p = r + a*x + b*y + c*z, now r' + a*x' + b*y' + c*z'
+float3 SkinPos(float3 p, uint4 si, float3 sc)
+{
+	[branch] if (si.w == 0)
 		return p;
-	sw = DentW(si, sw);
-	return p + sw.x * NodeD(si.x * 2).xyz + sw.y * NodeD(si.y * 2).xyz + sw.z * NodeD(si.z * 2).xyz + sw.w * NodeD(si.w * 2).xyz;
+	[branch] if (si.w == 2)
+		return p + NodeMv(si.x);
+	float3 r0, x0, y0, m0, x1, y1;
+	NodeTri(si, r0, x0, y0, m0, x1, y1);
+	[branch] if (si.w == 3)
+		return r0 + m0 + TriTurn(p - r0, x0, y0, x1, y1);
+	return p + m0 + sc.x * (x1 - x0) + sc.y * (y1 - y0) + sc.z * (SafeN(cross(x1, y1)) - SafeN(cross(x0, y0)));
 }
-float3 SkinNrm(float3 n, uint4 si, float4 sw)
+// the normal turns as its triangle turned
+float3 SkinNrm(float3 n, uint4 si)
 {
-	[branch] if (sw.x + sw.y + sw.z + sw.w < 0.001)
+	[branch] if (si.w != 1 && si.w != 3)
 		return n;
-	sw = DentW(si, sw);
-	float4 q0 = NodeD(si.x * 2 + 1), q1 = NodeD(si.y * 2 + 1), q2 = NodeD(si.z * 2 + 1), q3 = NodeD(si.w * 2 + 1);
-	float4 q = sw.x * q0 + sw.y * (dot(q0, q1) < 0 ? -q1 : q1) + sw.z * (dot(q0, q2) < 0 ? -q2 : q2) + sw.w * (dot(q0, q3) < 0 ? -q3 : q3);
-	float l = length(q);
-	return l > 1e-5 ? QRot(q / l, n) : n;
+	float3 r0, x0, y0, m0, x1, y1;
+	NodeTri(si, r0, x0, y0, m0, x1, y1);
+	return TriTurn(n, x0, y0, x1, y1);
 }
-struct VSOut { float4 pos : SV_Position; float viewZ : TEXCOORD0; float3 n : TEXCOORD1; float4 uv : TEXCOORD2; float3 rel : TEXCOORD3; };
+// v2.55: 1 when an edge of the vertex's triangle of nodes got over 2.5 times as long (BeamNG's part tore there): triangles
+// with such a vertex are not drawn (the stretch test below can't measure ones that are thin on screen: the long lines in
+// your 2.54 screenshot 1)
+float TornV(uint4 si)
+{
+	[branch] if (si.w != 1)
+		return 0.0;
+	float3 r0, x0, y0, m0, x1, y1;
+	NodeTri(si, r0, x0, y0, m0, x1, y1);
+	float3 q0 = x0 - y0, q1 = x1 - y1;
+	float  s = max(max(dot(x1, x1) / max(dot(x0, x0), 1e-8), dot(y1, y1) / max(dot(y0, y0), 1e-8)), dot(q1, q1) / max(dot(q0, q0), 1e-8));
+	return s > 6.25 ? 1.0 : 0.0;
+}
+struct VSOut { float4 pos : SV_Position; float viewZ : TEXCOORD0; float3 n : TEXCOORD1; float4 uv : TEXCOORD2; float3 rel : TEXCOORD3; float3 sk : TEXCOORD4; float3 rp : TEXCOORD5; float tv : TEXCOORD6; };
+// v2.54: a triangle stretched to over 3 times its drawn size in any direction is torn (its nodes went with two pieces: a
+// bumper on the road, the car driving on, your 2.53 screenshots 4 and 6): not drawn. sk = where it is now, rp = where it was
+// drawn (car space). The stretch: from how both change across the screen (the screen's own scale cancels out), the
+// larger root of a x^2 - b x + c = 0 is the most it was stretched, squared. (Derivatives first, before any branch.)
+bool Torn(float3 sk, float3 rp)
+{
+	float3 rx = ddx(rp), ry = ddy(rp), sx = ddx(sk), sy = ddy(sk);
+	float  k = 1.0 / max(length(rx) + length(ry), 1e-20);
+	rx *= k;
+	ry *= k;
+	sx *= k;
+	sy *= k;
+	float r00 = dot(rx, rx), r01 = dot(rx, ry), r11 = dot(ry, ry);
+	float s00 = dot(sx, sx), s01 = dot(sx, sy), s11 = dot(sy, sy);
+	float a = r00 * r11 - r01 * r01, b = r11 * s00 - 2.0 * r01 * s01 + r00 * s11, c = s00 * s11 - s01 * s01;
+	if (a < 1e-4 * r00 * r11)
+		return false;  // (seen nearly edge-on: not measurable here)
+	return b + sqrt(max(b * b - 4.0 * a * c, 0.0)) > 18.0 * a;
+}
 
 float4 Project(float3 rel, out float viewZ)
 {
@@ -10530,14 +12917,17 @@ float3 PartPos(float3 p) { return float3(dot(pm0.xyz, p) + pm0.w, dot(pm1.xyz, p
 VSOut VSCar(VSIn i)
 {
 	VSOut o;
-	float3 p = PartPos(SkinPos(i.p, i.si, i.sw));
-	float3 n0 = SkinNrm(i.n, i.si, i.sw);
+	float3 p = PartPos(SkinPos(i.p, i.si, i.sc));
+	float3 n0 = SkinNrm(i.n, i.si);
 	float3 n = float3(dot(pm0.xyz, n0), dot(pm1.xyz, n0), dot(pm2.xyz, n0));
 	float3 rel = carPos.xyz + carRight.xyz * p.x + carFwd.xyz * p.y + carUp.xyz * p.z;
 	o.pos = Project(rel, o.viewZ);
 	o.n = carRight.xyz * n.x + carFwd.xyz * n.y + carUp.xyz * n.z;
 	o.uv = float4(i.uv0, i.uv1);
 	o.rel = rel;
+	o.sk = p;
+	o.rp = PartPos(i.p);
+	o.tv = TornV(i.si);
 	return o;
 }
 
@@ -10865,6 +13255,25 @@ void Occlusion(float3 P, float3 Nc, float3 Ngc, float3 Rm, float3 Rcc, out float
 
 float3 ToCar(float3 v) { return float3(dot(v, carRight.xyz), dot(v, carFwd.xyz), dot(v, carUp.xyz)); }
 
+// v2.61: broken glass / lamps: a crack pattern on the car's own surface (cells about 7 cm; lines where two cells meet)
+float2 CrackHash(float2 p) { p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3))); return frac(sin(p) * 43758.5453); }
+float Cracks(float3 P, float3 N)
+{
+	float3 a = abs(N);
+	float2 q = (a.x > a.y && a.x > a.z) ? P.yz : (a.y > a.z ? P.xz : P.xy);
+	q /= 0.07;
+	float2 c = floor(q), f = q - c;
+	float d1 = 8.0, d2 = 8.0;
+	[unroll] for (int y = -1; y <= 1; ++y)
+		[unroll] for (int x = -1; x <= 1; ++x) {
+			float2 r = float2(x, y) + CrackHash(c + float2(x, y)) - f;
+			float d = dot(r, r);
+			if (d < d1) { d2 = d1; d1 = d; }
+			else if (d < d2) d2 = d;
+		}
+	return 1.0 - smoothstep(0.015, 0.06, sqrt(d2) - sqrt(d1));
+}
+
 struct ShadeInfo
 {
 	float4 w;          // x/y/z: how much layers 2/3/4 show; w: final opacity
@@ -10946,11 +13355,68 @@ float4 Shade(VSOut i, out ShadeInfo si)
 	} else {
 		alpha = 1.0;
 	}
+	if (matFx.x > 0.5) {
+		// v2.61: cracked (2.6 only tinted it whitish: too faint to see)
+		float k = Cracks(ToCar(i.rel - carPos.xyz), ToCar(N));
+		base.rgb = lerp(base.rgb * 0.6 + 0.18, float3(0.9, 0.92, 0.94), k);
+		if (glass) alpha = max(alpha, lerp(0.3, 0.95, k));
+	}
 	float metal = saturate(srf.x), rough = clamp(srf.y, 0.03, 1.0), cc = saturate(srf.z);
 	if (matKind.x > 0.5) {
 		metal = 1.0;
 		rough = 0.03;
 		base.rgb = float3(0.9, 0.9, 0.9);
+	}
+	// v2.62: bullet holes (like GTA's own): a dark hole, a ring of torn bare metal with a ragged edge, a little darkening around
+	// v2.7: a blown-up car: charred dark and dull, a little rust-brown, uneven (like GTA's wrecks)
+	if (holeInfo.y > 0.0) {
+		float3 Pw = ToCar(i.rel - carPos.xyz);
+		float  nz = frac(sin(dot(floor(Pw * 6.0), float3(12.9898, 78.233, 37.719))) * 43758.5453);
+		float  b = holeInfo.y * (0.82 + 0.15 * nz);
+		base.rgb = lerp(base.rgb, lerp(float3(0.025, 0.022, 0.02), float3(0.09, 0.05, 0.03), nz * 0.6), b);
+		metal = lerp(metal, 0.15, b);
+		rough = lerp(rough, 0.92, b);
+		cc = lerp(cc, 0.0, b);
+	}
+	int nh = (int)holeInfo.x;
+	if (nh > 0 && matFx.y < 0.5) {
+		float3 Pc = ToCar(i.rel - carPos.xyz);
+		float3 NgC = ToCar(Ng);  // v2.7: this surface's own (flat) normal, for where a bullet's line meets it
+		float  hk = 0.0, rk = 0.0, sk = 0.0;
+		for (int h = 0; h < nh; ++h) {
+			float3 dv = Pc - holes[2 * h].xyz;
+			float3 bd = holes[2 * h + 1].xyz;
+			float  dd;
+			if (dot(bd, bd) > 0.25) {
+				// v2.7: where the bullet's line meets this surface (BeamNG's hit is on its collision triangles, a few cm inside
+				// the panel): up to 30 cm before that hit, 8 cm after it. Round, or oval for a glancing shot (at most 2.5 x long)
+				float  cn = dot(bd, NgC);
+				if (abs(cn) < 0.05) continue;
+				float  tx = dot(dv, NgC) / cn;
+				if (tx < -0.30 || tx > 0.08) continue;
+				float3 dxp = dv - bd * tx;  // (from where the line meets this surface's plane)
+				dd = max(length(dv - bd * dot(dv, bd)), 0.4 * length(dxp)) / holes[2 * h].w;
+				dv = dxp;
+			} else {
+				dd = length(dv) / holes[2 * h].w;
+			}
+			if (dd < 1.0) {
+				float j = frac(sin(dot(floor(dv / max(length(dv), 1e-5) * 7.0) + h, float3(12.9898, 78.233, 37.719))) * 43758.5453);  // (ragged by direction)
+				float e = dd + (j - 0.5) * 0.16;
+				hk = max(hk, 1.0 - smoothstep(0.30, 0.36, e));
+				rk = max(rk, smoothstep(0.30, 0.36, e) * (1.0 - smoothstep(0.60, 0.74, e)));
+				sk = max(sk, 1.0 - smoothstep(0.7, 1.0, dd));
+			}
+		}
+		base.rgb *= 1.0 - 0.25 * sk;
+		base.rgb = lerp(base.rgb, float3(0.58, 0.58, 0.6), rk);
+		metal = lerp(metal, 1.0, rk);
+		rough = lerp(rough, 0.45, rk);
+		base.rgb = lerp(base.rgb, float3(0.012, 0.012, 0.012), hk);
+		metal = lerp(metal, 0.0, hk);
+		rough = lerp(rough, 1.0, hk);
+		cc *= 1.0 - max(hk, rk);
+		if (glass) alpha = max(alpha, max(hk, rk));
 	}
 	if (dot(nW, V) < 0.02)
 		nW = normalize(nW + V * (0.02 - dot(nW, V)));  // keep bumped normals facing us
@@ -11046,8 +13512,12 @@ float4 Shade(VSOut i, out ShadeInfo si)
 
 float4 PSCar(VSOut i) : SV_Target
 {
+	bool torn = Torn(i.sk, i.rp) || i.tv > 0.001;
 	ShadeInfo si;
-	return Shade(i, si);
+	float4 c = Shade(i, si);
+	if (torn)
+		discard;
+	return c;
 }
 
 // Part picker: the part under the screen centre is drawn into four 1x1 targets and read back.
@@ -11065,25 +13535,42 @@ PickOut PSPick(VSOut i)
 }
 
 // ---- depth maps of the car along a direction (sun self-shadow, ambient occlusion)
-float4 VSDepthDir(VSIn i) : SV_Position
+struct VSOutS { float4 pos : SV_Position; float3 sk : TEXCOORD0; float3 rp : TEXCOORD1; float tv : TEXCOORD2; };
+VSOutS VSDepthDir(VSIn i)
 {
-	float3 q = PartPos(SkinPos(i.p, i.si, i.sw)) - sl3.xyz;
+	VSOutS o;
+	o.sk = PartPos(SkinPos(i.p, i.si, i.sc));
+	o.rp = PartPos(i.p);
+	o.tv = TornV(i.si);
+	float3 q = o.sk - sl3.xyz;
 	float rc = sl2.w;
-	return float4(dot(q, sl1.xyz) / rc, dot(q, sl2.xyz) / rc, 0.5 - dot(q, sl0.xyz) / (2.0 * rc), 1);
+	o.pos = float4(dot(q, sl1.xyz) / rc, dot(q, sl2.xyz) / rc, 0.5 - dot(q, sl0.xyz) / (2.0 * rc), 1);
+	return o;
 }
 
 // ---- ground shadows ---------------------------------------------------------------------------
 // The car's mesh is flattened onto its ground plane, either straight down (contact shadow, once per
 // car) or along the sun (our sun shadow, every frame), into a small coverage map in car space.
-float4 VSShadowMap(VSIn i) : SV_Position
+VSOutS VSShadowMap(VSIn i)
 {
-	float3 p = PartPos(SkinPos(i.p, i.si, i.sw));
+	VSOutS o;
+	float3 p = PartPos(SkinPos(i.p, i.si, i.sc));
 	float2 q = p.xy;
 	if (shadowC.x > 0.5)
 		q = p.xy - shadowB.xy * (max(p.z, 0.0) / min(shadowB.z, -0.05));
-	return float4(q / shadowC.y, 0.5, 1);
+	o.pos = float4(q / shadowC.y, 0.5, 1);
+	o.sk = p;
+	o.rp = PartPos(i.p);
+	o.tv = TornV(i.si);
+	return o;
 }
-float PSShadowMap() : SV_Target { return 1.0; }
+// (also the depth maps' pixel shader, v2.54: torn triangles cast no shadow)
+float PSShadowMap(VSOutS i) : SV_Target
+{
+	if (Torn(i.sk, i.rp) || i.tv > 0.001)
+		discard;
+	return 1.0;
+}
 
 // Laid onto GTA's own ground: each screen pixel's position comes from GTA's depth buffer.
 float ShadowTap(Texture2D<float> m, float2 q, float halfSize, float lod)
@@ -11384,11 +13871,18 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		LayerCB lay[4];
 		float   matInfo[4];
 		float   matKind[4];
+		float   matFx[4];  // v2.61
 	};
 
 	struct alignas(16) PartCB
 	{
 		float m[3][4];
+	};
+
+	struct alignas(16) HoleCB
+	{
+		float holes[kHoles][8];
+		float info[4];
 	};
 
 	struct alignas(16) OcclCB
@@ -11587,6 +14081,7 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		std::vector<car::Draw>                 draws;
 		std::vector<car::Material>             mats;
 		std::vector<car::Wheel>                wheels;
+		std::vector<uint8_t>                   dgHide;  // v2.6: per breakable group: hidden (1) or frosted (0) when broken
 		float                                  size[3] = {};
 		int                                    opaqueDraws = 0;
 		float                                  paint[3][4] = {};
@@ -11597,7 +14092,7 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		size_t                                 tris = 0;
 		double                                 centre[3] = {};  // bounding sphere (car space)
 		double                                 radius = 3.0;
-		// v2.5 (dents): the nodes each vertex follows (vertex buffer slot 1) and where the nodes are now (t35)
+		// v2.5 (dents): each vertex's triangle of nodes (vertex buffer slot 1) and where the nodes are now (t35)
 		ID3D11Buffer*                          skinVb = nullptr;
 		UINT                                   skinStride = 0;  // 0: one shared entry (the file has no node data)
 		ID3D11Texture2D*                       nodeBuf = nullptr;  // 1024 texels wide, 2 per node (kNodeTexW)
@@ -11742,6 +14237,8 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		DepthMaps                 sunDepth;
 		DepthMaps                 aoMaps;
 		ID3D11Buffer*             occlCb = nullptr;
+		ID3D11Buffer*             holeCb = nullptr;  // v2.62
+		uint32_t                  holeGenUp = ~0u;
 		bool                      aoDirty = true;
 		// GTA's picture with mips (environment learning)
 		ID3D11Texture2D*          envTex = nullptr;
@@ -11957,9 +14454,9 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 				{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 				{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 				{ "TEXCOORD", 1, DXGI_FORMAT_R32G32_FLOAT, 0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-				// v2.5 (dents): the nodes each vertex follows (a second vertex buffer: 4 x 16-bit indices, 4 x 8-bit weights)
+				// v2.5 (dents), v2.53: each vertex's triangle of nodes (a second vertex buffer: 4 x 16-bit, 3 floats)
 				{ "BLENDINDICES", 0, DXGI_FORMAT_R16G16B16A16_UINT, 1, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-				{ "BLENDWEIGHT", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 1, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+				{ "BLENDWEIGHT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 1, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 			};
 			const HRESULT hl = r.dev->CreateInputLayout(il, 6, entries[0].blob->GetBufferPointer(), entries[0].blob->GetBufferSize(), &r.layout);
 			if (FAILED(hl)) Log("renderer: input layout FAILED (0x%08X)", unsigned(hl));
@@ -11981,6 +14478,9 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		r.dev->CreateBuffer(&bd, nullptr, &r.partCb);
 		bd.ByteWidth = sizeof(OcclCB);
 		r.dev->CreateBuffer(&bd, nullptr, &r.occlCb);
+		bd.ByteWidth = sizeof(HoleCB);
+		r.dev->CreateBuffer(&bd, nullptr, &r.holeCb);  // v2.62
+		r.holeGenUp = ~0u;
 
 		D3D11_BLEND_DESC bl{};
 		bl.RenderTarget[0].BlendEnable = FALSE;
@@ -12430,25 +14930,23 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			return;
 		}
 		uint64_t bytes = uint64_t(m->verts.size()) * sizeof(car::Vtx) + uint64_t(m->indices.size()) * 4;
-		// v2.5 (dents): the nodes each vertex follows (vertex buffer slot 1: 4 node numbers, 4 weights) and where the
-		// nodes are now (t35: per node how far it moved, then its turn). Without node data one zero entry that every
-		// vertex reads (stride 0): the car is drawn as it is.
+		// v2.5 (dents), v2.53: each vertex's triangle of nodes (vertex buffer slot 1: 3 node numbers + how, 3 coordinates)
+		// and where the nodes are now (t35: per node how far it moved, where it was). Without node data one zero entry that
+		// every vertex reads (stride 0): the car is drawn as it is.
 		{
 			struct SkinV
 			{
 				uint16_t i[4];
-				uint8_t  w[4];
+				float    c[3];
 			};
-			static_assert(sizeof(SkinV) == 12, "skin vertex size");
-			const bool skin = m->skinned > 0 && m->skinIdx.size() == m->verts.size() * 4 && m->skinW.size() == m->verts.size() * 4 && !m->nodeCid.empty();
+			static_assert(sizeof(SkinV) == 20, "skin vertex size");
+			const bool skin = m->skinned > 0 && m->skinIdx.size() == m->verts.size() * 4 && m->skinC.size() == m->verts.size() * 3 && !m->nodeCid.empty();
 			std::vector<SkinV> sv(skin ? m->verts.size() : 1);
 			memset(sv.data(), 0, sv.size() * sizeof(SkinV));
 			if (skin) {
 				for (size_t v = 0; v < sv.size(); ++v) {
-					for (int k = 0; k < 4; ++k) {
-						sv[v].i[k] = m->skinIdx[v * 4 + k];
-						sv[v].w[k] = m->skinW[v * 4 + k];
-					}
+					for (int k = 0; k < 4; ++k) sv[v].i[k] = m->skinIdx[v * 4 + k];
+					for (int k = 0; k < 3; ++k) sv[v].c[k] = m->skinC[v * 3 + k];
 				}
 			}
 			D3D11_BUFFER_DESC      sb{};
@@ -12467,10 +14965,12 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			bytes += sb.ByteWidth;
 			const size_t nn = m->nodeCid.size();
 			if (skin && nn > 0) {
-				// a float4 texture, 1024 texels wide (2 per node: 512 nodes a row)
+				// a float4 texture, 1024 texels wide (v2.53: 2 per node: moved, where it is on the car)
 				const UINT         rows = UINT((nn * 2 + kNodeTexW - 1) / kNodeTexW);
 				std::vector<float> nd(size_t(rows) * kNodeTexW * 4, 0.0f);
-				for (size_t i = 0; i < nn; ++i) nd[i * 8 + 7] = 1.0f;  // no turn
+				if (m->nodePos.size() == nn * 3)
+					for (size_t i = 0; i < nn; ++i)
+						for (int k = 0; k < 3; ++k) nd[i * 8 + 4 + k] = m->nodePos[i * 3 + k];
 				D3D11_TEXTURE2D_DESC   nb{};
 				D3D11_SUBRESOURCE_DATA ni{};
 				nb.Width = kNodeTexW;
@@ -12553,6 +15053,21 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			tex->Release();
 		}
 		r.car.draws = m->draws;
+		r.car.dgHide = m->dgHide;
+		{   // v2.63: each breakable group's box, for the hits that shatter a cracked one
+			std::vector<std::array<float, 6>> box(m->dgNames.size(), { 1e9f, 1e9f, 1e9f, -1e9f, -1e9f, -1e9f });
+			for (const car::Draw& dw : m->draws) {
+				if (dw.dg < 0 || dw.dg >= int(box.size()) || dw.wheel >= 0) continue;
+				for (uint32_t q = dw.start; q < dw.start + dw.count && q < m->indices.size(); ++q) {
+					const float* pp = m->verts[m->indices[q]].p;
+					for (int a = 0; a < 3; ++a) box[dw.dg][a] = std::min(box[dw.dg][a], pp[a]), box[dw.dg][3 + a] = std::max(box[dw.dg][3 + a], pp[a]);
+				}
+			}
+			std::lock_guard<std::mutex> lk(g_holeMx);
+			g_dgBox.swap(box);
+			memset(g_dgHits, 0, sizeof(g_dgHits));
+			for (auto& b : g_dgShatter) b.store(0);
+		}
 		r.car.mats = m->materials;
 		r.car.wheels = m->wheels;
 		memcpy(r.car.size, m->size, sizeof(r.car.size));
@@ -13345,9 +15860,9 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 	void BindCommon(ID3D11ShaderResourceView* depthSrv)
 	{
 		Renderer&     r = g_r;
-		ID3D11Buffer* cbs[4] = { r.cb, r.matCb, r.partCb, r.occlCb };
+		ID3D11Buffer* cbs[5] = { r.cb, r.matCb, r.partCb, r.occlCb, r.holeCb };
 		r.ctx->VSSetConstantBuffers(0, 4, cbs);
-		r.ctx->PSSetConstantBuffers(0, 4, cbs);
+		r.ctx->PSSetConstantBuffers(0, 5, cbs);
 		r.ctx->PSSetShaderResources(0, 1, &depthSrv);
 		ID3D11SamplerState* ss[kSamplers] = { r.point, r.linear, r.clampLin, r.cmpSamp, r.llSamp };
 		r.ctx->PSSetSamplers(0, kSamplers, ss);
@@ -13385,6 +15900,7 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		const float  zero[4] = {};
 		const bool   withMaterials = pass != Pass::ShadowMap;
 		int          lastMat = -2, lastPart = -1;  // part: -1 body, else wheel*4 + mode
+		bool         lastBroken = false, lastWheel = false;
 		const size_t n = pass == Pass::ShadowMap ? size_t(c.opaqueDraws) : c.draws.size();
 		for (size_t i = 0; i < n; ++i) {
 			const car::Draw& d = c.draws[i];
@@ -13396,6 +15912,10 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			if (!withMaterials && d.mat >= 0 && d.mat < int(c.mats.size()) && c.mats[d.mat].translucent) {
 				continue;
 			}
+			// v2.6: glass and lights BeamNG broke: gone (its broken material is invisible) or frosted
+			const bool broken = d.dg >= 0 && d.dg < 256 && (g_dgBroken[d.dg >> 6].load(std::memory_order_relaxed) >> (d.dg & 63) & 1);
+			if (broken && d.dg < int(c.dgHide.size()) && c.dgHide[d.dg]) continue;
+			if (broken && (g_dgShatter[d.dg >> 6].load(std::memory_order_relaxed) >> (d.dg & 63) & 1)) continue;  // v2.63: shattered out
 			const int part = (moving && g_cfg.wheels && d.wheel >= 0 && d.wheel < int(c.wheels.size())) ? d.wheel * 4 + d.wheelMode : -1;
 			if (part != lastPart) {
 				lastPart = part;
@@ -13407,13 +15927,18 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 					Upload(r.partCb, pc);
 				}
 			}
-			if (withMaterials && d.mat != lastMat) {
+			const bool onWheel = d.wheel >= 0;  // v2.63: no bullet holes on wheels (they turn; your rims looked shot through)
+			if (withMaterials && (d.mat != lastMat || broken != lastBroken || onWheel != lastWheel)) {
 				lastMat = d.mat;
+				lastBroken = broken;
+				lastWheel = onWheel;
 				const int                 mi = std::clamp(d.mat, 0, int(c.mats.size()) - 1);
 				const car::Material&      m = c.mats[mi];
 				MatCB                     mc{};
 				ID3D11ShaderResourceView* srvs[24] = {};
 				FillMatCB(mc, m, mi, c.hasPaint, srvs);
+				mc.matFx[0] = broken ? 1.0f : 0.0f;  // v2.61: cracked (the shader draws the cracks)
+				mc.matFx[1] = onWheel ? 1.0f : 0.0f;  // v2.63: a wheel: no bullet holes
 				Upload(r.matCb, mc);
 				r.ctx->PSSetShaderResources(1, 12, srvs);
 				r.ctx->PSSetShaderResources(15, 12, srvs + 12);
@@ -13463,7 +15988,7 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		r.ctx->RSSetState(r.rsDepth);
 		r.ctx->OMSetDepthStencilState(r.depthWrite, 0);
 		r.ctx->VSSetShader(r.vsDepthDir, nullptr, 0);
-		r.ctx->PSSetShader(nullptr, nullptr, 0);
+		r.ctx->PSSetShader(r.psShadowMap, nullptr, 0);  // (v2.54: drops torn triangles; no colour target bound)
 		DrawParts(cam, Pass::ShadowMap, moving);
 		r.ctx->OMSetRenderTargets(0, nullptr, nullptr);
 		r.ctx->RSSetState(r.raster);
@@ -14067,7 +16592,7 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		r.ctx->IASetInputLayout(r.layout);
 		r.ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		r.ctx->IASetVertexBuffers(0, 1, &c.vb, &stride, &offset);
-		// v2.5 (dents): the nodes each vertex follows (slot 1) and where they are now (t35; none: drawn as it is)
+		// v2.5 (dents): each vertex's triangle of nodes (slot 1) and where they are now (t35; none: drawn as it is)
 		DentsUpload(c);
 		const UINT skinOffset = 0;
 		r.ctx->IASetVertexBuffers(1, 1, &c.skinVb, &c.skinStride, &skinOffset);
@@ -14168,6 +16693,18 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		r.ctx->PSSetShader(r.psCar, nullptr, 0);
 		r.ctx->OMSetBlendState(r.opaque, zero, 0xFFFFFFFF);
 		r.ctx->OMSetDepthStencilState(r.depthWrite, 0);
+		if (r.holeCb && g_holeGen.load() != r.holeGenUp) {
+			// v2.62: the bullet holes, when they changed
+			HoleCB hc{};
+			{
+				std::lock_guard<std::mutex> lk(g_holeMx);
+				memcpy(hc.holes, g_holes, sizeof(hc.holes));
+				hc.info[0] = float(g_holeN);
+				hc.info[1] = g_burnt;
+				r.holeGenUp = g_holeGen.load();
+			}
+			Upload(r.holeCb, hc);
+		}
 		DrawParts(cam, Pass::Main, true);
 
 		// the layer onto GTA's picture
@@ -14297,6 +16834,7 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		// which picture the first post-processing pass reads: 0 the last HDR picture drawn with the depth
 		// buffer, 1 the HDR picture before it, 2 something else
 		int roleVotes[3] = {};
+		int voteWait = 0;  // v2.52: frames waited for votes before locking
 		// locked
 		bool      locked = false;
 		StageSig  sig;
@@ -14535,6 +17073,10 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		}
 		s.locked = false;
 		s.mismatch = 0;
+		// v2.52: the next lock goes by fresh votes only (your 2.51 log: near water it relocked with the water layout's votes and drew
+		// the car into a picture nobody shows)
+		s.roleVotes[0] = s.roleVotes[1] = s.roleVotes[2] = 0;
+		s.voteWait = 0;
 		StageReleaseViews();
 	}
 
@@ -14643,6 +17185,13 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 					break;
 				}
 			}
+			// v2.52: post-processing keeps the screen's shape (your log: 1280x720 for 2560x1440); near water GTA binds a 512x512
+			// R32_FLOAT target there first, which isn't it
+			if (P >= 0) {
+				const StageBind& p = s.binds[P];
+				const double     ar = double(p.w) * r.bbH, as = double(p.h) * r.bbW;
+				if (p.w * 8 < r.bbW || fabs(ar - as) > 0.03 * as) P = -1;
+			}
 			if (P >= 0) {
 				const StageBind& p = s.binds[P];
 				g.w = p.w;
@@ -14683,14 +17232,24 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 				s.cand = g;
 				s.agree = 1;
 				++s.changes;
-				if (!s.locked) s.roleVotes[0] = s.roleVotes[1] = s.roleVotes[2] = 0;
+				if (!s.locked) s.roleVotes[0] = s.roleVotes[1] = s.roleVotes[2] = 0, s.voteWait = 0;
 			}
 			if (s.locked) {
 				s.mismatch = g == s.sig ? 0 : s.mismatch + 1;
+				const int tv = s.roleVotes[0] + s.roleVotes[1] + s.roleVotes[2];
 				if (s.mismatch > 240) StageUnlock("GTA's frame changed (resolution or settings?)");
 				else if (s.hdrChoice != g_cfg.hdrTarget) StageUnlock("HdrTarget changed");
+				// v2.52: checked all the time: the post-processing must read the picture the car goes into
+				else if (g_cfg.hdrTarget == 0 && tv >= 40 && s.roleVotes[s.role] * 10 < tv * 3) {
+					Log("D3: GTA's post-processing reads another picture than the one the car is drawn into (votes %d/%d/%d): learning again", s.roleVotes[0],
+						s.roleVotes[1], s.roleVotes[2]);
+					StageUnlock("the car would be hidden");
+				}
 			}
-			if (!s.locked && s.agree >= 30 && StageWanted()) {
+			const int votesNow = s.roleVotes[0] + s.roleVotes[1] + s.roleVotes[2];
+			if (!s.locked && s.agree >= 30 && StageWanted() && g_cfg.hdrTarget == 0 && votesNow < 10 && ++s.voteWait < 300) {
+				// v2.52: not before this layout's own votes say which picture its post-processing reads
+			} else if (!s.locked && s.agree >= 30 && StageWanted()) {
 				// which picture to draw into
 				const int total = s.roleVotes[0] + s.roleVotes[1] + s.roleVotes[2];
 				int         role = 0;

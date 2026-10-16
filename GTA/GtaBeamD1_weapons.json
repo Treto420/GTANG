@@ -1,0 +1,38 @@
+{
+  "about": "GTA x Beam v2.63: GTA's weapons and explosions on BeamNG's car. groups (GTA's weapon groups), what one bullet does: dentCm = how deep it dents the car where it hits (cm), tire / glass = chance (0 to 1) that a tyre / window it hits breaks, engine / radiator = BeamNG's damage per hit near them (radiator 0.1 = destroyed), driver = health it takes from you when it goes through the cabin past your head (100 = all). A group with dentCm 0 and driver 0 is ignored. blasts (GTA's explosion types, -1 = any other): accel = push at 1 m (m/s2, less with the distance squared), r = its core (m), dt = how long it pushes (s), ignite = chance it sets the car on fire, glassR = windows within this break (m), hurt = health it takes from you at the car, none at hurtR (m), explodeR = this close to the car's middle (m) it blows the car up at once (a rocket hit; a car explosion that close is GTA's own explosion of your car). car = the car's own explosion. burnToExplodeS = how long the car burns before it blows up; engineFireHits = engine hits before the engine catches fire; bulletHoleCm = the size of a bullet hole on the drawn car (0 = none); fireScale = GTA's flames on the burning car (1 = the effect's own size); glassShatterHits = more hits on a cracked windscreen / lamp before it shatters out (0 = never); crashMinDv / crashHpPerDv = a crash hurts you when the car's speed changes more than this within 0.25 s (m/s), this much health per m/s more; guessChance = for shooters GTA gives no bullet impact for: x their accuracy. Ctrl+F11 reads this file again.",
+  "burnToExplodeS": 30,
+  "engineFireHits": 24,
+  "bulletHoleCm": 2.2,
+  "fireScale": 0.35,
+  "glassShatterHits": 3,
+  "crashMinDv": 7,
+  "crashHpPerDv": 6,
+  "guessChance": 1.0,
+  "groups": [
+    { "group": "GROUP_PISTOL", "dentCm": 0.75, "tire": 1, "glass": 1, "engine": 0.001, "radiator": 0.005, "driver": 15 },
+    { "group": "GROUP_SMG", "dentCm": 0.75, "tire": 1, "glass": 1, "engine": 0.001, "radiator": 0.005, "driver": 12 },
+    { "group": "GROUP_RIFLE", "dentCm": 1.25, "tire": 1, "glass": 1, "engine": 0.0015, "radiator": 0.0075, "driver": 20 },
+    { "group": "GROUP_MG", "dentCm": 1.25, "tire": 1, "glass": 1, "engine": 0.0015, "radiator": 0.0075, "driver": 20 },
+    { "group": "GROUP_SHOTGUN", "dentCm": 2, "tire": 1, "glass": 1, "engine": 0.002, "radiator": 0.01, "driver": 30 },
+    { "group": "GROUP_SNIPER", "dentCm": 2.5, "tire": 1, "glass": 1, "engine": 0.004, "radiator": 0.02, "driver": 60 },
+    { "group": "GROUP_HEAVY", "dentCm": 1.5, "tire": 1, "glass": 1, "engine": 0.0015, "radiator": 0.0075, "driver": 20 },
+    { "group": "GROUP_MELEE", "dentCm": 0, "driver": 0 },
+    { "group": "GROUP_THROWN", "dentCm": 0, "driver": 0 },
+    { "group": "GROUP_STUNGUN", "dentCm": 0, "driver": 0 },
+    { "group": "default", "dentCm": 0.75, "tire": 1, "glass": 1, "engine": 0.001, "radiator": 0.005, "driver": 15 }
+  ],
+  "blasts": [
+    { "type": 0, "name": "grenade", "accel": 700, "r": 1.2, "dt": 0.05, "ignite": 0.4, "glassR": 6, "hurt": 70, "hurtR": 7, "explodeR": 1.8 },
+    { "type": 1, "name": "grenade launcher", "accel": 700, "r": 1.2, "dt": 0.05, "ignite": 0.4, "glassR": 6, "hurt": 70, "hurtR": 7, "explodeR": 2.5 },
+    { "type": 2, "name": "sticky bomb", "accel": 1000, "r": 1.0, "dt": 0.05, "ignite": 0.6, "glassR": 7, "hurt": 90, "hurtR": 8, "explodeR": 2.5 },
+    { "type": 3, "name": "molotov", "accel": 60, "r": 1.5, "dt": 0.05, "ignite": 1.0, "glassR": 2, "hurt": 15, "hurtR": 3 },
+    { "type": 4, "name": "rocket", "accel": 1200, "r": 1.0, "dt": 0.05, "ignite": 0.8, "glassR": 8, "hurt": 100, "hurtR": 9, "explodeR": 3.5 },
+    { "type": 5, "name": "tank shell", "accel": 1800, "r": 1.0, "dt": 0.06, "ignite": 0.9, "glassR": 10, "hurt": 150, "hurtR": 10, "explodeR": 4.5 },
+    { "type": 7, "name": "car", "accel": 500, "r": 1.5, "dt": 0.06, "ignite": 0.7, "glassR": 6, "hurt": 60, "hurtR": 7, "explodeR": 2.5 },
+    { "type": 9, "name": "petrol pump", "accel": 800, "r": 1.5, "dt": 0.06, "ignite": 0.9, "glassR": 8, "hurt": 80, "hurtR": 9 },
+    { "type": 27, "name": "barrel", "accel": 400, "r": 1.5, "dt": 0.05, "ignite": 0.6, "glassR": 5, "hurt": 50, "hurtR": 6 },
+    { "type": 34, "name": "gas tank", "accel": 400, "r": 1.5, "dt": 0.05, "ignite": 0.6, "glassR": 5, "hurt": 50, "hurtR": 6 },
+    { "type": -1, "name": "other", "accel": 400, "r": 1.5, "dt": 0.05, "ignite": 0.3, "glassR": 5, "hurt": 40, "hurtR": 6 }
+  ],
+  "car": { "accel": 500, "r": 1.5, "dt": 0.06, "ignite": 1.0, "glassR": 10, "hurt": 200, "hurtR": 6 }
+}

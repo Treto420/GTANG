@@ -55,7 +55,25 @@ static std::string g_textBuf;
 static std::vector<std::string> g_hud, g_hudPrev;
 static double      g_hudT = 0;
 static int         g_paused = 0;
-// v2.4: asynchronous ground rays
+// v2.6: FAKE_WEAPONS=1: once the drive is on (fake_drive_on.txt) three shooters stand around the car and, 2 s later, fire at it:
+// ped 7000 from 8 m left through the cabin at window height (every 0.4 s for 3 s), ped 7001 from 8 m left at the bottom of the
+// front left tyre (every 0.5 s for 3 s), ped 7002 from 10 m ahead into the front at the radiator (every 0.5 s for 2 s); a
+// grenade (type 0) goes off 3 m behind the car at +6 s (0.3 s in GTA's list); fake_wpn_done.txt at +20 s. The player's health
+// (200), fires, proofs and GTA's car blowing up (a type 7 explosion at it) are printed.
+struct FakePed { int h; double head[3], tgt[3], t0, every, until, last; int n; };
+static std::vector<FakePed> g_peds;
+static double g_wT0 = -1;
+static bool   g_wDone = false;
+struct FakeExp { int type; double p[3], t0, t1; };
+static std::vector<FakeExp> g_exps;
+static int g_health = 200, g_fires = 0;
+static bool g_nadeDone = false;
+// v2.61: FAKE_FOOT=1: 2 s after the drive is on you get out (you stand 4 m left of the car), shoot it 5 times from there (every
+// 0.5 s, from +1.5 s), get back in at +7 s; fake_foot_done.txt at +12 s. Particle effects: the first fire name is unknown here
+// (GTA would return 0), the second one starts.
+static bool   g_footOut = false, g_footDone = false;
+static double g_fT0 = -1;
+static int    g_fxNext = 6000;
 struct FakeRay { int h; float x0, y0, z0, x1, y1, z1; unsigned tick; bool now; };
 static std::vector<FakeRay> g_rays;
 static int      g_rayNext = 1000;
@@ -75,7 +93,24 @@ static double FakeGround(double x, double y, bool* hit, unsigned* mat)
 	*hit = true;
 	if (Env("FAKE_HOLE") && y > 70 && y < 80) { *hit = false; *mat = 0; return 0; }
 	double z = 0.03 * x + 1.5 * sin(y / 25.0);
+	// v2.7: FAKE_DROP=1: right of the car's line (heading 110 deg), from 8.5 m off it, the ground is 16 m lower (a ridge road's drop:
+	// out of the rays' normal reach, 12 m down)
+	if (Env("FAKE_DROP") && 0.93969 * x + 0.34202 * y > 8.5) z -= 16.0;
 	if (x > 3.5 && x < 4.0) z += 0.15;  // a curb
+	// v2.54: FAKE_CREST=1: the road goes over a crest at 70 m along the car's line (a ramp meeting a bridge deck: 1.2 m up
+	// and down within a few metres) with a 0.2 m joint across the road at its top (a low face, not a wall)
+	if (Env("FAKE_CREST")) {
+		const double sc = (-0.34202 * x + 0.93969 * y - 70.0) / 3.0;
+		z += 1.2 * exp(-sc * sc);
+	}
+	// v2.55: FAKE_PITS=1: a 0.6 m square hole every 4 m along the road, 0.8 m deep (GTA's road with a crack the rays slip
+	// through to the ground under it)
+	if (Env("FAKE_PITS") && fabs(x) < 4.0 && fmod(fabs(y) + 0.3, 4.0) < 0.6 && fmod(fabs(x) + 0.3, 3.0) < 0.6) z -= 0.8;
+	// v2.55: and (FAKE_PITS=1) a 0.5 m wide beam 3 m over the road across it every 25 m along the car's line (a truss member the
+	// ground rays meet before the road: GTA's beams are open below; here the ground just has it)
+	if (Env("FAKE_PITS") && fmod(fabs(-0.34202 * x + 0.93969 * y) + 0.25, 25.0) < 0.5) z += 3.0;
+	// v2.51: FAKE_JUMP=1: the ground drops 10 m at 80 m along the car's line (a cliff it drives off)
+	if (Env("FAKE_JUMP") && -0.34202 * x + 0.93969 * y > 80.0) z -= 10.0;
 	if (Env("FAKE_ROUGH")) {
 		// v2.42: ground like GTA's: a road crown, bumpy grass and dirt (a few cm), a dip across the road every 40 m
 		const double ax0 = fabs(x);
@@ -98,6 +133,8 @@ static double RampH(double x, double y)
 	const double off = fabs(x + 0.364 * y);
 	if ((BridgeOn() != 1 && BridgeOn() != 2) || y <= 90 || y >= 230) return 0;
 	const double H = BridgeOn() == 2 ? 14.0 : 8.0;  // v2.5: FAKE_BRIDGE=2: a 14 m deck (the ground beside it is out of the rays' reach)
+	// v2.62: FAKE_JOINT=1: a 1.1 m gap across the deck at y 163.7..164.8 (an expansion joint: the rays slip through to the ground)
+	if (Env("FAKE_JOINT") && y > 163.7 && y < 164.8) return 0.0;
 	if (y >= 130 && y < 190) return off < 18.0 ? H : 0.0;
 	if (off > 5.0) return 0;
 	return y < 130 ? H * (y - 90) / 40.0 : H * (230 - y) / 40.0;
@@ -113,12 +150,14 @@ static void InitWalls()
 {
 	if (g_wallsInit) return;
 	g_wallsInit = true;
-	if (!Env("FAKE_WALLS")) return;
+	if (!Env("FAKE_WALLS") && !Env("FAKE_CREST")) return;
 	const double fx = -0.34202, fy = 0.93969, rx = 0.93969, ry = 0.34202;
 	auto at = [&](double s, double o, double angDeg, double hl, double ht, double h) {
 		const double a = atan2(fy, fx) + angDeg * 3.14159265358979 / 180.0;
 		g_walls.push_back({ fx * s + rx * o, fy * s + ry * o, cos(a), sin(a), hl, ht, h });
 	};
+	if (Env("FAKE_CREST")) at(70.0, 0.0, 90.0, 7.0, 0.08, 0.2);  // v2.54: the joint across the road
+	if (!Env("FAKE_WALLS")) return;
 	at(160.0, 6.0, 0.0, 140.0, 0.3, 0.9);    // the barrier, along the road
 	at(60.0, -12.0, 45.0, 12.0, 0.5, 2.5);   // a wall at 45 degrees
 	at(120.0, 16.0, 0.0, 7.0, 5.0, 12.0);    // a building
@@ -188,10 +227,11 @@ static bool FakeHRay(double x0, double y0, double z0, double x1, double y1, doub
 // v2.5: FAKE_PROPS=1: props in GTA's object pool (handles 9000+) along the car's line: lamp posts 4.5 m right of it every
 // 20 m (breakable, 0.4 x 0.4 x 8 m), a bin ON the line at s 45 (0.6 x 0.6 x 1 m), a lamp post ON it at s 80, a container 7 m
 // left at s 100 (6 x 2.4 x 2.6 m: solid), a can (tiny: ignored) and one attached to something (skipped)
-struct FakeProp { int h; double x, y, yaw; unsigned model; bool frag, attached, pushed; };
+struct FakeProp { int h; double x, y, yaw; unsigned model; bool frag, attached, pushed; bool posed = false, frozen = false; double z = 0, R[3][3] = {}; int poses = 0; };
 static std::vector<FakeProp> g_props;
 static bool g_propsInit = false;
 static const unsigned kMLamp = 0xA1110001u, kMBin = 0xA1110002u, kMCont = 0xA1110003u, kMCan = 0xA1110004u;
+static const unsigned kMTraf = 0xA1110005u;  // v2.51: a traffic light: its pole 4.5 m right of the road, its arm 8 m over it
 static void InitProps()
 {
 	if (g_propsInit) return;
@@ -199,14 +239,72 @@ static void InitProps()
 	if (!Env("FAKE_PROPS")) return;
 	const double fx = -0.34202, fy = 0.93969, rx = 0.93969, ry = 0.34202;
 	int h = 9000;
-	auto add = [&](double sAl, double o, unsigned m, bool frag, bool att) { g_props.push_back({ h++, fx * sAl + rx * o, fy * sAl + ry * o, 20.0, m, frag, att, false }); };
+	auto add = [&](double sAl, double o, unsigned m, bool frag, bool att) { FakeProp p{ h++, fx * sAl + rx * o, fy * sAl + ry * o, 20.0, m, frag, att, false }; g_props.push_back(p); };
 	for (int k = 0; k < 10; ++k) add(30.0 + 20.0 * k, 4.5, kMLamp, true, false);
 	add(45.0, 0.0, kMBin, false, false);
 	add(80.0, 0.0, kMLamp, true, false);
 	add(100.0, -7.0, kMCont, false, false);
 	add(60.0, 2.0, kMCan, false, false);
 	add(65.0, 0.0, kMBin, false, true);
+	add(55.0, 4.5, kMTraf, true, false);  // v2.51 (handle 9015)
 }
+// v2.51: a prop model's solid parts (model frame: x0 x1 y0 y1 z0 z1) for object rays (flags 16)
+static int FakePropParts(unsigned m, double b[2][6])
+{
+	auto set = [&](int k, double x0, double x1, double y0, double y1, double z0, double z1) { b[k][0] = x0, b[k][1] = x1, b[k][2] = y0, b[k][3] = y1, b[k][4] = z0, b[k][5] = z1; };
+	if (m == kMLamp) { set(0, -0.2, 0.2, -0.2, 0.2, 0, 8); return 1; }
+	if (m == kMBin) { set(0, -0.3, 0.3, -0.3, 0.3, 0, 1); return 1; }
+	if (m == kMCont) { set(0, -1.2, 1.2, -3, 3, 0, 2.6); return 1; }
+	if (m == kMCan) { set(0, -0.04, 0.04, -0.04, 0.04, 0, 0.12); return 1; }
+	if (m == kMTraf) { set(0, -0.2, 0.2, -0.2, 0.2, 0, 9.5); set(1, -8.3, 0, -0.15, 0.15, 6, 6.5); return 2; }
+	return 0;
+}
+static double FakeGround(double x, double y, bool* hit, unsigned* mat);
+// a ray (world) against the props: the first one it meets
+static bool FakeObjRay(const double a[3], const double b[3], int* ent, double p[3])
+{
+	InitProps();
+	double best = 2.0;
+	for (const FakeProp& fp : g_props) {
+		bool         gh;
+		unsigned     mt;
+		const double gz = FakeGround(fp.x, fp.y, &gh, &mt);
+		const double an = fp.yaw * 3.14159265358979 / 180.0, rt[2] = { cos(an), sin(an) }, fw[2] = { -sin(an), cos(an) };
+		double       la[3], lb[3];
+		for (int q = 0; q < 2; ++q) {
+			const double* P = q ? b : a;
+			double*       L = q ? lb : la;
+			L[0] = (P[0] - fp.x) * rt[0] + (P[1] - fp.y) * rt[1];
+			L[1] = (P[0] - fp.x) * fw[0] + (P[1] - fp.y) * fw[1];
+			L[2] = P[2] - gz;
+		}
+		double bx[2][6];
+		const int np = FakePropParts(fp.model, bx);
+		for (int k = 0; k < np; ++k) {
+			// (like GTA's: a ray that starts inside a solid doesn't see it)
+			double tin = -1e30, tout = 1;
+			bool   miss = false;
+			for (int c = 0; c < 3 && !miss; ++c) {
+				const double d = lb[c] - la[c], lo = bx[k][c * 2], hi = bx[k][c * 2 + 1];
+				if (fabs(d) < 1e-12) {
+					if (la[c] < lo || la[c] > hi) miss = true;
+					continue;
+				}
+				double t0 = (lo - la[c]) / d, t1 = (hi - la[c]) / d;
+				if (t0 > t1) std::swap(t0, t1);
+				tin = std::max(tin, t0);
+				tout = std::min(tout, t1);
+			}
+			if (miss || tin < 0 || tin > tout || tin >= best) continue;
+			best = tin;
+			*ent = fp.h;
+			for (int c = 0; c < 3; ++c) p[c] = a[c] + (b[c] - a[c]) * tin;
+		}
+	}
+	return best <= 1.0;
+}
+struct FakeObjHit { int h; bool hit; int ent; double p[3]; };
+static std::vector<FakeObjHit> g_objRays;
 static FakeProp* PropOf(int h)
 {
 	InitProps();
@@ -332,11 +430,146 @@ int worldGetAllObjects(int* arr, int arrSize)
 	return n;
 }
 
+// v2.7: FAKE_TRAFFIC=1: a parked GTA car (9001) put 25 m ahead of the car, across its way, the first time drive mode asks for
+// GTA's cars; what the plugin does to it (velocity, damage) is printed
+static bool   g_tcPlaced = false;
+static double g_tc[3] = {}, g_tcYaw = 0, g_tcV[3] = {};
+static double FakeGround(double x, double y, bool* hit, unsigned* mat);
+EXP int worldGetAllVehicles(int* arr, int arrSize) __asm__("?worldGetAllVehicles@@YAHPEAHH@Z");   // v2.7
+int worldGetAllVehicles(int* arr, int arrSize)
+{
+	int n = 0;
+	if (n < arrSize) arr[n++] = 100;   // (the player's car)
+	if (!Env("FAKE_TRAFFIC")) return n;
+	if (!g_tcPlaced) {
+		g_tcPlaced = true;
+		bool gh; unsigned m;
+		g_tc[0] = g_pos[0] + g_rot[0][1] * 25.0;
+		g_tc[1] = g_pos[1] + g_rot[1][1] * 25.0;
+		g_tc[2] = FakeGround(g_tc[0], g_tc[1], &gh, &m) + 0.6;
+		g_tcYaw = g_yawDeg + 90.0;
+		printf("FAKE: traffic car 9001 parked at %.1f %.1f %.1f\n", g_tc[0], g_tc[1], g_tc[2]); fflush(stdout);
+	}
+	if (n < arrSize) arr[n++] = 9001;
+	return n;
+}
+EXP int worldGetAllPeds(int* arr, int arrSize) __asm__("?worldGetAllPeds@@YAHPEAHH@Z");   // v2.6
+int worldGetAllPeds(int* arr, int arrSize)
+{
+	int  n = 0;
+	bool me = false;
+	for (auto& p : g_peds) me = me || p.h == 1;
+	if (!me && n < arrSize) arr[n++] = 1;   // (you)
+	for (auto& p : g_peds) if (n < arrSize) arr[n++] = p.h;
+	return n;
+}
+static FakePed* PedOf(int h)
+{
+	for (auto& p : g_peds) if (p.h == h) return &p;
+	return nullptr;
+}
+// a point in the GTA car's frame (right, forward, up from its position)
+static void CarPt(double r, double f, double u, double o[3]) { for (int i = 0; i < 3; ++i) o[i] = g_pos[i] + g_rot[i][0] * r + g_rot[i][1] * f + g_rot[i][2] * u; }
+static void FootSchedule()
+{
+	if (!Env("FAKE_FOOT") || g_footDone) return;
+	const double now = NowS();
+	if (g_fT0 < 0) {
+		if (GetFileAttributesA("fake_drive_on.txt") == INVALID_FILE_ATTRIBUTES) return;
+		g_fT0 = now + 2.0;
+		return;
+	}
+	if (now >= g_fT0 && !g_footOut && now < g_fT0 + 7.0) {
+		g_footOut = true;
+		FakePed p{};
+		p.h = 1;
+		CarPt(-4.0, 0.0, 1.0, p.head);
+		CarPt(1.5, 0.0, 0.0, p.tgt);
+		if (Env("FAKE_SHATTER")) {  // v2.63: you stand 6 m ahead of the car and shoot its left headlight
+			CarPt(-0.7, 8.0, -0.05, p.head);
+			CarPt(-0.7, 0.0, -0.05, p.tgt);
+		}
+		p.t0 = g_fT0 + 1.5; p.every = 0.5; p.until = g_fT0 + 3.9; p.last = -100;
+		g_peds.push_back(p);
+		printf("FAKE: you get out of the car and stand at %.2f %.2f %.2f\n", p.head[0], p.head[1], p.head[2] - 1.6); fflush(stdout);
+	}
+	// v2.63: FAKE_RPG=1: at +5 s your rocket hits the car (a type 4 explosion 1.2 m from its middle, and a type 7 at the car the
+	// way GTA blows up the car it hits)
+	static bool rpg = false;
+	if (Env("FAKE_RPG") && !rpg && now >= g_fT0 + 5.0) {
+		rpg = true;
+		FakeExp e{ 4, {}, now, now + 0.3 };
+		CarPt(-1.0, 0.5, 0.6, e.p);
+		g_exps.push_back(e);
+		FakeExp e7{ 7, { g_pos[0], g_pos[1], g_pos[2] + 0.4 }, now, now + 0.5 };
+		g_exps.push_back(e7);
+		printf("FAKE: a rocket hits the car at %.2f %.2f %.2f\n", e.p[0], e.p[1], e.p[2]); fflush(stdout);
+	}
+	if (now >= g_fT0 + 7.0 && g_footOut) {
+		g_footOut = false;
+		g_peds.erase(std::remove_if(g_peds.begin(), g_peds.end(), [](const FakePed& q) { return q.h == 1; }), g_peds.end());
+		printf("FAKE: you get back in\n"); fflush(stdout);
+	}
+	if (now >= g_fT0 + 12.0) {
+		g_footDone = true;
+		FILE* f = fopen("fake_foot_done.txt", "w");
+		if (f) fclose(f);
+		printf("FAKE: foot test done\n"); fflush(stdout);
+	}
+}
+static void WeaponsSchedule()
+{
+	FootSchedule();
+	for (auto& p : g_peds)   // (your shots on foot)
+		if (p.h == 1 && !Env("FAKE_WEAPONS")) {
+			const double t = NowS();
+			if (t >= p.t0 && t <= p.until && t - p.last >= p.every) { p.last = t; ++p.n; printf("FAKE: ped %d fires (shot %d)\n", p.h, p.n); fflush(stdout); }
+		}
+	if (!Env("FAKE_WEAPONS") || g_wDone) return;
+	const double now = NowS();
+	if (g_wT0 < 0) {
+		if (GetFileAttributesA("fake_drive_on.txt") == INVALID_FILE_ATTRIBUTES) return;
+		g_wT0 = now + 2.0;
+		auto add = [&](int h, const double a[3], const double b[3], double t0, double every, double len) {
+			FakePed p{};
+			p.h = h; memcpy(p.head, a, sizeof(p.head)); memcpy(p.tgt, b, sizeof(p.tgt));
+			p.t0 = g_wT0 + t0; p.every = every; p.until = g_wT0 + t0 + len; p.last = -100;
+			g_peds.push_back(p);
+		};
+		double a[3], b[3];
+		CarPt(-8.0, 0.0, 0.4, a); CarPt(3.0, 0.0, 0.4, b); add(7000, a, b, 0.0, 0.4, 3.0);           // through the cabin
+		CarPt(-8.0, 1.45, -0.5, a); CarPt(2.0, 1.45, -0.5, b); add(7001, a, b, 0.2, 0.5, 3.0);       // the front left tyre's bottom
+		CarPt(0.0, 10.0, 0.0, a); CarPt(0.0, -4.0, 0.0, b); add(7002, a, b, 3.5, 0.5, 2.0);          // into the front (radiator, engine)
+		printf("FAKE: 3 shooters around the car at %.2f %.2f %.2f (they fire in 2 s)\n", g_pos[0], g_pos[1], g_pos[2]); fflush(stdout);
+		return;
+	}
+	for (auto& p : g_peds)
+		if (now >= p.t0 && now <= p.until && now - p.last >= p.every) {
+			p.last = now;
+			++p.n;
+			printf("FAKE: ped %d fires (shot %d)\n", p.h, p.n); fflush(stdout);
+		}
+	if (!g_nadeDone && now >= g_wT0 + 6.0) {
+		g_nadeDone = true;
+		FakeExp e{ 0, {}, now, now + 0.3 };
+		CarPt(0.0, -3.0, -0.3, e.p);
+		g_exps.push_back(e);
+		printf("FAKE: a grenade goes off at %.2f %.2f %.2f\n", e.p[0], e.p[1], e.p[2]); fflush(stdout);
+	}
+	if (now >= g_wT0 + 20.0) {
+		g_wDone = true;
+		FILE* f = fopen("fake_wpn_done.txt", "w");
+		if (f) fclose(f);
+		printf("FAKE: weapons done, player health %d, %d fires started\n", g_health, g_fires); fflush(stdout);
+	}
+}
+
 void presentCallbackRegister(void (*cb)(void*)) { for (auto& p : g_present) if (!p) { p = cb; break; } }
 void presentCallbackUnregister(void (*cb)(void*)) { for (auto& p : g_present) if (p == cb) p = nullptr; }
 void scriptWait(DWORD)
 {
 	TickEnd();
+	WeaponsSchedule();   // v2.6
 	++g_tickN;
 	if (g_freezeMs > 0) {
 		const int ms = g_freezeMs;
@@ -409,12 +642,21 @@ PUINT64 nativeCall()
 	case 0x7239B21A38F536BA: RetI(1); break;                  // DOES_ENTITY_EXIST
 	case 0x9F47B058362C84B5: { FakeProp* fp = PropOf(int(g_args[0])); RetI(fp ? int(fp->model) : 0x1234); break; }  // GET_ENTITY_MODEL
 	case 0x3FEF770D40960D5A: {                                // GET_ENTITY_COORDS (v2.5: props too)
-		if (FakeProp* fp = PropOf(int(g_args[0]))) { bool gh; unsigned m; RetV(float(fp->x), float(fp->y), float(FakeGround(fp->x, fp->y, &gh, &m))); break; }
+		if (FakePed* fp = PedOf(int(g_args[0]))) { RetV(float(fp->head[0]), float(fp->head[1]), float(fp->head[2] - 0.6)); break; }   // v2.6
+		if (int(g_args[0]) == 9001) { RetV(float(g_tc[0]), float(g_tc[1]), float(g_tc[2])); break; }   // v2.7
+		if (FakeProp* fp = PropOf(int(g_args[0]))) { bool gh; unsigned m; RetV(float(fp->x), float(fp->y), float(fp->posed ? fp->z : FakeGround(fp->x, fp->y, &gh, &m))); break; }
 		RetV(float(g_pos[0]), float(g_pos[1]), float(g_pos[2])); break; }
 	case 0xECB2FC7235A7D137: {                                // GET_ENTITY_MATRIX (v2.5: props)
 		FakeProp* fp = PropOf(int(g_args[0]));
 		NV* fw = reinterpret_cast<NV*>(g_args[1]); NV* rt = reinterpret_cast<NV*>(g_args[2]); NV* up = reinterpret_cast<NV*>(g_args[3]); NV* ps = reinterpret_cast<NV*>(g_args[4]);
-		if (fp) {
+		if (int(g_args[0]) == 9001) {   // v2.7: the traffic car
+			const double a = g_tcYaw * 3.14159265358979 / 180.0;
+			*fw = NV{ float(-sin(a)), float(cos(a)), 0 }; *rt = NV{ float(cos(a)), float(sin(a)), 0 }; *up = NV{ 0, 0, 1 };
+			*ps = NV{ float(g_tc[0]), float(g_tc[1]), float(g_tc[2]) };
+		} else if (fp && fp->posed) {  // v2.52: put there by the plugin (a physics prop copying BeamNG's box)
+			*rt = NV{ float(fp->R[0][0]), float(fp->R[1][0]), float(fp->R[2][0]) }; *fw = NV{ float(fp->R[0][1]), float(fp->R[1][1]), float(fp->R[2][1]) };
+			*up = NV{ float(fp->R[0][2]), float(fp->R[1][2]), float(fp->R[2][2]) }; *ps = NV{ float(fp->x), float(fp->y), float(fp->z) };
+		} else if (fp) {
 			const double a = fp->yaw * 3.14159265358979 / 180.0;
 			bool gh; unsigned m;
 			*fw = NV{ float(-sin(a)), float(cos(a)), 0 }; *rt = NV{ float(cos(a)), float(sin(a)), 0 }; *up = NV{ 0, 0, 1 };
@@ -439,8 +681,23 @@ PUINT64 nativeCall()
 		break;
 	}
 	// v2.0 drive mode natives
-	case 0x239A3351AC1DA385: g_pos[0] = F(1); g_pos[1] = F(2); g_pos[2] = F(3); PuppetLog("coords"); break;  // SET_ENTITY_COORDS_NO_OFFSET
-	case 0x8524A8B0171D5E07: SetBasisEuler2(F(1), F(2), F(3) + (Env("FAKE_ROTWRONG") ? 30.0f : 0.0f)); PuppetLog("rot"); break;  // SET_ENTITY_ROTATION
+	case 0x239A3351AC1DA385:                                  // SET_ENTITY_COORDS_NO_OFFSET (v2.52: props too)
+		if (FakeProp* fp = PropOf(int(g_args[0]))) {
+			if (!fp->posed) { const double a = fp->yaw * 3.14159265358979 / 180.0; const double R[3][3] = { { cos(a), -sin(a), 0 }, { sin(a), cos(a), 0 }, { 0, 0, 1 } }; memcpy(fp->R, R, sizeof(R)); }
+			fp->posed = true; fp->x = F(1); fp->y = F(2); fp->z = F(3); ++fp->poses;
+			if (fp->poses <= 3 || fp->poses % 20 == 0) { printf("FAKE: prop %d posed %.2f %.2f %.2f (%d, frozen %d)\n", fp->h, fp->x, fp->y, fp->z, fp->poses, int(fp->frozen)); fflush(stdout); }
+			break;
+		}
+		g_pos[0] = F(1); g_pos[1] = F(2); g_pos[2] = F(3); PuppetLog("coords"); break;
+	case 0x8524A8B0171D5E07:                                  // SET_ENTITY_ROTATION (v2.52: props too)
+		if (FakeProp* fp = PropOf(int(g_args[0]))) {
+			double save[3][3]; memcpy(save, g_rot, sizeof(save));
+			SetBasisEuler2(F(1), F(2), F(3));
+			memcpy(fp->R, g_rot, sizeof(fp->R)); memcpy(g_rot, save, sizeof(save));
+			if (fp->poses <= 3) { printf("FAKE: prop %d turned: up %.2f %.2f %.2f\n", fp->h, fp->R[0][2], fp->R[1][2], fp->R[2][2]); fflush(stdout); }
+			break;
+		}
+		SetBasisEuler2(F(1), F(2), F(3) + (Env("FAKE_ROTWRONG") ? 30.0f : 0.0f)); PuppetLog("rot"); break;
 	case 0x77B21BE7AC540F07: {                                // SET_ENTITY_QUATERNION x y z w
 		const double x = F(1), y = F(2), z = F(3), w = F(4);
 		const double M[3][3] = { { 1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w) },
@@ -450,10 +707,20 @@ PUINT64 nativeCall()
 		PuppetLog("quat");
 		break;
 	}
-	case 0x1C99BB7B6E96D16F: g_vel[0] = F(1); g_vel[1] = F(2); g_vel[2] = F(3); g_velSet = true; break;  // SET_ENTITY_VELOCITY
+	case 0x1C99BB7B6E96D16F:  // SET_ENTITY_VELOCITY (v2.7: the traffic car's printed)
+		if (int(g_args[0]) == 9001) {
+			g_tcV[0] = F(1); g_tcV[1] = F(2); g_tcV[2] = F(3);
+			printf("FAKE: traffic car velocity set %.2f %.2f %.2f\n", g_tcV[0], g_tcV[1], g_tcV[2]); fflush(stdout);
+			break;
+		}
+		g_vel[0] = F(1); g_vel[1] = F(2); g_vel[2] = F(3); g_velSet = true; break;
+	case 0x4805D2B1D8CF94A9: if (int(g_args[0]) == 9001) RetV(float(g_tcV[0]), float(g_tcV[1]), float(g_tcV[2])); break;   // GET_ENTITY_VELOCITY (v2.7: the traffic car)
+	case 0xA1DD317EA8FD4F29: printf("FAKE: vehicle %d damaged at %.2f %.2f %.2f by %.0f\n", int(g_args[0]), F(1), F(2), F(3), F(4)); fflush(stdout); break;   // SET_VEHICLE_DAMAGE (v2.7)
 	case 0x1A9205C1B9EE827F: g_collision = g_args[1] != 0; printf("FAKE: collision %d\n", int(g_collision)); fflush(stdout); break;
 	case 0x4A4722448F18EEF5: g_gravity = g_args[1] != 0; printf("FAKE: gravity %d\n", int(g_gravity)); fflush(stdout); break;
-	case 0x428CA6DBD1094446: g_frozen = g_args[1] != 0; printf("FAKE: frozen %d\n", int(g_frozen)); fflush(stdout); break;
+	case 0x428CA6DBD1094446:                                  // FREEZE_ENTITY_POSITION (v2.52: props too)
+		if (FakeProp* fp = PropOf(int(g_args[0]))) { fp->frozen = g_args[1] != 0; printf("FAKE: prop %d frozen %d\n", fp->h, int(fp->frozen)); fflush(stdout); break; }
+		g_frozen = g_args[1] != 0; printf("FAKE: frozen %d\n", int(g_frozen)); fflush(stdout); break;
 	case 0xFE99B66D079CF6BC: {                                // DISABLE_CONTROL_ACTION (v2.01: recorded)
 		const int id = int(g_args[1]);
 		if (id >= 0 && id < 512) g_dis[id] = true;
@@ -477,6 +744,7 @@ PUINT64 nativeCall()
 		if (md == kMBin) { *mn = NV{ -0.3f, -0.3f, 0.0f }; *mx = NV{ 0.3f, 0.3f, 1.0f }; break; }
 		if (md == kMCont) { *mn = NV{ -1.2f, -3.0f, 0.0f }; *mx = NV{ 1.2f, 3.0f, 2.6f }; break; }
 		if (md == kMCan) { *mn = NV{ -0.04f, -0.04f, 0.0f }; *mx = NV{ 0.04f, 0.04f, 0.12f }; break; }
+		if (md == kMTraf) { *mn = NV{ -8.3f, -0.3f, 0.0f }; *mx = NV{ 0.3f, 0.3f, 9.5f }; break; }
 		*mn = NV{ -1.0f, -2.5f, -0.6f };
 		*mx = NV{ 1.0f, 2.5f, 0.8f };
 		break;
@@ -529,7 +797,7 @@ PUINT64 nativeCall()
 	case 0x157F93B036700462: RetI(0); break;                  // IS_RADAR_HIDDEN
 	case 0x9EB6522EA68F22FE: RetI(1); break;                  // IS_RADAR_PREFERENCE_SWITCHED_ON
 	case 0xAF754F20EB5CD51A: RetI(1); break;                  // IS_MINIMAP_RENDERING
-	case 0xBB40DD2270B65366: RetI(1); break;                  // GET_PED_IN_VEHICLE_SEAT -> the player
+	case 0xBB40DD2270B65366: RetI(g_footOut ? 0 : 1); break;  // GET_PED_IN_VEHICLE_SEAT -> the player (v2.61: not while out)
 	case 0xEC3C9B8D5327B563: {                                // GET_CONTROL_NORMAL
 		const int c = int(g_args[1]);
 		RetF(c == 59 ? 0.5f : c == 71 ? 1.0f : 0.0f);
@@ -552,6 +820,16 @@ PUINT64 nativeCall()
 	case 0xEF01D36B9C9D0C7B: g_paused = 1; printf("FAKE: pause menu opened (menu 0x%08X)\n", unsigned(g_args[0])); fflush(stdout); break;  // ACTIVATE_FRONTEND_MENU (v2.43)
 	case 0x745711A75AB09277: if (!g_args[0]) g_paused = 0; printf("FAKE: frontend active %d\n", int(g_args[0])); fflush(stdout); break;     // SET_FRONTEND_ACTIVE (v2.43)
 	case 0x377906D8A31E5586: {                                // synchronous shape test
+		if (int(g_args[6]) == 16) {
+			// v2.51: props only (the plugin measures what of a prop a car can hit)
+			const double a[3] = { F(0), F(1), F(2) }, b[3] = { F(3), F(4), F(5) };
+			FakeObjHit o{ g_rayNext++, false, 0, {} };
+			o.hit = FakeObjRay(a, b, &o.ent, o.p);
+			g_objRays.push_back(o);
+			if (g_objRays.size() > 512) g_objRays.erase(g_objRays.begin());
+			RetI(o.h);
+			break;
+		}
 		if (int(g_args[6]) == 1) {
 			// v2.41: map-only rays (the ground streaming's immediate rays, the landing): answered at once, with a cost
 			static int us = -1;
@@ -638,11 +916,97 @@ PUINT64 nativeCall()
 		if (wait < 0) { char e[16]; wait = GetEnvironmentVariableA("FAKE_COLLWAIT", e, sizeof e) ? atoi(e) : 0; }
 		RetI(++g_collCalls > wait ? 1 : 0); break; }
 	case 0xD05A3241B9A86F19: break;                                     // SET_ENTITY_FLAG_SUPPRESS_SHADOW
-	case 0xA3EE4A07279BB9DB: RetI(1); break;                            // IS_PED_IN_VEHICLE
+	case 0xA3EE4A07279BB9DB: RetI(g_footOut ? 0 : 1); break;            // IS_PED_IN_VEHICLE (v2.61: not while out)
+	case 0xEA1C610A04DB6BBB: if (int(g_args[0]) == 1) { printf("FAKE: player visible %d\n", int(g_args[1])); fflush(stdout); } break;  // SET_ENTITY_VISIBLE
+	case 0x9B1E824FFBB7027A: if (int(g_args[0]) == 1) { printf("FAKE: player alpha reset\n"); fflush(stdout); } break;              // RESET_ENTITY_ALPHA
+	case 0xAD738C3085FE7E11: printf("FAKE: entity %d is a mission entity\n", int(g_args[0])); fflush(stdout); break;                 // SET_ENTITY_AS_MISSION_ENTITY
+	case 0xB80D8756B4668AB6: break;                                                                                                   // REQUEST_NAMED_PTFX_ASSET
+	case 0x8702416E512EC454: RetI(1); break;                                                                                          // HAS_NAMED_PTFX_ASSET_LOADED
+	case 0x6C38AF3693A69A91: break;                                                                                                   // USE_PARTICLE_FX_ASSET
+	case 0x1AE42C1660FD6517: {                                // START_PARTICLE_FX_LOOPED_ON_ENTITY: the first name unknown here
+		const char* n = reinterpret_cast<const char*>(g_args[0]);
+		const bool  ok = n && strcmp(n, "fire_wrecked_plane_cockpit") != 0;
+		printf("FAKE: particle fx %s on entity %d at %.2f %.2f %.2f scale %.2f: %s\n", n ? n : "?", int(g_args[1]), F(2), F(3), F(4), F(8), ok ? "started" : "unknown"); fflush(stdout);
+		RetI(ok ? g_fxNext++ : 0);
+		break; }
+	case 0x74AFEF0D2E1E409B: RetI(int(g_args[0]) >= 6000 ? 1 : 0); break;                                                             // DOES_PARTICLE_FX_LOOPED_EXIST
+	case 0x8F75998877616996: printf("FAKE: particle fx %d stopped\n", int(g_args[0])); fflush(stdout); break;                       // STOP_PARTICLE_FX_LOOPED
+	case 0x2274BC1C4885E333: {                                // GET_OFFSET_FROM_ENTITY_GIVEN_WORLD_COORDS (the car)
+		const double w[3] = { F(1) - g_pos[0], F(2) - g_pos[1], F(3) - g_pos[2] };
+		RetV(float(w[0] * g_rot[0][0] + w[1] * g_rot[1][0] + w[2] * g_rot[2][0]), float(w[0] * g_rot[0][1] + w[1] * g_rot[1][1] + w[2] * g_rot[2][1]),
+		     float(w[0] * g_rot[0][2] + w[1] * g_rot[1][2] + w[2] * g_rot[2][2]));
+		break; }
+	// v2.6 weapons
+	case 0x6C4D0409BA1A2BC2: {                                // GET_PED_LAST_WEAPON_IMPACT_COORD
+		FakePed* fp = PedOf(int(g_args[0]));
+		NV*      o = reinterpret_cast<NV*>(g_args[1]);
+		if (!fp) { RetI(0); break; }
+		if (!fp->n) *o = NV{ float(fp->head[0]), float(fp->head[1]), float(fp->head[2] - 1.6) };   // (an earlier shot at its feet)
+		else {
+			const double j = (fp->n & 1) ? 0.02 : -0.02;
+			*o = NV{ float(fp->tgt[0]), float(fp->tgt[1]), float(fp->tgt[2] + j) };
+		}
+		RetI(1);
+		break; }
+	case 0x34616828CD07F1A1: { FakePed* fp = PedOf(int(g_args[0])); RetI(fp && NowS() - fp->last < 0.12 ? 1 : 0); break; }  // IS_PED_SHOOTING
+	case 0x0A6DB4965674D243: RetI(int(0x1B06D571u)); break;  // GET_SELECTED_PED_WEAPON: WEAPON_PISTOL
+	case 0xC3287EE3050FB74C: RetI(int(0x18D5FA97u)); break;  // GET_WEAPONTYPE_GROUP: GROUP_PISTOL
+	case 0x37F4AD56ECBC0CD6: RetI(50); break;                 // GET_PED_ACCURACY
+	case 0x4859F1FC66A6278E: RetI(PedOf(int(g_args[0])) && int(g_args[0]) != int(g_args[1]) ? 1 : 0); break;  // IS_PED_IN_COMBAT (with you)
+	case 0x17C07FC640E86B4E: {                                // GET_PED_BONE_COORDS (the head)
+		if (FakePed* fp = PedOf(int(g_args[0]))) { RetV(float(fp->head[0]), float(fp->head[1]), float(fp->head[2])); break; }
+		double h[3];
+		CarPt(-0.4, 0.0, 0.45, h);   // you, in the driver's seat
+		RetV(float(h[0]), float(h[1]), float(h[2]));
+		break; }
+	case 0x3317DEDB88C95038: RetI(int(g_args[0]) == 1 && g_health <= 100 ? 1 : 0); break;  // IS_PED_DEAD_OR_DYING
+	case 0xEEF059FAD016D209: RetI(int(g_args[0]) == 1 ? g_health : 200); break;            // GET_ENTITY_HEALTH
+	case 0x6B76DC1F3AE6E6A3:                                  // SET_ENTITY_HEALTH
+		if (int(g_args[0]) == 1) { g_health = int(g_args[1]); printf("FAKE: player health %d\n", g_health); fflush(stdout); }
+		break;
+	case 0xFAEE099C6F890BB8:                                  // SET_ENTITY_PROOFS
+		printf("FAKE: proofs entity %d: bullet %d fire %d explosion %d\n", int(g_args[0]), int(g_args[1]), int(g_args[2]), int(g_args[3])); fflush(stdout);
+		break;
+	case 0x6B83617E04503888:                                  // START_SCRIPT_FIRE
+		++g_fires;
+		printf("FAKE: script fire %d at %.2f %.2f %.2f\n", 5000 + g_fires, F(0), F(1), F(2)); fflush(stdout);
+		RetI(5000 + g_fires);
+		break;
+	case 0x7FF548385680673F: printf("FAKE: script fire %d removed\n", int(g_args[0])); fflush(stdout); break;  // REMOVE_SCRIPT_FIRE
+	case 0xBA71116ADF5B514C: {                                // EXPLODE_VEHICLE: GTA's car blows up (in GTA's explosion list)
+		printf("FAKE: vehicle %d exploded\n", int(g_args[0])); fflush(stdout);
+		FakeExp e{ 7, { g_pos[0], g_pos[1], g_pos[2] }, NowS(), NowS() + 0.5 };
+		g_exps.push_back(e);
+		break; }
+	case 0xAB0F816885B0E483: {                                // IS_EXPLOSION_IN_SPHERE type x y z r
+		const int    ty = int(g_args[0]);
+		const double x = F(1), y = F(2), z = F(3), r = F(4), now = NowS();
+		int          in = 0;
+		for (const FakeExp& e : g_exps)
+			if (now >= e.t0 && now <= e.t1 && (ty == -1 || ty == e.type) && (e.p[0] - x) * (e.p[0] - x) + (e.p[1] - y) * (e.p[1] - y) + (e.p[2] - z) * (e.p[2] - z) <= r * r) in = 1;
+		RetI(in);
+		break; }
 	case 0x3D87450E15D98694: {                                // GET_SHAPE_TEST_RESULT: ground hit along the view
 		int* hit = reinterpret_cast<int*>(g_args[1]);
 		NV*  end = reinterpret_cast<NV*>(g_args[2]);
-		{   // v2.4: a ray with its own handle (the ride check): the fake ground
+		int* entOut = reinterpret_cast<int*>(g_args[4]);
+		{   // v2.51: an object ray
+			const int h = int(g_args[0]);
+			bool done = false;
+			for (size_t i = 0; i < g_objRays.size(); ++i)
+				if (g_objRays[i].h == h) {
+					const FakeObjHit o = g_objRays[i];
+					g_objRays.erase(g_objRays.begin() + i);
+					*hit = o.hit ? 1 : 0;
+					*end = NV{ float(o.p[0]), float(o.p[1]), float(o.p[2]) };
+					if (entOut) *entOut = o.hit ? o.ent : 0;
+					done = true;
+					break;
+				}
+			if (done) { RetI(2); break; }
+		}
+		{   // v2.4: a ray with its own handle (the ride check): the fake ground. v2.51: along any direction (a jump's flight), in
+			// 0.25 m steps: the first step that crosses the ground
 			const int h = int(g_args[0]);
 			size_t i = 0;
 			while (i < g_rays.size() && g_rays[i].h != h) ++i;
@@ -650,10 +1014,23 @@ PUINT64 nativeCall()
 				if (g_rays[i].tick == g_tickN && !g_rays[i].now) { RetI(1); break; }
 				const FakeRay r = g_rays[i];
 				g_rays.erase(g_rays.begin() + i);
-				bool gh; unsigned m = 0;
-				const double gz = FakeGround(r.x0, r.y0, &gh, &m);
-				*hit = (gh && gz <= r.z0 && gz >= r.z1) ? 1 : 0;
-				*end = NV{ r.x0, r.y0, float(gz) };
+				const double len = hypot(double(r.x1) - r.x0, double(r.y1) - r.y0);
+				const int    N = std::max(1, int(ceil(len / 0.25)));
+				double       pz = r.z0;
+				*hit = 0;
+				*end = NV{ r.x1, r.y1, r.z1 };
+				if (entOut) *entOut = 0;
+				for (int k = 1; k <= N; ++k) {
+					const double t = double(k) / N, x = r.x0 + (r.x1 - r.x0) * t, y = r.y0 + (r.y1 - r.y0) * t, z = r.z0 + (r.z1 - r.z0) * t;
+					unsigned     m = 0;
+					double       gz = 0;
+					if (FakeRayHit(x, y, std::max(pz, z), std::min(pz, z), &gz, &m)) {
+						*hit = 1;
+						*end = NV{ float(x), float(y), float(gz) };
+						break;
+					}
+					pz = z;
+				}
 				RetI(2);
 				break;
 			}

@@ -225,8 +225,14 @@ BODY = {12 + i: p for i, p in enumerate(body_nodes())}
 DENT = {}            # cid -> (dx, dy, dz) car frame, now
 DENT_FULL = {c: ((0.25, -0.35, 0.0) if (p[0] == -0.95 and p[1] == 2.3) else (0.0, -0.15, 0.0)) for c, p in BODY.items() if p[1] == 2.3 and p[0] <= 0.0}
 DENT_AFTER = float(os.environ.get('FAKE_DENT_AFTER', '0') or 0)
+# v2.54: FAKE_DENT_FAR=1: the dent also flings the front right top node 16 m away (a part torn off and left behind): the
+# triangles stretched between it and the car must not be drawn
+if os.environ.get('FAKE_DENT_FAR') == '1':
+    DENT_FULL.update({c: (3.0, 16.0, 0.0) for c, p in BODY.items() if p == (0.95, 2.3, 1.1)})
+DIP = [float(x) for x in os.environ.get('FAKE_DIP', '').split()] if os.environ.get('FAKE_DIP') else None   # v2.62
+dip_state = {}
 REPAIR_FILE = os.environ.get('FAKE_REPAIR_FILE')   # v2.5: your repair binding when the host script touches this file
-for _f in ('fake_dent_done.txt', 'fake_repair_done.txt', 'fake_drive_on.txt', 'fake_dent_settled.txt', 'fake_repair_late.txt', 'fake_past.txt', 'fake_still10.txt') + ((REPAIR_FILE,) if REPAIR_FILE else ()):
+for _f in ('fake_foot_done.txt', 'fake_putback.txt', 'fake_wpn_done.txt', 'fake_s130.txt', 'fake_dent_done.txt', 'fake_repair_done.txt', 'fake_drive_on.txt', 'fake_dent_settled.txt', 'fake_repair_late.txt', 'fake_past.txt', 'fake_still10.txt') + ((REPAIR_FILE,) if REPAIR_FILE else ()):
     if os.path.exists(_f): os.remove(_f)
 dent_state = {'t0': None, 'done': False}
 def node_local(cid):
@@ -266,6 +272,86 @@ def vm_node(self, c):
 vg.obj.getNodePosition = vm_node
 vg.obj.getDirectionVector = lambda self: vm.table_from(dict(zip('xyz', basis()[1])))
 vg.obj.getDirectionVectorUp = lambda self: vm.table_from(dict(zip('xyz', basis()[2])))
+# v2.6 (weapons): what the 2.6 mod's car code reads and calls: the body box's outside as collision triangles (from its nodes, and
+# the roof), a side window and a headlight that break with their deformGroups, a radiator beam across the front, the engine
+# block's nodes, flammable nodes; BeamNG's planets (a bullet's dents the nodes near it, a blast pushes the whole car), tyres
+# that deflate, fire (an ignited node's flames grow), its explosion
+vg.obj.getPosition = lambda self: vm.table_from(dict(zip('xyz', P())))
+def nid(p): return [c for c, q in BODY.items() if q == p][0]
+XS, YS, ZS = (-0.95, 0.0, 0.95), (-2.3, -0.6, 0.0, 0.6, 2.3), (0.4, 1.1)
+TRIS = []
+def quad(a, b, c, d): TRIS.extend([(nid(a), nid(b), nid(c)), (nid(a), nid(c), nid(d))])
+for x in (-0.95, 0.95):
+    for j in range(4): quad((x, YS[j], 0.4), (x, YS[j + 1], 0.4), (x, YS[j + 1], 1.1), (x, YS[j], 1.1))
+for y in (-2.3, 2.3):
+    for i in range(2): quad((XS[i], y, 0.4), (XS[i + 1], y, 0.4), (XS[i + 1], y, 1.1), (XS[i], y, 1.1))
+for z in (0.4, 1.1):
+    for i in range(2):
+        for j in range(4): quad((XS[i], YS[j], z), (XS[i + 1], YS[j], z), (XS[i + 1], YS[j + 1], z), (XS[i], YS[j + 1], z))
+quad((-0.8, -1.2, 1.58), (0.8, -1.2, 1.58), (0.8, 0.6, 1.58), (-0.8, 0.6, 1.58))
+vm.execute('v.data.triangles = {}')
+for i, t in enumerate(TRIS):
+    vm.execute('v.data.triangles[%d] = { id1 = %d, id2 = %d, id3 = %d }' % (i, t[0], t[1], t[2]))
+WIN = (nid((-0.95, -0.6, 1.1)), nid((-0.95, 0.6, 1.1)))
+LAMP = (nid((-0.95, 2.3, 0.4)), nid((0.0, 2.3, 0.4)))
+RAD = (nid((-0.95, 2.3, 0.4)), nid((0.95, 2.3, 0.4)))
+ENGN = (nid((0.0, 2.3, 0.4)), nid((0.0, 2.3, 1.1)))
+FLAM = [c for c, q in BODY.items() if q[2] == 0.4]
+vm.execute('''
+  v.data.beams = {
+    [0] = { id1 = %d, id2 = %d, deformSwitches = { { deformGroup = 'sidewindow_L_break', mesh = 'glass_sidewindow', dmgMat = 'invis' } } },
+    [1] = { id1 = %d, id2 = %d, deformSwitches = { { deformGroup = 'headlight_L_break', mesh = 'glass_lamp', dmgMat = 'lights_dmg' } } },
+    [2] = { id1 = %d, id2 = %d, deformGroup = 'radiator_damage' },
+    [3] = { id1 = %d, id2 = %d } }
+  ENG = { engineBlockNodes = { %d, %d }, deformGroups = { { groupType = 'radiator', groupNames = { 'radiator_damage' } } } }
+  function ENG:applyDeformGroupDamage(x, kind) calls[#calls + 1] = string.format('ENGINE damage %%s %%.4f', kind, x) end
+  powertrain = { getDevicesByCategory = function(c) if c == 'engine' then return { ENG } end return {} end }
+  vec3 = function(x, y, z) return { x = x, y = y, z = z } end
+  wheels = { wheels = { [0] = {}, [1] = {}, [2] = {}, [3] = {} } }
+  beamstate = { deformGroupsTriggerBeam = {}, damage = 0 }
+  function beamstate.addPlanet(c, r, m, dt) PLANET(c.x, c.y, c.z, r, m, dt) end
+  function beamstate.deflateTire(id) wheels.wheels[id].isTireDeflated = true; calls[#calls + 1] = 'TIRE deflated ' .. id end
+  function beamstate.triggerDeformGroup(g) beamstate.deformGroupsTriggerBeam[g] = true; calls[#calls + 1] = 'GLASS broken ' .. g end
+  fire = { flammableNodes = {}, hotNodes = {} }
+  function fire.igniteNode(c) if not fire.hotNodes[c] then fire.hotNodes[c] = { intensity = 0.5 }; calls[#calls + 1] = 'FIRE ignite node ' .. c end end
+  function fire.explodeVehicle() calls[#calls + 1] = 'EXPLODEVEHICLE' end
+  function fire.igniteVehicle() calls[#calls + 1] = 'IGNITEVEHICLE'; for c in pairs(fire.flammableNodes) do fire.igniteNode(c) end end
+''' % (WIN + LAMP + RAD + (WIN[0], LAMP[1]) + ENGN))
+for c in FLAM:
+    vm.execute('fire.flammableNodes[%d] = { cid = %d }' % (c, c))
+WPN = {'roll': False}
+def planet(cx, cy, cz, r, m, pdt):
+    # BeamNG's planet: a pull (here a push: negative mass) of G * |m| / d^2 on every node, for pdt seconds
+    A = 6.674e-11 * abs(m)
+    rr, f, u = basis()
+    o = P()
+    moved, most = 0, 0.0
+    if r < 0.5:
+        # a bullet: the nodes near it dent in (a stiff body: 5 mm per m/s)
+        for c in BODY:
+            q = to_world(node_local(c))
+            w = (o[0] + q[0] - cx, o[1] + q[1] - cy, o[2] + q[2] - cz)
+            d = math.sqrt(sum(x * x for x in w))
+            dv = A / max(d, r) ** 2 * pdt
+            disp = min(0.08, dv * 0.005)
+            if disp < 0.003: continue
+            lw = tuple(x / max(d, 1e-6) * disp for x in w)
+            dl = (sum(lw[i] * rr[i] for i in range(3)), sum(lw[i] * f[i] for i in range(3)), sum(lw[i] * u[i] for i in range(3)))
+            old = DENT.get(c, (0.0, 0.0, 0.0))
+            DENT[c] = tuple(old[i] + dl[i] for i in range(3))
+            moved += 1; most = max(most, disp)
+        ev.write('%.3f PLANET bullet: %.0f m/s2 at 1 m for %.2f s: %d nodes dented, the most %.1f cm\n' % (st, A, pdt, moved, most * 100)); ev.flush()
+    else:
+        # a blast: the whole car pushed (from its middle), rolling to a stop after
+        q = to_world((0.0, 0.0, 0.75))
+        w = (o[0] + q[0] - cx, o[1] + q[1] - cy, o[2] + q[2] - cz)
+        d = math.sqrt(sum(x * x for x in w))
+        dv = A / max(d, r) ** 2 * pdt
+        fw = sum(w[i] / d * dv * f[i] for i in range(3))
+        car['v'] = max(0.0, car['v'] + fw)
+        WPN['roll'] = True
+        ev.write('%.3f PLANET blast %.1f m from the car: %.0f m/s2 at 1 m for %.2f s: pushed %.2f m/s (%.2f forward)\n' % (st, d, A, pdt, dv, fw)); ev.flush()
+vg.PLANET = planet
 g.core_vehicle_manager.getPlayerVehicleData = lambda: vdata
 veh = ge.table_from({})
 g.VEH = veh
@@ -279,7 +365,7 @@ def P():
     return (car['x'] - o[0], car['y'] - o[1], car['z'] - o[2])
 veh.getPosition = lambda self: to_lua(dict(zip('xyz', P())))
 veh.getDirectionVector = lambda self: to_lua(dict(zip('xyz', basis()[1])))
-veh.getVelocity = lambda self: to_lua(dict(zip('xyz', [c * car['v'] for c in basis()[1]])))
+veh.getVelocity = lambda self: to_lua(dict(zip('xyz', [c * car['v'] for c in basis()[1][:2]] + [world_car['vz'] if world_car['on'] else 0.0])))   # v2.51: falling too
 veh.getNodePosition = lambda self, c: to_lua(dict(zip('xyz', to_world(node_local(int(c))))))
 veh.getRefNodeId = lambda self: 0
 def cluster_vel(self, node, scale, ax, ay, az):
@@ -297,6 +383,7 @@ world_car = {'on': False, 'vz': 0.0, 'tps': 0}
 def set_pos_rot(self, x, y, z, qx, qy, qz, qw):
     # BeamNG-like: the vehicle faces -Y in its own frame; x, y, z = its ref node (what getPosition reads)
     f = ge.eval('QROT')(ge.table_from({'x': qx, 'y': qy, 'z': qz, 'w': qw}), ge.table_from({'x': 0, 'y': -1, 'z': 0}))
+    if car['y'] > 60: open('fake_putback.txt', 'w').close()   # v2.6: for script_hole.txt (put back after falling in the hole)
     car['psi'] = math.atan2(f['y'], f['x'])
     car['v'] = 0.0
     o = to_world(O_TRUE)
@@ -311,6 +398,68 @@ def set_pos_rot(self, x, y, z, qx, qy, qz, qw):
 veh.setPositionRotation = set_pos_rot
 cast = None
 ge.execute('getPlayerVehicle = function() return VEH end')
+# v2.52: physics props: BeamNG's vehicle spawning (the mod's gtab_prop boxes): here the box's bottom middle goes where asked,
+# turned as asked; PROP_KNOCK tips one over (turned about its bottom's -x edge, pushed along)
+ge.execute('''
+  PROPV = {}
+  local PV = {}
+  PV.__index = PV
+  function PV:getID() return self.id end
+  function PV:getPosition() return self.pos end
+  function PV:getNodePosition(c) local n = self.nodes[c + 1]; return { x = n.x - self.pos.x, y = n.y - self.pos.y, z = n.z - self.pos.z } end
+  function PV:delete() self.alive = false end
+  core_vehicles = { spawnNewVehicle = function(model, o)
+    local v = o.config.vars
+    local gx, gy, gz = v['$gx'], v['$gy'], v['$gz']
+    local L = { {-gx/2,-gy/2,0}, {gx/2,-gy/2,0}, {-gx/2,gy/2,0}, {gx/2,gy/2,0}, {-gx/2,-gy/2,gz}, {gx/2,-gy/2,gz}, {-gx/2,gy/2,gz}, {gx/2,gy/2,gz} }
+    local pv = setmetatable({ id = 2000 + #PROPV, alive = true, opts = o, nodes = {}, pos = { x = o.pos.x, y = o.pos.y, z = o.pos.z },
+                              anchored = o.config.parts.gtab_prop_anchor ~= nil, name = o.vehicleName }, PV)
+    for k = 1, 8 do
+      local r = QROT(o.rot, { x = L[k][1], y = L[k][2], z = L[k][3] })
+      pv.nodes[k] = { x = o.pos.x + r.x, y = o.pos.y + r.y, z = o.pos.z + r.z }
+    end
+    PROPV[#PROPV + 1] = pv
+    PROPLOG(pv.name, pv.anchored, gx, gy, gz, v['$gm'])
+    return pv
+  end }
+  core_vehicle_manager.getVehicleData = function(id)
+    local nodes = {}
+    for c = 0, 7 do nodes[c] = { cid = c, name = 'g' .. c } end
+    return { vdata = { nodes = nodes } }
+  end
+  function PROP_KNOCK(pv, ang, dx, dy)
+    local a, c = pv.nodes[1], pv.nodes[3]
+    local ax = { x = c.x - a.x, y = c.y - a.y, z = c.z - a.z }
+    local l = math.sqrt(ax.x ^ 2 + ax.y ^ 2 + ax.z ^ 2)
+    local s = math.sin(ang / 2) / l
+    local q = { x = ax.x * s, y = ax.y * s, z = ax.z * s, w = math.cos(ang / 2) }
+    for k = 1, 8 do
+      local n = pv.nodes[k]
+      local r = QROT(q, { x = n.x - a.x, y = n.y - a.y, z = n.z - a.z })
+      pv.nodes[k] = { x = a.x + r.x + dx, y = a.y + r.y + dy, z = a.z + r.z }
+    end
+    pv.knocked = true
+  end
+''')
+def proplog(name, anch, gx, gy, gz, gm):
+    ev.write('%.3f PROPSPAWN %s anchored %s %.2f x %.2f x %.2f m %.0f kg\n' % (st, name, anch, gx, gy, gz, gm)); ev.flush()
+g.PROPLOG = proplog
+# BeamNG's car against a physics prop's box (its bottom outline, its height): a tied post costs the car 3 m/s, a loose one 0.5
+def phys_hit():
+    PV = ge.eval('PROPV')
+    r, f, u = basis()
+    pts = [(car['x'] + f[0] * 2.3 + r[0] * k, car['y'] + f[1] * 2.3 + r[1] * k) for k in (-0.9, 0.0, 0.9)]
+    for i in range(1, len(PV) + 1):
+        v = PV[i]
+        if not v.alive or v.knocked: continue
+        n = v.nodes
+        quad = [(n[1].x, n[1].y), (n[2].x, n[2].y), (n[4].x, n[4].y), (n[3].x, n[3].y)]
+        if car['z'] > max(n[k].z for k in range(5, 9)) or car['z'] < min(n[k].z for k in range(1, 5)) - 1.0: continue
+        for (px, py) in pts:
+            sg = [(quad[(q + 1) % 4][0] - quad[q][0]) * (py - quad[q][1]) - (quad[(q + 1) % 4][1] - quad[q][1]) * (px - quad[q][0]) for q in range(4)]
+            if all(x >= 0 for x in sg) or all(x <= 0 for x in sg):
+                return v
+    return None
 
 # ---------------------------------------------------------------- BeamNG's input system
 maps = {n: to_lua({'enabled': True}) for n in ['GlobalActionMap', 'MenuActionMap', 'VehicleCommonActionMap', 'VehicleSpecificActionMap', 'NormalActionMap']}
@@ -403,8 +552,8 @@ def walls_dump():
         if o.cls == 'ProceduralMesh' and o.alive and o.meshes and str(name).startswith('gtap_'):
             # v2.5: a solid prop's box
             V = o.meshes[1].verts
-            top = [V[17 + q] for q in range(4)]
-            boxes.append('PROPBOX %s %.2f %.2f %.2f %.2f' % (name, sum(v.x for v in top) / 4 + o.pos.x, sum(v.y for v in top) / 4 + o.pos.y, o.pos.z, top[0].z + o.pos.z))
+            top = [V[33 + q] for q in range(8)]
+            boxes.append('PROPBOX %s %.2f %.2f %.2f %.2f' % (name, sum(v.x for v in top) / 8 + o.pos.x, sum(v.y for v in top) / 8 + o.pos.y, o.pos.z, top[0].z + o.pos.z))
             continue
         if o.cls != 'ProceduralMesh' or not o.alive or not o.meshes or not str(name).startswith('gtab_g_'): continue
         ntile += 1
@@ -412,18 +561,20 @@ def walls_dump():
             mesh = o.meshes[mi]
             f, V = mesh.faces, mesh.verts
             if 'WALL' in str(mesh.material) or 'PROP' in str(mesh.material):
-                for b in range(1, len(V) + 1, 20):
-                    if b + 19 > len(V): break
-                    top = [V[b + 16 + q] for q in range(4)]
+                for b in range(1, len(V) + 1, 40):
+                    # v2.52: corners cut: 8 side faces (4 vertices each), then the 8 top vertices: (hl, -ht+c), (hl, ht-c), (hl-c, ht),
+                    # (-hl+c, ht), (-hl, ht-c), (-hl, -ht+c), (-hl+c, -ht), (hl-c, -ht)
+                    if b + 39 > len(V): break
+                    top = [V[b + 32 + q] for q in range(8)]
                     side = [V[b + q] for q in range(4)]
-                    cx = sum(v.x for v in top) / 4 + o.pos.x
-                    cy = sum(v.y for v in top) / 4 + o.pos.y
-                    z1 = sum(v.z for v in top) / 4 + o.pos.z
+                    cx = sum(v.x for v in top) / 8 + o.pos.x
+                    cy = sum(v.y for v in top) / 8 + o.pos.y
+                    z1 = sum(v.z for v in top) / 8 + o.pos.z
                     z0 = (side[0].z + side[1].z) / 2 + o.pos.z
-                    l = math.hypot(top[1].x - top[0].x, top[1].y - top[0].y)
-                    t = math.hypot(top[2].x - top[1].x, top[2].y - top[1].y)
-                    ang = math.degrees(math.atan2(top[1].y - top[0].y, top[1].x - top[0].x))
-                    gs = (top[1].z - top[0].z) / l if l > 1e-6 else 0.0
+                    l = math.hypot(top[0].x - top[5].x, top[0].y - top[5].y)
+                    t = math.hypot(top[2].x - top[7].x, top[2].y - top[7].y)
+                    ang = math.degrees(math.atan2(top[0].y - top[5].y, top[0].x - top[5].x))
+                    gs = (top[0].z - top[5].z) / l if l > 1e-6 else 0.0
                     boxes.append('BOX %s %.2f %.2f %.2f %.2f %.2f %.2f %.1f %.4f' % (name, cx, cy, z0, z1, l, t, ang, gs))
                 continue
             for k in range(1, len(f) + 1, 3):
@@ -454,6 +605,26 @@ def walls_dump():
                 break
     open('fake_beam_walls.txt', 'w').write('%.1f WALLS %d of %d triangles in %d tiles, %d over 4 m high %s\n' % (st, walls, ntri, ntile, big, ' '.join(where)) +
                                            ''.join(b + '\n' for b in boxes) + ''.join('HUMP %.2f %.2f %.2f %s\n' % h for h in humps) + ''.join('HIGH %.2f %.2f %.2f\n' % h for h in high))
+# v2.51: the props' boxes (the mod's gtap_ meshes): is the car's front (middle, corners) inside one?
+prop_state = {}
+def prop_hit():
+    r, f, u = basis()
+    pts = [(car['x'] + f[0] * 2.3 + r[0] * k, car['y'] + f[1] * 2.3 + r[1] * k) for k in (-0.9, 0.0, 0.9)]
+    objs = ge.eval('OBJS')
+    for name in list(objs.keys()):
+        if not str(name).startswith('gtap_'): continue
+        o = objs[name]
+        if not o.alive or not o.meshes: continue
+        V = o.meshes[1].verts
+        for b in range(0, len(V) // 40):
+            top = [(V[40 * b + 33 + q].x + o.pos.x, V[40 * b + 33 + q].y + o.pos.y) for q in range(8)]   # (v2.52: 8 corners, convex)
+            ztop = V[40 * b + 33].z + o.pos.z
+            if car['z'] > ztop or car['z'] < o.pos.z - 1.0: continue
+            for (px, py) in pts:
+                sg = [(top[(q + 1) % 8][0] - top[q][0]) * (py - top[q][1]) - (top[(q + 1) % 8][1] - top[q][1]) * (px - top[q][0]) for q in range(8)]
+                if all(x >= 0 for x in sg) or all(x <= 0 for x in sg):
+                    return str(name)
+    return None
 # (counted when the run is stopped: GTA quitting ends it with SIGTERM)
 import signal
 def on_term(sig, frm):
@@ -492,6 +663,10 @@ while time.perf_counter() < end:
     if M.driveOn() and car['y'] > 230 and not os.path.exists('fake_past.txt'):
         open('fake_past.txt', 'w').close()
         ev.write('%.3f PAST y 230\n' % st); ev.flush()
+    # v2.51: fake_s130.txt once the car is 130 m along its start line (past the cliff of FAKE_JUMP=1)
+    if M.driveOn() and -0.34202 * car['x'] + 0.93969 * car['y'] > 130 and not os.path.exists('fake_s130.txt'):
+        open('fake_s130.txt', 'w').close()
+        ev.write('%.3f PAST s 130\n' % st); ev.flush()
     if os.path.exists('fake_past.txt') and car['v'] < 0.05:
         dent_state['still'] = dent_state.get('still', 0.0) + dt
         if dent_state['still'] > 10.0 and not os.path.exists('fake_still10.txt'):
@@ -562,6 +737,8 @@ while time.perf_counter() < end:
         vm.execute("gi = 3 electrics.values.gear = 'D'")
     drive = 1.0 if e.gear == 'D' else (-1.0 if e.gear == 'R' else 0.0)
     acc = thr * ACC * (1 - clu) * abs(drive) - brk * 6.0 - pb * 4.0
+    if WPN['roll'] and thr < 0.05: acc -= 3.0   # v2.6: a car pushed by a blast rolls to a stop
+    if WPN['roll'] and car['v'] < 0.01: WPN['roll'] = False
     car['v'] = max(0.0, min(VMAX, car['v'] + acc * dt))
     want = -stv * 0.45
     car['delta'] += (want - car['delta']) * min(1.0, dt * 6.0)
@@ -570,8 +747,37 @@ while time.perf_counter() < end:
     car['x'] += f[0] * car['v'] * dt
     car['y'] += f[1] * car['v'] * dt
     car['spin'] -= car['v'] * dt / 0.33
+    # v2.52: against a physics prop: it tips over and is pushed 1 m along
+    pv = phys_hit()
+    if pv:
+        f0 = basis()[1]
+        ev.write('%.3f PHYSHIT %s anchored %s at %.2f m/s\n' % (st, pv.name, pv.anchored, car['v'])); ev.flush()
+        car['v'] = max(0.0, car['v'] - (3.0 if pv.anchored else 0.5))
+        ge.eval('PROP_KNOCK')(pv, math.radians(80), f0[0] * 1.0, f0[1] * 1.0)
+    # v2.51: BeamNG's car against the props' boxes (rigid: about 30 g while its front is inside one)
+    hp = prop_hit()
+    if hp:
+        car['v'] = max(0.0, car['v'] - 300.0 * dt)
+        if hp != prop_state.get('last'):
+            ev.write('%.3f PROPHIT %s at %.2f m/s\n' % (st, hp, car['v'])); ev.flush()
+    prop_state['last'] = hp
     # v2.4: on GTA's ground (the mod's tiles): the car stands on them; where there are none it falls
-    if world_car['on']:
+    # v2.62: FAKE_DIP="t0 dur depth": from t0 s into the drive for dur s the car is held depth m under its ground (a crash
+    # tumbling it under GTA's), then put back on it
+    if world_car['on'] and DIP and dent_state.get('drive_t') is not None and DIP[0] <= st - dent_state['drive_t'] < DIP[0] + DIP[1]:
+        if cast is None:
+            cast = ge.eval('castRayStatic')
+        d = cast(ge.table_from({'x': car['x'], 'y': car['y'], 'z': car['z'] + DIP[2] + 1.5}), ge.table_from({'x': 0, 'y': 0, 'z': -1}), DIP[2] + 3.0)
+        if d is not None and d < DIP[2] + 2.99:
+            car['z'] = car['z'] + 1.5 - d
+        if not dip_state.get('on'):
+            dip_state['on'] = True
+            ev.write('%.3f DIP the car %.1f m under its ground for %.1f s\n' % (st, DIP[2], DIP[1])); ev.flush()
+        world_car['vz'] = 0.0
+    elif world_car['on']:
+        if dip_state.get('on'):
+            dip_state['on'] = False
+            car['z'] += DIP[2]
         if cast is None:
             cast = ge.eval('castRayStatic')
         d = cast(ge.table_from({'x': car['x'], 'y': car['y'], 'z': car['z'] + 1.5}), ge.table_from({'x': 0, 'y': 0, 'z': -1}), 3.0)
@@ -581,6 +787,7 @@ while time.perf_counter() < end:
         else:
             world_car['vz'] -= 9.81 * dt
             car['z'] += world_car['vz'] * dt
+    vm.execute('for c, n in pairs(fire.hotNodes) do n.intensity = math.min(5, n.intensity + %.4f) end' % (0.5 * dt))   # v2.6: flames grow
     e.wheelspeed = car['v']
     e.rpm = 800 + car['v'] * 300
     e.throttle = thr

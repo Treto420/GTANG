@@ -932,6 +932,18 @@ namespace car
 					paintable += y.paint ? 1 : 0;
 				}
 				layered += mm.nLayers > 1 ? 1 : 0;
+				// v2.6: a colour palette map with no layer flagged instanceDiffuse (your Z06's new_body_paint): BeamNG paints it
+				// anyway (it showed blue there, white here). Those layers take the paint.
+				bool anyPaint = false;
+				for (int l = 0; l < mm.nLayers; ++l) anyPaint = anyPaint || mm.layers[l].paint;
+				for (int l = 0; l < mm.nLayers && !anyPaint; ++l) {
+					Layer& y = mm.layers[l];
+					if (y.palTex >= 0 || y.palConst >= 0) {
+						y.paint = true;
+						++paintable;
+						Logf(log, "car: material '%s' layer %d has a colour palette map but no paint flag: painted (v2.6)", mm.name.c_str(), l + 1);
+					}
+				}
 			} else {
 				// older files: what BeamNG's exporter wrote (first layer only, textures embedded)
 				Layer& y = mm.layers[0];
@@ -1527,6 +1539,40 @@ namespace car
 				out.vehFrameOk ? "usable for driving" : "NOT usable for driving (needs glTF axes + export direction)");
 		}
 
+		// ---- v2.6: each part's deformGroup (the BeamNG mod's "dg": mesh -> [group, broken material]): glass and lights BeamNG
+		// breaks are hidden (broken material invisible: side windows) or drawn frosted (a cracked windshield, a broken lamp)
+		std::map<int, int> dgOfNode;
+		auto dgOf = [&](int gltfNode) -> int {
+			const J* gb = root.get("gtaBridge");
+			const J* dgJ = gb ? gb->get("dg") : nullptr;
+			if (!dgJ || gltfNode < 0 || gltfNode >= int(data->nodes_count) || !data->nodes[gltfNode].name) return -1;
+			auto ex = dgOfNode.find(gltfNode);
+			if (ex != dgOfNode.end()) return ex->second;
+			std::string  nm = data->nodes[gltfNode].name;
+			const size_t dot = nm.rfind('.');
+			if (dot != std::string::npos && dot + 1 < nm.size() && nm.find_first_not_of("0123456789", dot + 1) == std::string::npos) nm = nm.substr(0, dot);
+			int      g = -1;
+			const J* e = dgJ->get(nm.c_str());
+			const auto it = e ? e->items() : std::vector<const J*>{};
+			if (!it.empty() && it[0]->t == J::Str && !it[0]->s.empty()) {
+				const std::string mat = it.size() > 1 && it[1]->t == J::Str ? Lower(it[1]->s) : "";
+				for (size_t i = 0; i < out.dgNames.size() && g < 0; ++i)
+					if (out.dgNames[i] == it[0]->s) g = int(i);
+				if (g < 0) {
+					g = int(out.dgNames.size());
+					out.dgNames.push_back(it[0]->s);
+					// v2.61: side and rear windows shatter out (your 2.6 test: only tinted, nobody saw it); windscreens and lamps crack
+					const std::string gn = Lower(it[0]->s);
+					const bool glassy = gn.find("glass") != std::string::npos || gn.find("window") != std::string::npos;
+					bool       side = false;
+					for (const char* w : { "door", "quarter", "side", "vent", "rear", "back", "tailgate", "hatch", "sunroof" }) side = side || gn.find(w) != std::string::npos;
+					const bool lamp = gn.find("light") != std::string::npos || gn.find("lamp") != std::string::npos || gn.find("signal") != std::string::npos;
+					out.dgHide.push_back(mat.empty() || mat.find("invis") != std::string::npos || (glassy && side && !lamp) ? 1 : 0);
+				}
+			}
+			return dgOfNode[gltfNode] = g;
+		};
+
 		// ---- draws: opaque first, then see-through (glass) in file order
 		std::vector<size_t> order(prims.size());
 		for (size_t i = 0; i < order.size(); ++i) order[i] = i;
@@ -1539,67 +1585,65 @@ namespace car
 			d.mat = p.mat;
 			d.wheel = primWheel[i];
 			d.wheelMode = primMode[i];
+			d.dg = dgOf(p.node);
 			out.draws.push_back(d);
 			out.opaqueDraws += p.translucent ? 0 : 1;
 		}
+		if (!out.dgNames.empty()) {
+			std::string list;
+			int         parts = 0;
+			for (const Draw& d : out.draws) parts += d.dg >= 0;
+			for (size_t i = 0; i < out.dgNames.size() && list.size() < 600; ++i) list += (i ? ", " : "") + out.dgNames[i] + (out.dgHide[i] ? " (gone)" : " (cracked)");
+			Logf(log, "car glass/lights (v2.61): %zu breakable groups on %d parts, when BeamNG breaks them: %s", out.dgNames.size(), parts, list.c_str());
+		} else {
+			Logf(log, "car glass/lights (v2.6): the file names no breakable groups (export the car again with the 2.6 BeamNG mod: Shift+F11)");
+		}
 
-		// ---- v2.5 (dents): BeamNG's nodes (as exported, relative to the vehicle like the wheels' nodes) and, for every
-		// vertex of the body (not the wheels), the nearest of them (up to 4, from its part's node groups when the BeamNG mod
-		// said which): the drawn car is bent the way BeamNG's nodes move
+		// ---- v2.5 (dents), v2.53: like BeamNG's flexbodies, every vertex of the body (not the wheels) sits in a triangle
+		// of 3 of its part's nodes: the nearest node, the next nearest, and the nearest one off their line (Rigs of Rods'
+		// flexbody "locators"). It keeps its place along the triangle's two edges and its normal, so when BeamNG moves the
+		// nodes the panel bends, turns or falls off with them. A part's nodes are its flexbody's own ("_group_nodes" in
+		// the export) or a prop's 3; a part without them uses all of the body's nodes (2.52 blended 4 nodes of the whole
+		// body per vertex: waves, a hood that followed the engine, bumpers stretched between the car and the road).
 		{
 			const double t0 = msSince();
 			const J*     gb = root.get("gtaBridge");
 			const J*     nodesJ = gb ? gb->get("nodes") : nullptr;
 			const J*     flexJ = gb ? gb->get("flex") : nullptr;
+			const J*     propsJ = gb ? gb->get("props") : nullptr;
 			if (!nodesJ) {
-				out.skinNote = "the file has no node data (export the car again with the 2.5 BeamNG mod: Shift+F11)";
+				out.skinNote = "the file has no node data (export the car again with the 2.53 BeamNG mod: Shift+F11)";
 			} else if (!out.vehFrameOk) {
 				out.skinNote = "the car's frame isn't BeamNG's vehicle frame (glTF axes + export direction needed)";
 			} else {
 				const J* cJ = nodesJ->get("c");
 				const J* pJ = nodesJ->get("p");
-				const J* gJ = nodesJ->get("g");
 				const J* wJ = nodesJ->get("w");
 				const auto ci = cJ ? cJ->items() : std::vector<const J*>{};
 				const auto pi = pJ ? pJ->items() : std::vector<const J*>{};
-				const auto gi = gJ ? gJ->items() : std::vector<const J*>{};
 				const auto wi = wJ ? wJ->items() : std::vector<const J*>{};
 				const size_t N = ci.size();
 				if (N == 0 || N > 60000 || pi.size() != N * 3) {
-					out.skinNote = "node data not readable";
+					out.skinNote = "node data not readable (" + std::to_string(N) + " node ids, " + std::to_string(pi.size()) + " position numbers; export the car again with the 2.53 BeamNG mod: Shift+F11)";
 				} else {
 					// node positions -> car space (the wheels' offset: the mesh may be in world positions)
 					const V3 o = (wheelOff == 1 && haveVehPos) ? vehPos : V3{ 0, 0, 0 };
-					std::map<std::string, int>      groupId;
-					std::vector<std::vector<int>>   nodeGroups(N);
 					out.nodeCid.resize(N);
 					out.nodePos.resize(N * 3);
 					out.nodeWheel.assign(N, 0);
-					std::vector<V3> np(N);
+					std::vector<V3>              np(N);
+					std::unordered_map<int, int> idxOfCid;
 					for (size_t i = 0; i < N; ++i) {
 						double c = -1, x = 0, y = 0, z = 0;
 						ci[i]->num(c);
 						pi[i * 3]->num(x), pi[i * 3 + 1]->num(y), pi[i * 3 + 2]->num(z);
 						out.nodeCid[i] = int(c);
+						idxOfCid[int(c)] = int(i);
 						np[i] = Sub(toCar({ x + o.x, y + o.y, z + o.z }), shift);
 						out.nodePos[i * 3] = float(np[i].x);
 						out.nodePos[i * 3 + 1] = float(np[i].y);
 						out.nodePos[i * 3 + 2] = float(np[i].z);
 						if (i < wi.size()) out.nodeWheel[i] = wi[i]->truthy() ? 1 : 0;
-						if (i < gi.size() && gi[i]->t == J::Str) {
-							const std::string& gs = gi[i]->s;
-							for (size_t a = 0; a <= gs.size();) {
-								size_t b = gs.find('|', a);
-								if (b == std::string::npos) b = gs.size();
-								if (b > a) {
-									auto it = groupId.find(gs.substr(a, b - a));
-									const int id = it != groupId.end() ? it->second : int(groupId.size());
-									if (it == groupId.end()) groupId[gs.substr(a, b - a)] = id;
-									nodeGroups[i].push_back(id);
-								}
-								a = b + 1;
-							}
-						}
 					}
 					// any node inside a wheel (hub, tyre: BeamNG's wheel lists may not name them all) counts as the wheel's;
 					// the BeamNG mod leaves out the same ones (axle centre, radius + 3 cm, 30 cm along the axle)
@@ -1620,48 +1664,55 @@ namespace car
 							}
 						}
 					}
-					// a grid of the nodes (0.25 m)
-					const double cell = 0.25;
-					auto key = [&](int x, int y, int z) { return (int64_t(x + 100000) << 40) ^ (int64_t(y + 100000) << 20) ^ int64_t(z + 100000); };
-					std::unordered_map<int64_t, std::vector<int>> grid;
+					std::vector<int> allBody;
 					for (size_t i = 0; i < N; ++i)
-						if (!out.nodeWheel[i]) grid[key(int(floor(np[i].x / cell)), int(floor(np[i].y / cell)), int(floor(np[i].z / cell)))].push_back(int(i));
-					// the nodes each part may follow: its flexbody's node groups (all body nodes when not known)
-					std::map<std::string, std::vector<uint8_t>> allowedOf;  // by group list
-					std::vector<uint8_t>                        allBody(N, 1);
-					for (size_t i = 0; i < N; ++i) allBody[i] = !out.nodeWheel[i];
-					int partsGrouped = 0, partsAll = 0;
-					auto allowedFor = [&](int gltfNode) -> const std::vector<uint8_t>& {
-						if (!flexJ || gltfNode < 0 || gltfNode >= int(data->nodes_count) || !data->nodes[gltfNode].name) return allBody;
-						std::string nm = data->nodes[gltfNode].name;
+						if (!out.nodeWheel[i]) allBody.push_back(int(i));
+					// each part's nodes (by its glTF node): how 1 = its flexbody's, 2 = a prop's 3, 0 = all of the body, 3 = its
+					// flexbody hangs on the wheels' nodes (a hub, an arm, a caliper): drawn as it is (v2.53 put those on the body's
+					// nearest nodes: a lost bumper's nodes pulled them into spikes, your screenshots 4 and 6)
+					const bool oldFlex = flexJ && !flexJ->o.empty() && flexJ->o.front().second.t == J::Str;  // (2.52's group names)
+					struct PartSet
+					{
+						int              how = 0;
+						std::vector<int> nodes;
+					};
+					std::map<int, PartSet> partSet;
+					std::vector<std::string> unmatched;
+					auto setFor = [&](int gltfNode) -> const PartSet& {
+						auto ex = partSet.find(gltfNode);
+						if (ex != partSet.end()) return ex->second;
+						PartSet ps;
+						std::string nm = (gltfNode >= 0 && gltfNode < int(data->nodes_count) && data->nodes[gltfNode].name) ? data->nodes[gltfNode].name : "";
 						const size_t dot = nm.rfind('.');
 						if (dot != std::string::npos && dot + 1 < nm.size() && nm.find_first_not_of("0123456789", dot + 1) == std::string::npos) nm = nm.substr(0, dot);
-						const J* fg = flexJ->get(nm.c_str());
-						if (!fg || fg->t != J::Str || fg->s.empty()) return allBody;
-						auto ex = allowedOf.find(fg->s);
-						if (ex != allowedOf.end()) return ex->second;
-						std::vector<uint8_t> al(N, 0);
-						std::set<int>        want;
-						const std::string&   gs = fg->s;
-						for (size_t a = 0; a <= gs.size();) {
-							size_t b = gs.find('|', a);
-							if (b == std::string::npos) b = gs.size();
-							auto it = groupId.find(gs.substr(a, b - a));
-							if (b > a && it != groupId.end()) want.insert(it->second);
-							a = b + 1;
+						auto listOf = [&](const J* arr) {
+							std::vector<int> r;
+							for (const J* x : arr ? arr->items() : std::vector<const J*>{}) {
+								double c;
+								auto   it = x->num(c) ? idxOfCid.find(int(c)) : idxOfCid.end();
+								r.push_back(it != idxOfCid.end() && !out.nodeWheel[size_t(it->second)] ? it->second : -1);
+							}
+							return r;
+						};
+						const J* fl = (!nm.empty() && !oldFlex && flexJ) ? flexJ->get(nm.c_str()) : nullptr;
+						if (fl) {
+							for (int i : listOf(fl))
+								if (i >= 0) ps.nodes.push_back(i);
+							if (ps.nodes.size() >= 3) ps.how = 1;
+							else if (!fl->items().empty()) {
+								ps.how = 3;
+								ps.nodes.clear();
+							}
 						}
-						size_t cnt = 0;
-						for (size_t i = 0; i < N; ++i) {
-							if (out.nodeWheel[i]) continue;
-							for (int g : nodeGroups[i])
-								if (want.count(g)) {
-									al[i] = 1;
-									++cnt;
-									break;
-								}
+						if (ps.how == 0 && !nm.empty() && propsJ) {
+							const std::vector<int> t = listOf(propsJ->get(nm.c_str()));
+							if (t.size() == 3 && t[0] >= 0 && t[1] >= 0 && t[2] >= 0) ps = { 2, t };
 						}
-						if (cnt < 3) al = allBody;  // (groups not found: all of the body)
-						return allowedOf.emplace(fg->s, std::move(al)).first->second;
+						if (ps.how == 0) {
+							ps.nodes = allBody;
+							if (unmatched.size() < 16) unmatched.push_back(nm.empty() ? "(no name)" : nm);
+						}
+						return partSet.emplace(gltfNode, std::move(ps)).first->second;
 					};
 					// vertices: the part that uses them first
 					std::vector<int> partOf(cpos.size(), -2);  // -2 unused, -1 a wheel's
@@ -1672,91 +1723,152 @@ namespace car
 							partOf[vi] = primWheel[p] >= 0 ? -1 : prims[p].node;
 						}
 					out.skinIdx.assign(cpos.size() * 4, 0);
-					out.skinW.assign(cpos.size() * 4, 0);
+					out.skinC.assign(cpos.size() * 3, 0.0f);
+					int           byHow[4] = {}, onlyMoves = 0, memoHits = 0, ampN = 0, rigidN = 0;
+					double        ampSum = 0;
 					std::set<int> partsSeen;
+					constexpr double kMin2 = 0.02 * 0.02;  // nodes closer than 2 cm to the first can't make a triangle
+					constexpr int    K = 12, KT = 8;
+					// (vertices at the same spot of the same part: UV seams, hard edges) -> the same triangle
+					std::unordered_map<uint64_t, size_t> memo;
 					for (size_t v = 0; v < cpos.size(); ++v) {
 						if (partOf[v] < 0) continue;
-						const std::vector<uint8_t>& al = allowedFor(partOf[v]);
-						if (partsSeen.insert(partOf[v]).second) (&al == &allBody ? partsAll : partsGrouped) += 1;
+						const PartSet& ps = setFor(partOf[v]);
+						if (partsSeen.insert(partOf[v]).second) ++byHow[ps.how];
+						if (ps.nodes.empty()) continue;
 						const V3& P = cpos[v];
-						const int gx = int(floor(P.x / cell)), gy = int(floor(P.y / cell)), gz = int(floor(P.z / cell));
-						std::pair<double, int> best[4];
+						uint16_t* si = &out.skinIdx[v * 4];
+						float*    sc = &out.skinC[v * 3];
+						const uint64_t mk = (uint64_t(uint32_t(partOf[v])) * 0x9E3779B97F4A7C15ull) ^ (uint64_t(llround(P.x * 1e4)) * 0xC2B2AE3D27D4EB4Full) ^
+						                    (uint64_t(llround(P.y * 1e4)) * 0x165667B19E3779F9ull) ^ (uint64_t(llround(P.z * 1e4)) * 0x27D4EB2F165667C5ull);
+						{
+							auto m = memo.find(mk);
+							if (m != memo.end() && partOf[m->second] == partOf[v] && Dot(Sub(cpos[m->second], P), Sub(cpos[m->second], P)) < 1e-8) {
+								memcpy(si, &out.skinIdx[m->second * 4], 4 * sizeof(uint16_t));
+								memcpy(sc, &out.skinC[m->second * 3], 3 * sizeof(float));
+								onlyMoves += si[3] == 2;
+								rigidN += si[3] == 3;
+								++memoHits;
+								++out.skinned;
+								continue;
+							}
+							memo[mk] = v;
+						}
+						int                    ref = -1, nx = -1, ny = -1;
+						std::pair<double, int> best[K];
 						int                    nb = 0;
-						for (int r = 1; r <= 4 && nb == 0; r *= 2) {
-							nb = 0;
-							for (int dz = -r; dz <= r; ++dz)
-								for (int dy = -r; dy <= r; ++dy)
-									for (int dx = -r; dx <= r; ++dx) {
-										auto it = grid.find(key(gx + dx, gy + dy, gz + dz));
-										if (it == grid.end()) continue;
-										for (int ni : it->second) {
-											if (!al[ni]) continue;
-											const double d2 = (np[ni].x - P.x) * (np[ni].x - P.x) + (np[ni].y - P.y) * (np[ni].y - P.y) + (np[ni].z - P.z) * (np[ni].z - P.z);
-											if (nb < 4) {
-												best[nb++] = { d2, ni };
-												std::sort(best, best + nb);
-											} else if (d2 < best[3].first) {
-												best[3] = { d2, ni };
-												std::sort(best, best + 4);
-											}
+						if (ps.how == 2) {
+							ref = ps.nodes[0], nx = ps.nodes[1], ny = ps.nodes[2];  // a prop: carried by its 3 nodes as BeamNG does
+						} else {
+							for (int ni : ps.nodes) {
+								const V3     d = Sub(np[size_t(ni)], P);
+								const double d2 = Dot(d, d);
+								if (nb == K && d2 >= best[K - 1].first) continue;
+								int k = nb < K ? nb++ : K - 1;
+								for (; k > 0 && best[k - 1].first > d2; --k) best[k] = best[k - 1];
+								best[k] = { d2, ni };
+							}
+							// v2.54: of the 8 nearest nodes, the triangle that moves the vertex least for a given wobble of its nodes
+							// (your 2.53 test: "rougher, not bigger"; the nearest + next nearest often had the vertex far outside
+							// their triangle, so a few mm between them became cm on the panel). BeamNG's docs: its flexbody
+							// mapping looks for the closest nodes at about 90 degrees around the vertex. Cost: how far outside
+							// the triangle it is (1 = inside) + its height over the triangle against the triangle's size.
+							double bestCost = 1e300;
+							const int nt = std::min(nb, KT);
+							for (int a = 0; a < nt; ++a)
+								for (int b = a + 1; b < nt; ++b)
+									for (int c = b + 1; c < nt; ++c) {
+										const V3     R0 = np[size_t(best[a].second)], X = Sub(np[size_t(best[b].second)], R0), Y = Sub(np[size_t(best[c].second)], R0);
+										const V3     C = Cross(X, Y);
+										const double cl = sqrt(Dot(C, C)), lx = sqrt(Dot(X, X)), ly = sqrt(Dot(Y, Y));
+										if (lx * lx < kMin2 || ly * ly < kMin2 || cl < 0.26 * lx * ly) continue;  // (under 15 degrees: a sliver)
+										const V3     Z{ C.x / cl, C.y / cl, C.z / cl }, D = Sub(P, R0);
+										const double u = Dot(D, Cross(Y, Z)) / cl, w = Dot(D, Cross(Z, X)) / cl, h = Dot(D, Z);
+										const double cost = fabs(u) + fabs(w) + fabs(1.0 - u - w) + 2.0 * fabs(h) / sqrt(cl) +
+										                    0.1 * (sqrt(best[a].first) + sqrt(best[b].first) + sqrt(best[c].first)) / (3.0 * sqrt(best[0].first) + 0.05);
+										if (cost < bestCost) {
+											bestCost = cost;
+											ref = best[a].second, nx = best[b].second, ny = best[c].second;
 										}
 									}
 						}
-						if (nb == 0) continue;  // (no node within 1 m: stays as drawn)
-						double w[4], sum = 0;
-						for (int k = 0; k < nb; ++k) sum += (w[k] = 1.0 / (best[k].first + 0.0004));
-						int left = 255;
-						for (int k = 0; k < nb; ++k) {
-							const int q = k == nb - 1 ? left : int(lround(255.0 * w[k] / sum));
-							out.skinIdx[v * 4 + k] = uint16_t(best[k].second);
-							out.skinW[v * 4 + k] = uint8_t(std::clamp(q, 0, left));
-							left -= out.skinW[v * 4 + k];
+						if (ps.how != 2 && ref < 0) {
+							// no good triangle among the nearest (all on a line): Rigs of Rods' way, the nearest node and the
+							// nearest ones off its line
+							ref = best[0].second;
+							const V3 R = np[size_t(ref)];
+							// the nearest node (of the 12 nearest, else of all) that passes ok
+							auto pick = [&](auto ok) {
+								for (int k = 1; k < nb; ++k)
+									if (ok(best[k].second)) return best[k].second;
+								int    got = -1;
+								double gd = 1e300;
+								for (int ni : ps.nodes) {
+									const V3     d = Sub(np[size_t(ni)], P);
+									const double d2 = Dot(d, d);
+									if (d2 < gd && ok(ni)) gd = d2, got = ni;
+								}
+								return got;
+							};
+							nx = pick([&](int j) { const V3 d = Sub(np[size_t(j)], R); return Dot(d, d) >= kMin2; });
+							if (nx >= 0) {
+								const V3 ex = Norm(Sub(np[size_t(nx)], R));
+								ny = pick([&](int j) {
+									if (j == nx) return false;
+									const V3     d = Sub(np[size_t(j)], R);
+									const double l2 = Dot(d, d), dd = Dot(ex, d);
+									return l2 >= kMin2 && dd * dd <= 0.5 * l2;  // at least 45 degrees off the first edge
+								});
+							}
+						}
+						si[0] = uint16_t(ref);
+						if (nx < 0 || ny < 0) {
+							si[3] = 2;  // all of the part's nodes on a line: the vertex only moves with the nearest
+							++onlyMoves;
+						} else {
+							const V3     R = np[size_t(ref)], X = Sub(np[size_t(nx)], R), Y = Sub(np[size_t(ny)], R), Z = Norm(Cross(X, Y)), D = Sub(P, R);
+							const double det = Dot(X, Cross(Y, Z));
+							if (!(fabs(det) > 1e-12)) {
+								si[3] = 2;
+								++onlyMoves;
+							} else {
+								si[1] = uint16_t(nx), si[2] = uint16_t(ny), si[3] = 1;
+								sc[0] = float(Dot(D, Cross(Y, Z)) / det);
+								sc[1] = float(Dot(X, Cross(D, Z)) / det);
+								sc[2] = float(Dot(X, Cross(Y, D)) / det);
+								// v2.55: a prop (BeamNG carries it rigidly by its 3 nodes; 2.54 stretched it with them: your steering
+								// wheel blown up), or a point far outside its triangle (a few mm between its nodes would move it by
+								// cm): carried rigidly by the triangle, turned but never stretched
+								const double amp = fabs(sc[0]) + fabs(sc[1]) + fabs(1.0f - sc[0] - sc[1]) + 2.0 * fabs(sc[2]) / sqrt(sqrt(Dot(Cross(X, Y), Cross(X, Y))));
+								if (ps.how == 2 || amp > 4.0) {
+									si[3] = 3;
+									++rigidN;
+								} else {
+									ampSum += fabs(sc[0]) + fabs(sc[1]) + fabs(1.0f - sc[0] - sc[1]);
+									++ampN;
+								}
+							}
 						}
 						++out.skinned;
 					}
-					// each node's neighbours (within 0.6 m, else 1.2 m where nodes are sparse; sharing a group when groups are
-					// known): its turn is fitted to them
-					out.nodeNbr.assign(N, {});
-					for (size_t i = 0; i < N; ++i) {
-						if (out.nodeWheel[i]) continue;
-						const int gx = int(floor(np[i].x / cell)), gy = int(floor(np[i].y / cell)), gz = int(floor(np[i].z / cell));
-						std::vector<std::pair<double, int>> c;
-						for (int pass = 0; pass < 2 && c.size() < 3; ++pass) {
-							const int    rc = pass == 0 ? 3 : 5;
-							const double r2 = pass == 0 ? 0.36 : 1.44;
-							c.clear();
-							for (int dz = -rc; dz <= rc; ++dz)
-								for (int dy = -rc; dy <= rc; ++dy)
-									for (int dx = -rc; dx <= rc; ++dx) {
-										auto it = grid.find(key(gx + dx, gy + dy, gz + dz));
-										if (it == grid.end()) continue;
-										for (int j : it->second) {
-											if (j == int(i)) continue;
-											const double d2 = (np[j].x - np[i].x) * (np[j].x - np[i].x) + (np[j].y - np[i].y) * (np[j].y - np[i].y) + (np[j].z - np[i].z) * (np[j].z - np[i].z);
-											if (d2 > r2) continue;
-											bool share = nodeGroups[i].empty() || nodeGroups[j].empty();
-											for (int g : nodeGroups[i])
-												for (int h : nodeGroups[j]) share = share || g == h;
-											if (share) c.push_back({ d2, j });
-										}
-									}
-						}
-						std::sort(c.begin(), c.end());
-						for (size_t k = 0; k < c.size() && k < 10; ++k) out.nodeNbr[i].push_back(uint16_t(c[k].second));
-					}
 					int wheelNodes = 0;
 					for (uint8_t x : out.nodeWheel) wheelNodes += x;
-					char nb[400];
-					snprintf(nb, sizeof(nb), "%zu nodes (%d of the wheels, %d of them inside a wheel), %zu node groups; %d vertices follow them; %d parts by their node groups, %d by all of the body (%.0f ms)", N,
-						wheelNodes, inWheels, groupId.size(), out.skinned, partsGrouped, partsAll, msSince() - t0);
+					std::string un;
+					for (const std::string& u : unmatched) un += (un.empty() ? "" : ", ") + u;
+					char nb[800];
+					snprintf(nb, sizeof(nb), "%zu nodes (%d of the wheels, %d of them inside a wheel); %d vertices follow them (%d only move with one node; %d carried rigidly (props, far "
+					         "from their nodes); %d at the same spot as another; outside their triangle %.2f on average, 1 = inside); parts: %d on their own flexbody's nodes, %d props on 3 nodes, %d ride with the wheels (drawn as they are), "
+					         "%d on all of the body%s%s%s (%.0f ms)",
+						N, wheelNodes, inWheels, out.skinned, onlyMoves, rigidN, memoHits, ampN ? ampSum / ampN : 0.0, byHow[1], byHow[2], byHow[3], byHow[0],
+						oldFlex ? " (the file is from the 2.52 mod: export the car again, Shift+F11)" : "", un.empty() ? "" : ": ", un.substr(0, 300).c_str(), msSince() - t0);
 					out.skinNote = nb;
 				}
 			}
 			if (out.skinned == 0) {
 				out.skinIdx.clear();
-				out.skinW.clear();
+				out.skinC.clear();
 			}
-			Logf(log, "car dents (v2.5): %s", out.skinNote.c_str());
+			Logf(log, "car dents (v2.55): %s", out.skinNote.c_str());
 		}
 
 		// ---- textures

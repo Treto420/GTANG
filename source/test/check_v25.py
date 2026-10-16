@@ -3,13 +3,17 @@
   walls:  sh ../run_e2e.sh script_walls.txt 90 FAKE_RAYCAP=12 FAKE_WALLS=1 [FAKE_TWOSIDED=1]   (barrier, 45-degree wall, building)
   deck2:  sh ../run_e2e.sh script_bridge.txt 130 FAKE_RAYCAP=12 FAKE_BRIDGE=2                  (up onto a 14 m deck, under a 22 m one)
   padcombo: sh ../run_e2e.sh script_padcombo.txt 80 FAKE_RAYCAP=12                           (RB + LB + D-pad down, also held across a switch)
-  extras: sh ../run_e2e.sh script_extras.txt 70 FAKE_RAYCAP=12                               (gravity x1.1, drive modes on the gauge)
-  props:  sh ../run_e2e.sh script_walls.txt 90 FAKE_RAYCAP=12 FAKE_PROPS=1                    (soft props on the road, a solid container)
+  extras: sh ../run_e2e.sh script_extras.txt 70 FAKE_RAYCAP=12                               (gravity x1.1 set in the ini (v2.51 default 1.0), drive modes on the gauge)
+  props:  sh ../run_e2e.sh script_props_fixed.txt 150 FAKE_RAYCAP=12 FAKE_PROPS=1             (v2.51, PropPhysics=0: a bin, a breakaway lamp post on the road, a traffic light arm over it, a container)
+  physprops: sh ../run_e2e.sh script_props.txt 150 FAKE_RAYCAP=12 FAKE_PROPS=1                (v2.52: the same as physics props)
   slowmo: sh ../run_e2e.sh script_slowmo.txt 90 FAKE_RAYCAP=12 FAKE_VMAX=15                              (GTA at 0.2 x speed for a while: radio wheel)
+  jump:   sh ../run_e2e.sh script_jump.txt 120 FAKE_RAYCAP=12 FAKE_VMAX=15 FAKE_JUMP=1 FAKE_SYNCUS=10       (v2.51: off a 10 m drop at 80 m)
+  pits:   sh ../run_e2e.sh script_walls.txt 90 FAKE_RAYCAP=12 FAKE_PITS=1                    (v2.55: narrow pits in the road filled)
+  crest:  sh ../run_e2e.sh script_walls.txt 90 FAKE_RAYCAP=12 FAKE_CREST=1                   (v2.54: a crest with a low joint: no wall)
   dents:  sh ../run_e2e.sh script_dents.txt 200 FAKE_DENT_AFTER=15 FAKE_REPAIR_FILE=do_repair.txt "FAKE_CAM=-4.5 5.5 3.5 -21.5 -140.7"
           (BeamNG's car bent at the front left corner, then repaired; screenshots before / after / repaired)
 Usage: python3 ../check_v25.py <mode>"""
-import math, os, re, sys
+import os, math, os, re, sys
 mode = sys.argv[1]
 fails = []
 def check(cond, what):
@@ -84,6 +88,34 @@ if mode == 'walls':
     sc = [int(x) for x in re.findall(r'walls \(v2.5\): (\d+) tiles scanned', log)]
     check(sum(sc) > 50, 'wall scans ran (%d tiles)' % sum(sc))
 
+if mode == 'crest':
+    # v2.54: over a 1.2 m crest with a 0.2 m joint across the road at its top: no wall box across the road there (2.53 made one
+    # where the rays ran just over the road: an invisible wall driving onto a bridge)
+    P = path()
+    smax = max((x * FX + y * FY) for st, x, y, z in P) if P else 0
+    check(smax > 73, 'the car got past the crest (s %.0f)' % smax)
+    across = [b for b in boxes if any(in_box(b, FX * s + RX * o, FY * s + RY * o, 0.3) for s in (69.0, 70.0, 71.0) for o in (-3.0, -1.5, 0.0, 1.5, 3.0))]
+    check(not across, 'no wall box across the road at the crest (%d: %s)' % (len(across), across[:2]))
+    low = sum(int(x) for x in re.findall(r'(\d+) faces met too low over their foot', log))
+    check(low > 0, 'v2.54: the joint was met and left out as too low (%d faces)' % low)
+
+if mode == 'pits':
+    # v2.55: 0.8 m deep holes, 0.6 m wide, in the road: lifted to the road around them (not holes in BeamNG's road)
+    lifted = sum(int(x) for x in re.findall(r'(\d+) points lifted out of narrow pits', log))
+    check(lifted > 20, 'v2.55: narrow pits filled (%d points)' % lifted)
+    lowered = sum(int(x) for x in re.findall(r'(\d+) lowered from narrow spikes', log))
+    check(lowered > 20, 'v2.55: narrow spikes (beams over the road) taken down (%d points)' % lowered)
+    P0 = path()
+    smax = max((x * FX + y * FY) for st, x, y, z in P0) if P0 else 0
+    check(smax > 60, 'BeamNG\'s car drove on past the beams (s %.0f)' % smax)
+    P = path()
+    # (v2.7: from when it first moves: the sandbox's speed moves the start; standing at the spawn height before isn't on the road yet)
+    mv = [l.strip().split(',') for l in open('fake_beam_path.csv')]
+    t0 = next((float(r[0]) for r in mv if len(r) > 5 and float(r[0]) >= 15 and float(r[5]) > 0.1), 0.0) + 1.0
+    P = [q for q in P if q[0] >= t0]
+    worst = max((abs(z - 200 - ground(x, y)) for st, x, y, z in P), default=99)
+    check(P and worst < 0.6, 'BeamNG\'s car stays on the road (worst %.2f m off)' % worst)
+
 if mode == 'deck2':
     P = path()
     on8, dev, bad, ymax = 0, 0.0, [], 0.0
@@ -138,27 +170,88 @@ if mode == 'props':
     check('9014' not in pushed and '9013' not in pushed, 'not the bin attached to something, not the can (%s)' % pushed)
     side = [p for p in pushed if int(p) < 9010]
     check(not side, 'the lamp posts beside the road were not touched (%s)' % side)
+    check('9015' not in pushed and 'model 0xA1110005' not in ''.join(l for l in log.splitlines() if 'hit a' in l or 'broke a' in l),
+          'v2.51: the traffic light whose arm is over the road: no hit when the car passes under its arm')
     bumps = re.findall(r'BUMP ([\d.]+) -> ([\d.]+) m/s', ev)
-    check(len(bumps) >= 2 and all(float(a) > float(b) for a, b in bumps), 'BeamNG\'s car lost a little speed at each hit (%s)' % bumps)
-    pb = re.findall(r'props: solid prop gtap_9012 is a box here \(([\d.]+) x ([\d.]+) x ([\d.]+) m\)', mlog)
-    check(len(pb) >= 1 and abs(float(pb[0][0]) - 6.0) < 0.1 and abs(float(pb[0][1]) - 2.4) < 0.1, 'the container is a solid box in BeamNG (%s)' % pb)
+    check(len(bumps) >= 1 and all(float(a) > float(b) for a, b in bumps), 'the bin (soft): BeamNG\'s car lost a little speed (%s)' % bumps)
+    # v2.51: the lamp post on the road is a breakaway box in BeamNG: the car hits it for real, loses speed, the box breaks, GTA knocks it over
+    check('PROPHIT gtap_9011' in ev, 'v2.51: BeamNG\'s car hit the lamp post\'s box (PROPHIT)')
+    br = re.findall(r'props: the car broke prop gtap_9011: it lost ([\d.]+) km/h against it \(breaks at ([\d.]+)\)', mlog)
+    check(br and float(br[0][0]) >= float(br[0][1]), 'v2.51: it broke after the car lost its break speed against it (%s)' % br)
+    check('BeamNG\'s car broke a breakaway prop (model 0xA1110001' in log, 'v2.51: GTA knocked it over when BeamNG said')
+    tm = re.findall(r'props: model 0xA1110005 .*?what a car hits at 0\.6 m: (\d+) part\(s\), the biggest ([\d.]+) x ([\d.]+) m', log)
+    check(tm and int(tm[0][0]) == 1 and float(tm[0][1]) < 0.8 and float(tm[0][2]) < 0.8, 'v2.51: the traffic light measured: only its pole at bumper height (%s)' % tm)
+    pbx = [l.split() for l in walls.splitlines() if l.startswith('PROPBOX gtap_9015')]
+    if pbx:
+        cx, cy = float(pbx[-1][2]), float(pbx[-1][3])
+        off = cx * RX + cy * RY
+        check(abs(off - 4.5) < 0.6, 'v2.51: its box in BeamNG is at the pole, 4.5 m right of the road (%.2f m)' % off)
+    pb = re.findall(r'props: solid prop gtap_9012 is 1 box\(es\) here \(the first ([\d.]+) x ([\d.]+) x ([\d.]+) m\)', mlog)
+    check(len(pb) >= 1 and abs(float(pb[0][0]) - 6.0) < 0.5 and abs(float(pb[0][1]) - 2.4) < 0.5, 'the container is a solid box in BeamNG (%s)' % pb)
     seen = rd('GtaBeamD1_props_seen.txt')
-    check('0xA1110003' in seen and 'solid' in seen and '0xA1110004' in seen and 'tiny' in seen, 'GtaBeamD1_props_seen.txt lists the models met and why')
-    check('props: BeamNG\'s car hit a soft prop' in log, 'the hits are in GtaBeamD1.log')
+    check('0xA1110003' in seen and 'solid' in seen and '0xA1110004' in seen and 'tiny' in seen and 'breakaway' in seen, 'GtaBeamD1_props_seen.txt lists the models met and why')
+    check('props: BeamNG\'s car hit a soft prop' in log, 'the soft hits are in GtaBeamD1.log')
+
+if mode == 'physprops':
+    # v2.52: physics props (the default): the lamp post on the road and the bin are BeamNG boxes that tip over; GTA's copy them
+    host = rd('host_out.txt')
+    check('props: BeamNG spawns physics props' in log, 'v2.52: BeamNG confirmed it spawns physics props')
+    sp = re.findall(r'PROPSPAWN gtab_prop_(\d+) anchored (\w+) ([\d.]+) x ([\d.]+) x ([\d.]+) m (\d+) kg', ev)
+    d = {a: (b, float(c), float(e), float(f), int(g)) for a, b, c, e, f, g in sp}
+    check('9011' in d and d['9011'][0].lower() == 'true' and d['9011'][3] > 3.0, 'v2.52: the lamp post on the road: a box tied to the ground, its trunk up to 6 m (%s)' % (d.get('9011'),))
+    check('9010' in d and d['9010'][0].lower() == 'false', 'v2.52: the bin: a loose box (%s)' % (d.get('9010'),))
+    check('9012' not in d and '9013' not in d and '9014' not in d, 'v2.52: not the container (solid), the can (tiny) or the attached bin (%s)' % sorted(d))
+    check('PHYSHIT gtab_prop_9011' in ev and 'PHYSHIT gtab_prop_9010' in ev, 'v2.52: BeamNG\'s car hit both boxes')
+    kn = re.findall(r"BeamNG's car knocked a (\w+) prop \(model 0x(\w+)", log)
+    check(('tied', 'A1110001') in kn and ('loose', 'A1110002') in kn, 'v2.52: GTA told they were knocked (%s)' % kn)
+    posed = re.findall(r'FAKE: prop (\d+) posed ([-\d.]+) ([-\d.]+) ([-\d.]+) \((\d+), frozen (\d)\)', host)
+    p11 = [p for p in posed if p[0] == '9011']
+    check(p11 and p11[-1][5] == '1', 'v2.52: GTA\'s lamp post copies the box, GTA\'s own physics off it (%s)' % (p11[-1:],))
+    if p11:
+        x, y = float(p11[-1][1]), float(p11[-1][2])
+        s_al, off = x * FX + y * FY, x * RX + y * RY
+        check(abs(off) < 1.5 and 80.4 < s_al < 82.5, 'v2.52: it went along the car\'s way (s %.2f, %.2f m off the line; it stood at s 80)' % (s_al, off))
+    up = re.findall(r'FAKE: prop 9011 turned: up ([-\d.]+) ([-\d.]+) ([-\d.]+)', host)
+    check(up and float(up[-1][2]) < 0.4, 'v2.52: and it is lying over in GTA (up %s)' % (up[-1:],))
+    check(not any(p[0] < '9010' for p in posed), 'v2.52: the lamp posts beside the road stay (%s)' % sorted(set(p[0] for p in posed)))
+    pushed = re.findall(r'FAKE: prop (\d+) pushed', host)
+    check('9010' not in pushed and '9011' not in pushed, 'v2.52: GTA\'s own push not used on them (%s)' % pushed)
+    check(re.search(r'props: solid prop gtap_9012 is 1 box', mlog) is not None, 'v2.52: the container is still a fixed solid box')
+
+if mode == 'jump':
+    P = path()
+    tps = log.count('put its car on GTA\'s ground (fell)')
+    check(tps == 0, 'v2.51: no reset after the drop (%d put back)' % tps)
+    nf = sum(int(x) for x in re.findall(r'(\d+) times under the ground it left while still over GTA', log))
+    check(nf > 0 or 'ground: landed after' in log, 'v2.51: under the ground it left, still over GTA\'s: not taken for a fall (%d), or the landing ground was there in time' % nf)
+    check('ground: the car is in the air' in log, 'v2.51: GTA saw the car in the air and where it lands')
+    smax = max((x * FX + y * FY) for st, x, y, z in P) if P else 0
+    check(smax > 125, 'the car drove on after the drop (s %.0f)' % smax)
+    low = [(st, x, y, z) for st, x, y, z in P if x * FX + y * FY > 110]
+    dev = max((abs(z - 200 - (ground(x, y) - 10.0)) for st, x, y, z in low), default=99)
+    check(low and dev < 0.6, 'BeamNG\'s car on the lower ground after landing (worst %.2f m off)' % dev)
 
 if mode == 'dents':
-    m = re.search(r'car dents \(v2\.5\): (\d+) nodes .*?; (\d+) vertices follow them', log)
+    m = re.search(r'car dents \(v2\.5\d*\): (\d+) nodes .*?; (\d+) vertices follow them', log)
     check(m and int(m.group(1)) == 48 and int(m.group(2)) > 0, 'the car file\'s nodes were read and the body follows them (%s)' % (m.group(0) if m else 'no line'))
     check('dents: on' in mlog and 'dents: the car\'s reference taken' in mlog, 'BeamNG mod: dents on, the car\'s reference taken')
     check('dents: in the car' not in mlog and 'nothing from the car' not in mlog, 'no errors in the car\'s Lua, no restarts')
     check('dents: the first ones from BeamNG' in log, 'GTA got the dents')
-    st = re.findall(r'dents: \d+ messages from BeamNG \((\d+) node moves, (\d+) unknown nodes, (\d+) bad, (\d+) for another car, \d+ lost\), (\d+) of 48 nodes moved now \(the most ([\d.]+) cm\), (\d+) turns fitted, \d+ updates, (\d+) copies', log)
+    st = re.findall(r'dents: \d+ messages from BeamNG \((\d+) node moves, (\d+) unknown nodes, (\d+) bad, (\d+) for another car, \d+ lost\), (\d+) of 48 nodes moved now \(the most ([\d.]+) cm\), \d+ updates, (\d+) copies', log)
     now = re.findall(r'dents: (?:now (\d+) of 48 nodes moved, the most ([\d.]+) cm|(none) now)', log)
-    check(any(a == '4' and abs(float(b) - 43.0) < 1.0 for a, b, c in now), 'GTA had the 4 bent nodes, the most 43 cm (as BeamNG\'s): %s' % now)
+    far = os.environ.get('FAKE_DENT_FAR') == '1'
+    if far:
+        check(any(a == '5' and float(b) > 1600.0 for a, b, c in now), 'v2.54: GTA had the 5 moved nodes, one 16 m away: %s' % now[-3:])
+    else:
+        check(any(a == '4' and abs(float(b) - 43.0) < 1.0 for a, b, c in now), 'GTA had the 4 bent nodes, the most 43 cm (as BeamNG\'s): %s' % now)
     check(now and now[-1][2] == 'none', 'after the repair: no node moved any more')
     check(all(int(x[1]) == 0 and int(x[2]) == 0 and int(x[3]) == 0 for x in st), 'no unknown nodes, bad entries or messages for another car')
-    check(any(int(x[6]) > 0 for x in st), 'turns fitted for the bent nodes (light on the bent panel)')
-    check(st and int(st[-1][7]) >= 3, 'node data copied to the video card (%s times)' % (st[-1][7] if st else 0))
+    check(st and int(st[-1][6]) >= 3, 'node data copied to the video card (%s times)' % (st[-1][6] if st else 0))
+    # v2.53: the body sits in triangles of its own flexbody's nodes; v2.54: the best-placed ones (inside them)
+    check(re.search(r'car dents \(v2\.55\): .*vertices follow them \(0 only move with one node; 0 carried rigidly \(props, far from their nodes\); \d+ at the same spot as another; outside their triangle 1\.00 on average, 1 = inside\); '
+                    r'parts: 1 on their own flexbody\'s nodes, 0 props on 3 nodes, 0 ride with the wheels \(drawn as they are\), 0 on all of the body', log) is not None,
+          'v2.54: the body on its flexbody\'s own nodes, every vertex inside its triangle')
+    check('renderer: input layout FAILED' not in log and 'dents vertex buffer FAILED' not in log, 'v2.53: the 20-byte dents vertex layout is accepted')
     try:
         from PIL import Image
         import numpy as np
@@ -168,6 +261,12 @@ if mode == 'dents':
             return int(d.sum())
         ba, br = changed('dent_before', 'dent_after'), changed('dent_before', 'dent_repaired')
         check(ba > 3000, 'the drawn car changed shape after the dent (%d pixels)' % ba)
+        if far:
+            # v2.54: the triangles stretched between the car and the far node are not drawn (2.53 drew a sheet across the left
+            # of the picture)
+            a = im['dent_after'][:, :380]
+            red = int(((a[:, :, 0] > 120) & (a[:, :, 0] > a[:, :, 1] + 60)).sum())
+            check(red < 300, 'v2.54: no stretched sheet to the far node (%d car-red pixels left of the car)' % red)
         check(br < ba / 4, 'repaired: drawn as before again (%d pixels differ, dent %d)' % (br, ba))
     except Exception as e:
         check(False, 'screenshots: %s' % e)

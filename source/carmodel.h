@@ -99,6 +99,7 @@ namespace car
 		int      mat = -1;
 		int      wheel = -1;            // index into Model::wheels, -1 = body
 		int      wheelMode = 0;         // 1 spins + steers, 2 steers only (brake caliper)
+		int      dg = -1;               // v2.6: index into Model::dgNames (glass, lights: hidden or frosted when BeamNG breaks them), -1 none
 	};
 
 	struct Wheel
@@ -151,11 +152,16 @@ namespace car
 		std::vector<int>                   nodeCid;    // BeamNG's node id (cid) of each node
 		std::vector<float>                 nodePos;    // x y z per node (car space, at export)
 		std::vector<uint8_t>               nodeWheel;  // 1 = one of a wheel's nodes (nothing follows it: wheels are drawn on their own)
-		std::vector<std::vector<uint16_t>> nodeNbr;    // nodes near each node (of its parts): its turn is fitted to them
-		std::vector<uint16_t>              skinIdx;    // 4 node indices per vertex
-		std::vector<uint8_t>               skinW;      // 4 weights per vertex (sum 255; all 0 = it stays as drawn)
+		// v2.53: per vertex its triangle of nodes (first, second, third, how: 0 stays as drawn, 1 in the triangle, 2 only
+		// moves with the first) and where it is in it (along first->second, first->third, the triangle's normal)
+		std::vector<uint16_t>              skinIdx;    // 4 per vertex
+		std::vector<float>                 skinC;      // 3 per vertex
 		int                                skinned = 0;  // vertices that follow nodes
 		std::string                        skinNote;     // for the log
+		// v2.6: BeamNG's deformGroups of the drawn parts (a flexbody's "deformGroup": glass, lights, mirrors) and per group whether its
+		// broken material is invisible (side windows: hidden when broken) or not (a windshield cracks: drawn frosted)
+		std::vector<std::string>           dgNames;
+		std::vector<uint8_t>               dgHide;
 	};
 
 	struct Options

@@ -1,5 +1,7 @@
 {
-  "about": "GTA x Beam v2.52: GTA's props near BeamNG's car. v2.52: the nearest breakaway and soft ones are physics props (weighted boxes BeamNG simulates, GTA's prop copies them; PropPhysics in the ini): 'mass' (kg) sets one's weight (not listed: by its size), 'break' how hard a post must be hit to snap. kind: 'soft' (bins, cones, boxes: GTA knocks it over and BeamNG's car loses a little speed, 'bump' m/s), 'breakaway' (posts, poles, signs, traffic lights, fences: a box in BeamNG your car really hits; it breaks when the car has lost 'break' m/s against it, then GTA knocks it over), 'solid' (a box that never breaks), 'ignore'. Not listed: breakable and tall or wide = breakaway, big or tall = solid, the rest soft. 'model' is the model name or its hash (0x...). GtaBeamD1_props_seen.txt lists the models your drives met. Ctrl+F11 re-reads this file.",
+  "about": "GTA x Beam v2.7: GTA's props near BeamNG's car. v2.7: a broken prop gives GTA's particle effect named by its 'fx' (sparks, water, none; not given: hydrants water, breakaway props sparks); fxSparks / fxWater = [asset, effect]. v2.52: the nearest breakaway and soft ones are physics props (weighted boxes BeamNG simulates, GTA's prop copies them; PropPhysics in the ini): 'mass' (kg) sets one's weight (not listed: by its size), 'break' how hard a post must be hit to snap. kind: 'soft' (bins, cones, boxes: GTA knocks it over and BeamNG's car loses a little speed, 'bump' m/s), 'breakaway' (posts, poles, signs, traffic lights, fences: a box in BeamNG your car really hits; it breaks when the car has lost 'break' m/s against it, then GTA knocks it over), 'solid' (a box that never breaks), 'ignore'. Not listed: breakable and tall or wide = breakaway, big or tall = solid, the rest soft. 'model' is the model name or its hash (0x...). GtaBeamD1_props_seen.txt lists the models your drives met. Ctrl+F11 re-reads this file.",
+  "fxSparks": ["core", "ent_brk_sparking_wires"],
+  "fxWater": ["core", "ent_sht_water"],
   "props": [
     { "model": "prop_container_01a", "kind": "solid" },
     { "model": "prop_container_05a", "kind": "solid" },
@@ -8,7 +10,7 @@
     { "model": "prop_streetlight_01", "kind": "breakaway", "break": 3.0 },
     { "model": "prop_streetlight_03", "kind": "breakaway", "break": 3.0 },
     { "model": "prop_traffic_01a", "kind": "breakaway", "break": 4.0 },
-    { "model": "prop_fire_hydrant_1", "kind": "breakaway", "break": 4.0 },
+    { "model": "prop_fire_hydrant_1", "kind": "breakaway", "break": 4.0, "fx": "water" },
     { "model": "prop_bin_01a", "kind": "soft", "bump": 0.6 },
     { "model": "prop_roadcone02a", "kind": "soft", "bump": 0.1 }
   ]

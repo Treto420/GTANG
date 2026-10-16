@@ -1,0 +1,9 @@
+5 pad 0,0,0,0,0,0,0
+40 key f11
+100 key f10
+101 waitfile fake_drive_on.txt
+110 shot foot_before.ppm
+111 waitfile fake_foot_done.txt
+120 shot foot_after.ppm
+125 key f10
+140 quit

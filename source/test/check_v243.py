@@ -4,7 +4,8 @@
   under:  sh ../run_e2e.sh script_bridge.txt 110 FAKE_RAYCAP=12 FAKE_BRIDGE=1 FAKE_STARTX=12 [KEEPMAP=1]  (past the ramp, under the deck)
   pause:  sh ../run_e2e.sh script_pause.txt 110 FAKE_RAYCAP=12 FAKE_USERPAUSE="50 56" FAKE_REPAIR_AT=62
   static: after any run: tiles stay in BeamNG behind the car
-Usage: python3 ../check_v243.py <on|under|pause|static> [keep]"""
+  v2.62:  under overpass (WorldUpM=7 in the ini), on joint (FAKE_JOINT=1)
+Usage: python3 ../check_v243.py <on|under|pause|static> [keep] [overpass] [joint]"""
 import math, os, re, sys
 mode = sys.argv[1]
 keep = len(sys.argv) > 2 and sys.argv[2] == 'keep'
@@ -68,6 +69,12 @@ if mode in ('on', 'under'):
             fd = sum(int(x) for x in re.findall(r'\+(\d+) from the saved map', log))
             check(fd > 50, 'v2.43: the road under the deck came from the saved map (%d tiles)' % fd)
     check(m is not None, 'walls counted in BeamNG (%s)' % walls[:90])
+    if 'overpass' in sys.argv:   # v2.62: WorldUpM=7: the rays met the 6 m overpass first
+        up = sum(int(x) for x in re.findall(r'(\d+) points under an overpass', log))
+        check(up > 100, 'v2.62: the road under the overpass, not its deck (%d points)' % up)
+    if 'joint' in sys.argv:      # v2.62: FAKE_JOINT=1: a 1.1 m gap across the deck
+        jn = sum(int(x) for x in re.findall(r'(\d+) points across gaps in a deck', log))
+        check(jn >= 10, 'v2.62: the gap across the deck joined (%d points)' % jn)
 if mode == 'static':
     rmd = sum(int(x) for x in re.findall(r'(\d+) far tiles taken out of BeamNG', log))
     st = re.findall(r'(\d+) tiles in BeamNG \((\d+) built', log)

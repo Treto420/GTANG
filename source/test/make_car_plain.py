@@ -50,6 +50,35 @@ def cyl(mat, c, r, w, seg=24):
 
 box('body', (0, 0, 0.75), (1.9, 4.6, 0.7))
 box('body', (0, -0.3, 1.33), (1.6, 1.8, 0.5))
+# v2.53 (locator_test.py): CAR_PARTS=1 adds a front bumper with its own 8 nodes (BeamNG: a flexbody whose group is the
+# bumper's), a trim piece no flexbody names (all of the body's nodes) and a mirror (a prop on 3 nodes)
+PARTS = os.environ.get('CAR_PARTS') == '1'
+if PARTS:
+    box('body_bumper', (0, 2.45, 0.55), (1.8, 0.2, 0.3))
+    box('body_trim', (0, -2.35, 0.9), (1.2, 0.1, 0.1))
+    box('body_mirror', (-1.0, 0.7, 1.05), (0.12, 0.06, 0.08))
+    box('body_strut', (0.8, 1.45, 0.8), (0.1, 0.1, 0.24))   # v2.54: a flexbody on the wheel's nodes only: drawn as it is
+    box('paintx_panel', (0.0, 0.0, 1.62), (0.4, 0.4, 0.02))   # v2.6: a palette map without the paint flag (your Z06)
+# v2.6 (weapons, locator_test.py): CAR_GLASS=1 adds the left side window and a headlight lens, each breaking with its BeamNG
+# deformGroup (the 2.6 mod's "dg": the window's broken material is invisible, the lamp's isn't)
+GLASS = os.environ.get('CAR_GLASS') == '1'
+if GLASS:
+    box('glass_sidewindow', (-0.81, -0.3, 1.33), (0.02, 1.2, 0.36))
+    box('glass_lamp', (-0.7, 2.31, 0.55), (0.4, 0.02, 0.15))   # v2.63: at the height of BeamNG's lamp beam (the shatter test)
+    box('glass_door', (0.81, -0.3, 1.33), (0.02, 1.2, 0.36))   # v2.61: broken material not invisible, gone by its name
+# v2.54 (load time): CAR_DENSE=N adds an N x N vertex sheet over the car on a 20 x 40 node grid of its own
+DENSE = int(os.environ.get('CAR_DENSE', '0') or 0)
+if DENSE:
+    vs, tr = [], []
+    for j in range(DENSE):
+        for i in range(DENSE):
+            x, y = -0.9 + 1.8 * i / (DENSE - 1), -2.2 + 4.4 * j / (DENSE - 1)
+            vs.append([x, y, 1.15 + 0.05 * math.sin(x * 3) * math.cos(y * 2)])
+    for j in range(DENSE - 1):
+        for i in range(DENSE - 1):
+            q = j * DENSE + i
+            tr += [q, q + 1, q + DENSE + 1, q, q + DENSE + 1, q + DENSE]
+    add('body_sheet', vs, [[0, 0, 1]] * len(vs), [(0, 0)] * len(vs), tr)
 WHEELS = ((0.8, 1.45, 'FR'), (-0.8, 1.45, 'FL'), (0.8, -1.4, 'RR'), (-0.8, -1.4, 'RL'))
 for x, y, name in WHEELS:
     cyl('tyre_' + name, (x, y, 0.33), 0.33, 0.26)
@@ -60,6 +89,10 @@ materials = [
         L(baseColorFactor=[1, 1, 1, 1], metallicFactor=1, roughnessFactor=1, clearCoatFactor=0, opacityFactor=1),
         L(baseColorFactor=[1, 1, 1, 1], instanceDiffuse=True, paletteConst='R', opacityFactor=1, metallicFactor=1, roughnessFactor=1, clearCoatFactor=1)])),
     ('tyre', dict(v=1.5, n=1, translucent='0', alphaTest='0', layers=[L(baseColorFactor=[0.05, 0.05, 0.05, 1], metallicFactor=0, roughnessFactor=0.9)])),
+    ('glass', dict(v=1.5, n=1, translucent='1', alphaTest='0', blendOp='PreMulAlpha', cubemap='', layers=[L(baseColorFactor=[0.1, 0.12, 0.14, 0.3], metallicFactor=0, roughnessFactor=0.05, opacityFactor=1)])),
+    ('paintx', dict(v=1.5, n=2, translucent='0', alphaTest='0', layers=[
+        L(baseColorFactor=[1, 1, 1, 1], metallicFactor=1, roughnessFactor=1, opacityFactor=1),
+        L(baseColorFactor=[1, 1, 1, 1], paletteConst='G', opacityFactor=1, metallicFactor=1, roughnessFactor=1, clearCoatFactor=1)])),
 ]
 bin_ = bytearray(); bufviews = []; accessors = []; meshes = []; nodes = []; gmats = []
 def view(data, target):
@@ -97,13 +130,33 @@ npos = []
 for x, y in WH_FAKE:
     npos += [(x - 0.1, y, 0.33), (x + 0.1, y, 0.33), (x, y + 0.2, 0.33)]
 npos += body_nodes()
-nodes_ex = dict(c=list(range(len(npos))), p=[round(v, 3) for q in npos for v in g(q)], g=['wheel'] * 12 + ['body'] * (len(npos) - 12),
-                w=[1] * 12 + [0] * (len(npos) - 12))
+nbody = len(npos)
+if DENSE:
+    npos += [(-0.95 + 1.9 * i / 19, -2.3 + 4.6 * j / 39, 1.2) for j in range(40) for i in range(20)]
+if PARTS:
+    npos += [(x, y, z) for x in (-0.9, 0.9) for y in (2.35, 2.55) for z in (0.4, 0.7)]
+nodes_ex = dict(c=list(range(len(npos))), p=[round(v, 3) for q in npos for v in g(q)], w=[1] * 12 + [0] * (len(npos) - 12))
+# v2.53: each flexbody mesh -> its own nodes (the 2.53 BeamNG mod's "flex"), props -> their 3 nodes
+flex = {'body': list(range(12, nbody))}
+if DENSE:
+    flex['body_sheet'] = list(range(len(npos) - 800, len(npos)))
+props = {}
+if PARTS:
+    flex['body_bumper'] = list(range(nbody, len(npos)))
+    flex['body_strut'] = [0, 1, 2]
+    props['body_mirror'] = [12 + 2, 12 + 3, 12 + 5]   # nodes at x=-0.95: (y -0.6, z 0.4), (y -0.6, z 1.1), (y 0, z 1.1)
+dg = {}
+if GLASS:
+    flex['glass_sidewindow'] = list(range(12, nbody))
+    flex['glass_lamp'] = list(range(12, nbody))
+    flex['glass_door'] = list(range(12, nbody))
+    dg = {'glass_sidewindow': ['sidewindow_L_break', 'invis'], 'glass_lamp': ['headlight_L_break', 'lights_dmg'], 'glass_door': ['doorglass_R_break', 'z06_glass_dmg']}
 NO_NODES = os.environ.get('CAR_NO_NODES') == '1'
 gl = dict(asset=dict(version='2.0'), scene=0, scenes=[dict(nodes=[len(nodes) - 1])], nodes=nodes, meshes=meshes, materials=gmats,
           accessors=accessors, bufferViews=bufviews,
           buffers=[dict(byteLength=len(bin_), uri='data:application/octet-stream;base64,' + base64.b64encode(bytes(bin_)).decode())],
           extras=dict(gtaBridge=dict(version='2.5', vehicle='testcar', paint=dict(color=[0.72, 0.16, 0.16, 1.2]), wheels=wheels, vehPos=[0, 0, 0],
-                                     **({} if NO_NODES else dict(nodes=nodes_ex, flex={'body': 'body'})))))
+                                     **({} if NO_NODES else dict(nodes=nodes_ex, flex=flex, **({'props': props} if props else {}))),
+                                     **({'dg': dg} if dg else {}))))
 json.dump(gl, open(out + '/car.gltf', 'w'))
 print('wrote', out + '/car.gltf', sum(len(p[3]) for p in parts.values()) // 3, 'triangles')

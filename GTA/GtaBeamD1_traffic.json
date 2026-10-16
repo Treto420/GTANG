@@ -1,0 +1,18 @@
+{
+  "about": "GTA x Beam v2.7 traffic: how GTA's cars and people and BeamNG's car push each other when they touch. Ctrl+F11 in game reads it again.",
+  "rangeM": 40,
+  "beamMassKg": 1500,
+  "classMassKg": [1300, 1400, 1700, 2100, 1600, 1400, 1400, 1500, 250, 2000, 9000, 3000, 2500, 90, 1500, 5000, 5000, 3000, 2200, 6000, 9000, 20000, 1000],
+  "bounce": 0.15,
+  "pushGta": 1.0,
+  "pushBeam": 1.0,
+  "dentPerMs": 0.006,
+  "dentMaxM": 0.12,
+  "gtaDamagePerMs": 25,
+  "pedKnockMs": 2.0,
+  "pedHurtPerMs": 6,
+  "pedThrow": 1.0,
+  "pedSlowMs": 0.4,
+  "riderKnockMs": 4.0,
+  "cooldownS": 0.5
+}

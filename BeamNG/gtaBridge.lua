@@ -52,6 +52,11 @@
 --         BeamNG your car really hits ("pb": breakaway ones break when the car has lost their "break" speed against them, GTA
 --         then knocks them over: "pbk"); reload_vehicle can be your repair where the car is; combinations you press are logged;
 --         flat ground cells whose edges don't meet their neighbours' points are built finely (no small steps: less bumping).
+--   v2.6: GTA's weapons and explosions on BeamNG's car: "hit" (a bullet's line through the drawn car: a dent where it meets the car,
+--         tyres pop, glass and lights break, engine and radiator damage, the engine catches fire after enough hits), "blast" (an
+--         explosion: the car pushed from where it went off, maybe set on fire, the glass near it broken); the car's fire, its
+--         explosion after burning a while, its broken glass / lights go back to GTA ("fx"). The export writes each mesh's
+--         deformGroup ("dg") so GTA hides / frosts the glass BeamNG broke (export the car again: Shift+F11).
 --
 -- Install: <BeamNG user folder>/mods/unpacked/gtabridge/lua/ge/extensions/gtaBridge.lua
 -- Console helpers (press ~):
@@ -72,7 +77,7 @@
 --   gtaBridge.soundSession(false) -- v2.4: switch the sound "session" mode off (the GTA plugin's BeamNGSoundWake=session sets it)
 
 local M = {}
-M.version = '2.53'
+M.version = '2.7'
 local logTag = 'gtaBridge'
 
 -- ---------------------------------------------------------------- config
@@ -254,6 +259,7 @@ local worldTiles = {}   -- v2.4: id -> GTA ground tile info (see "T3" below)
 local worldDriveEnded     -- v2.4: set in the T3 section (forward declarations)
 local buildTileMsg
 local dents = {}          -- v2.5 (D2): dents shown in GTA (filled in the T3 section)
+local wpn = {}            -- v2.6: GTA's weapons and explosions on BeamNG's car (filled after the dents)
 local function removeSurface(id)
   local obj = surfaces[id]
   if obj then
@@ -1105,8 +1111,15 @@ local function onExported(root)
     root.extras = root.extras or {}
     local vp
     pcall(function() local p = exportJob.veh:getPosition(); vp = { p.x, p.z, -p.y } end)
+    -- v2.6: which mesh breaks with which deformGroup (glass, lights): GTA hides / frosts it when BeamNG breaks it
+    pcall(function()
+      local vd = core_vehicle_manager.getPlayerVehicleData()
+      local dg, ndg = wpn.exportDg(vd and vd.vdata or {})
+      info.dg = dg
+      logI('export: ' .. tostring(ndg) .. ' meshes with a deformGroup (glass, lights: hidden in GTA when BeamNG breaks them)')
+    end)
     root.extras.gtaBridge = { version = M.version, paint = exportJob.paint, vehicle = exportJob.vehicle,
-                              wheels = info.wheels, vehPos = vp, nodes = info.nodes, flex = info.flex, props = info.props }
+                              wheels = info.wheels, vehPos = vp, nodes = info.nodes, flex = info.flex, props = info.props, dg = info.dg }
     local s = jsonEncode(root)
     local wr = writeFile(exportCfg.vpath, s)
     if wr == false then error('writeFile failed for ' .. exportCfg.vpath) end
@@ -1937,6 +1950,30 @@ local function driveWheels(veh)
             end
           end
         end
+        -- v2.63: the wheel's own nodes (tyre, rim) on each side of its hub, while it is on: when it comes off the car in a
+        -- crash (they leave its hub nodes behind) GTA draws it where they are (drivePose)
+        local src = type(w.nodes) == 'table' and w.nodes or w.treadNodes
+        if type(src) == 'table' then
+          local ra, rb = {}, {}
+          for k, nn in pairs(src) do
+            local cid = cidOf(nn)
+            if not cid and type(k) == 'number' and type(nn) ~= 'table' then cid = k end
+            if cid and cid ~= a and cid ~= b and #ra + #rb < 48 then
+              local q = nodePos(cid)
+              if q then
+                local sd = dot(sub(q, c), ax)
+                if sd < -0.01 then ra[#ra + 1] = cid elseif sd > 0.01 then rb[#rb + 1] = cid end
+              end
+            end
+          end
+          if #ra >= 3 and #rb >= 3 then
+            local function mean(t) local m = { 0, 0, 0 }; for _, cid in ipairs(t) do local q = nodePos(cid) or c; for i = 1, 3 do m[i] = m[i] + q[i] / #t end end; return m end
+            local ca, cb = mean(ra), mean(rb)
+            local mid = { (ca[1] + cb[1]) * 0.5, (ca[2] + cb[2]) * 0.5, (ca[3] + cb[3]) * 0.5 }
+            local dm = sub(mid, c)
+            e.ring = { a = ra, b = rb, oa = dot(dm, ax), d0 = math.sqrt(dot(dm, dm)) }
+          end
+        end
         list[#list + 1] = e
       end
     end
@@ -1974,6 +2011,26 @@ local function drivePose(veh, dt)
     local c = { (p1[1] + p2[1]) * 0.5, (p1[2] + p2[2]) * 0.5, (p1[3] + p2[3]) * 0.5 }
     local ax = norm(sub(p2, p1))
     if dot(ax, r) < 0 then ax = { -ax[1], -ax[2], -ax[3] } end
+    -- v2.63: the wheel off its hub (a crash broke it off; your 2.62 test: the drawn wheels stayed on the car): drawn where its
+    -- own nodes are
+    local rg = w.ring
+    if rg then
+      local ca, cb = { 0, 0, 0 }, { 0, 0, 0 }
+      for _, cid in ipairs(rg.a) do local q = v3(veh:getNodePosition(cid)); for i = 1, 3 do ca[i] = ca[i] + q[i] / #rg.a end end
+      for _, cid in ipairs(rg.b) do local q = v3(veh:getNodePosition(cid)); for i = 1, 3 do cb[i] = cb[i] + q[i] / #rg.b end end
+      local rax = norm(sub(cb, ca))
+      local mid = { (ca[1] + cb[1]) * 0.5, (ca[2] + cb[2]) * 0.5, (ca[3] + cb[3]) * 0.5 }
+      local dm = sub(mid, c)
+      local off = math.abs(math.sqrt(dot(dm, dm)) - rg.d0) > 0.25 or dot(rax, ax) < 0.85
+      if off then
+        c = { mid[1] - rax[1] * rg.oa, mid[2] - rax[2] * rg.oa, mid[3] - rax[3] * rg.oa }
+        ax = rax
+      end
+      if off ~= (w.off or false) then
+        w.off = off
+        logI(string.format('drive: BeamNG\'s %s wheel %s', tostring(w.name), off and 'came off its hub: GTA draws it where it is' or 'is on its hub again'))
+      end
+    end
     local ang = 0
     if w.s then
       local q = sub(v3(veh:getNodePosition(w.s)), c)
@@ -2889,6 +2946,12 @@ local function driveInput(str)
   d.keys = keys
   d.padMode = tonumber(str:match('"m":(%d)')) or 0
   d.paused = str:match('"p":1') ~= nil   -- GTA paused: let go of everything, brake / parking brake
+  local out = str:match('"out":1') ~= nil   -- v2.61: you got out of the car in GTA (drive mode stays): parked the same way
+  if out ~= (d.out or false) then
+    d.out = out
+    logI(out and 'drive: you got out in GTA: the car parks (brake, then parking brake) and waits; bullets and explosions still reach it'
+      or 'drive: you are back in the car in GTA')
+  end
   pz.gtaPaused(d, str:match('"gp":1') ~= nil, 'GTA is paused')   -- v2.43: and BeamNG pauses
   d.msgs = d.msgs + 1
   -- for the "did the throttle arrive" check: the throttle we're asking for, by either path
@@ -3062,6 +3125,7 @@ handlers.drive_start = function(m)
   if not okS then logE('settings: ' .. tostring(woke)) elseif woke then drive.okMsg.sw = 1 end
   pcall(grav.on, m.grav)   -- v2.5
   pcall(dents.start, drive, m.dz)   -- v2.5 (D2)
+  do local okW, errW = pcall(wpn.start, drive, m) if not okW then logE('weapons: ' .. tostring(errW)) end end   -- v2.6
   driveActive = true
   send(drive.okMsg)
   logI(string.format('drive: GTA drives %s now: %d wheels (%s), wheel turn from %s; wheel data keys: %s', tostring(vehicle), #wl,
@@ -4117,8 +4181,20 @@ world.feel.tick = function(dtSim)
   local sp = math.sqrt(v[1] * v[1] + v[2] * v[2])
   if F.vz and sp > 14 then
     F.km = F.km + sp * dtSim / 1000
-    local jolt = math.abs((v[3] - F.vz) / dtSim) > 14.7
-    if jolt and not F.inJolt then F.n = F.n + 1 end
+    local a = math.abs((v[3] - F.vz) / dtSim)
+    local jolt = a > 14.7
+    if jolt and not F.inJolt then
+      F.n = F.n + 1
+      -- v2.61: where (GTA's coordinates), for your "bouncy on some flat roads": the 5 hardest of each 10 s
+      local car = d.veh or getPlayerVeh()
+      local cp = car and car:getPosition()
+      if cp then
+        F.at = F.at or {}
+        F.at[#F.at + 1] = { a / 9.81, cp.x + world.ox, cp.y + world.oy, sp * 3.6 }
+        table.sort(F.at, function(x, y) return x[1] > y[1] end)
+        if #F.at > 5 then F.at[6] = nil end
+      end
+    end
     F.inJolt = jolt
   end
   F.vz = v[3]
@@ -4477,6 +4553,624 @@ function M.dentsInfo(id, nn, tracked, kind, note)
   end
 end
 
+-- ---------------------------------------------------------------- v2.6: GTA's weapons and explosions on BeamNG's car
+-- GTA sends the bullets that went through its drawn car ("hit": a ray, from 1 m before the car's box, and what the weapon does)
+-- and the explosions near it ("blast": where, how hard). In the car's own Lua (gtabWpn, put in when the drive starts):
+--   a bullet finds the first of the car's collision triangles on its line (else the node nearest it) and there: a dent (a short
+--   push from just outside it: BeamNG's "planets", negative mass pushes), a tyre popped (beamstate.deflateTire), glass / lights
+--   broken (beamstate.triggerDeformGroup), engine and radiator damage (the engine's own applyDeformGroupDamage), the engine on fire
+--   after enough engine hits (fire.igniteNode);
+--   a blast pushes the whole car from where it went off (a planet for dt seconds), can set it on fire, breaks the glass near it;
+--   every 0.25 s: the glass / lights BeamNG broke (beamstate.deformGroupsTriggerBeam) and its fire (fire.hotNodes) go to GTA, and
+--   after burning wb seconds (or when its fuel goes up in a fireball) it blows up: its own blast, BeamNG's explodeVehicle too when
+--   GTA's ini says CarExplosion=beamng, and GTA's explosion at it ("boom").
+-- All names read from BeamNG 0.39's own Lua (lua/vehicle: beamstate, fire, powertrain, combustionEngine). UNVERIFIED in game: how
+-- strong a planet pushes (logged: the car's speed change after each blast), the flexbodies' deformGroup field (the export also
+-- reads the beams' deformSwitches, BeamNG's own list of which mesh breaks with which group).
+wpn.VEH = [==[
+gtabWpn = gtabWpn or { errs = {} }
+local W = gtabWpn
+local G = 6.674e-11
+local sqrt, abs = math.sqrt, math.abs
+local function js(s) return (tostring(s):gsub('[%c"\\]', ' ')) end
+local function report(s) obj:queueGameEngineLua(string.format('if gtaBridge and gtaBridge.wfx then gtaBridge.wfx(%d, %q) end', obj:getID(), s)) end
+local function cidOf(x) if type(x) == 'number' then return x end if type(x) == 'table' and type(x.cid) == 'number' then return x.cid end return nil end
+local function nodeCid(i) local n = v.data.nodes[i] return (type(n) == 'table' and n.cid) or i end
+local P = {}
+local function pos(c) local p = P[c] if not p then local q = obj:getNodePosition(c) p = { q.x, q.y, q.z } P[c] = p end return p end
+-- the car's triangles, glass / light beams, wheels, engine block and radiator nodes (read again when the car is new)
+function W.init()
+  W.tris, W.glass, W.wheels, W.engine, W.rad, W.devs, W.nb = {}, {}, {}, {}, {}, {}, {}
+  for _, t in pairs(v.data.triangles or {}) do
+    if type(t) == 'table' and type(t.id1) == 'number' and type(t.id2) == 'number' and type(t.id3) == 'number' then
+      W.tris[#W.tris + 1] = { nodeCid(t.id1), nodeCid(t.id2), nodeCid(t.id3) }
+    end
+  end
+  local radGroups = {}
+  pcall(function()
+    for _, dev in pairs(powertrain.getDevicesByCategory('engine') or {}) do
+      W.devs[#W.devs + 1] = dev
+      for _, c in pairs(dev.engineBlockNodes or {}) do W.engine[#W.engine + 1] = cidOf(c) or c end
+      for _, dg in ipairs(dev.deformGroups or {}) do
+        if dg.groupType == 'radiator' then for _, n in ipairs(dg.groupNames or {}) do radGroups[n] = true end end
+      end
+    end
+  end)
+  if not next(radGroups) then radGroups.radiator_damage = true end
+  for _, b in pairs(v.data.beams or {}) do
+    if type(b) == 'table' and b.id1 and b.id2 then
+      if type(b.deformSwitches) == 'table' then
+        local gs = {}
+        for _, g in pairs(b.deformSwitches) do if type(g) == 'table' and g.deformGroup then gs[#gs + 1] = g.deformGroup end end
+        if #gs > 0 then W.glass[#W.glass + 1] = { nodeCid(b.id1), nodeCid(b.id2), gs } end
+      end
+      local g, r = b.deformGroup, false
+      if type(g) == 'string' then r = radGroups[g] elseif type(g) == 'table' then for _, x in ipairs(g) do r = r or radGroups[x] end end
+      if r then W.rad[#W.rad + 1] = { nodeCid(b.id1), nodeCid(b.id2) } end
+      -- v2.61: plain beams by node (a dent changes their rest lengths)
+      if type(b.cid) == 'number' and (tonumber(b.beamType) or 0) == 0 then
+        local a, c = nodeCid(b.id1), nodeCid(b.id2)
+        W.nb[a] = W.nb[a] or {}; W.nb[a][#W.nb[a] + 1] = { b.cid, c }
+        W.nb[c] = W.nb[c] or {}; W.nb[c][#W.nb[c] + 1] = { b.cid, a }
+      end
+    end
+  end
+  for id, w in pairs(v.data.wheels or {}) do
+    if type(w) == 'table' then
+      local a, b = cidOf(w.node1), cidOf(w.node2)
+      if a and b then W.wheels[#W.wheels + 1] = { id = id, a = a, b = b, r = tonumber(w.radius) or 0.35, wd = tonumber(w.tireWidth) or 0.25, name = tostring(w.name or id) } end
+    end
+  end
+  local nf = 0
+  for _ in pairs(fire.flammableNodes or {}) do nf = nf + 1 end
+  W.burnT, W.engHits = W.burnT or 0, W.engHits or 0
+  report(string.format('{"k":"info","s":"the car: %d collision triangles, %d glass/light beams, %d wheels, %d engine block nodes, %d radiator beams, %d flammable nodes%s"}',
+    #W.tris, #W.glass, #W.wheels, #W.engine, #W.rad, nf, nf == 0 and ' (no fire nodes: this car cannot burn)' or ''))
+  local dmg = 1e9
+  pcall(function() dmg = beamstate.damage end)
+  if dmg < 1 then report('{"k":"repaired"}') end   -- v2.62: (an undamaged car: no bullet holes on it in GTA)
+end
+local function segDist2(x, y, z, a, b)
+  local ux, uy, uz = b[1] - a[1], b[2] - a[2], b[3] - a[3]
+  local l2 = ux * ux + uy * uy + uz * uz
+  local t = l2 > 1e-12 and math.max(0, math.min(1, ((x - a[1]) * ux + (y - a[2]) * uy + (z - a[3]) * uz) / l2)) or 0
+  local dx, dy, dz = x - a[1] - ux * t, y - a[2] - uy * t, z - a[3] - uz * t
+  return dx * dx + dy * dy + dz * dz
+end
+-- (a bullet goes on through the skin: anything of the list within r of its next len metres)
+local function nearRay(list, x, y, z, dx, dy, dz, len, r)
+  local b = { x + dx * len, y + dy * len, z + dz * len }
+  for i = 1, #list do
+    local p = pos(list[i])
+    if segDist2(p[1], p[2], p[3], { x, y, z }, b) < r * r then return true end
+  end
+  return false
+end
+local function igniteNear(x, y, z, r)
+  local bd, bc = r * r, nil
+  for c in pairs(fire.flammableNodes or {}) do
+    local p = pos(c)
+    local d2 = (p[1] - x) ^ 2 + (p[2] - y) ^ 2 + (p[3] - z) ^ 2
+    if d2 < bd then bd, bc = d2, c end
+  end
+  if bc then fire.igniteNode(bc) end
+  return bc
+end
+local function breakGlass(x, y, z, r, chance)
+  local set, out = {}, {}
+  for _, gb in ipairs(W.glass) do
+    if segDist2(x, y, z, pos(gb[1]), pos(gb[2])) < r * r then
+      for _, g in ipairs(gb[3]) do if not beamstate.deformGroupsTriggerBeam[g] then set[g] = true end end
+    end
+  end
+  for g in pairs(set) do
+    if math.random() < chance then beamstate.triggerDeformGroup(g); out[#out + 1] = js(g) end
+  end
+  return out
+end
+-- v2.61: the car's frame (right, forward, up) and a vector in it
+local function frame()
+  local f, u = obj:getDirectionVector(), obj:getDirectionVectorUp()
+  return { f.y * u.z - f.z * u.y, f.z * u.x - f.x * u.z, f.x * u.y - f.y * u.x }, { f.x, f.y, f.z }, { u.x, u.y, u.z }
+end
+local function toCar(p, R, F, U)
+  return { p[1] * R[1] + p[2] * R[2] + p[3] * R[3], p[1] * F[1] + p[2] * F[2] + p[3] * F[3], p[1] * U[1] + p[2] * U[2] + p[3] * U[3] }
+end
+local function nearWheel(p)
+  for _, wh in ipairs(W.wheels) do
+    local a, b = pos(wh.a), pos(wh.b)
+    if (p[1] - (a[1] + b[1]) * 0.5) ^ 2 + (p[2] - (a[2] + b[2]) * 0.5) ^ 2 + (p[3] - (a[3] + b[3]) * 0.5) ^ 2 < (wh.r + 0.08) ^ 2 then return true end
+  end
+  return false
+end
+-- v2.61: a bullet's dent, want metres deep along the bullet. First the way BeamNG restores a saved car's damage: the beams around
+-- the hit get the rest lengths of the dented shape (nothing pushes the car). If that hasn't shown after 3 frames: pushes right at
+-- the 3 nearest nodes (a planet 3 cm outside each, one frame), twice as hard each time, until it's that deep (W.step)
+function W.dentAt(hx, hy, hz, dx, dy, dz, want)
+  local rad = 0.22
+  local near = {}
+  for c, n in pairs(v.data.nodes) do
+    local cid = type(n) == 'table' and n.cid or c
+    local p = pos(cid)
+    local d = sqrt((p[1] - hx) ^ 2 + (p[2] - hy) ^ 2 + (p[3] - hz) ^ 2)
+    if d < rad and not nearWheel(p) then near[#near + 1] = { cid, d } end
+  end
+  if #near == 0 then return end
+  table.sort(near, function(a, b) return a[2] < b[2] end)
+  local R, F, U = frame()
+  local j = { want = want, dir = toCar({ dx, dy, dz }, R, F, U), nodes = {}, ref = {}, w = {}, k = 0, n = 0, a = 3000, how = 'rest lengths', beams = 0 }
+  local moved = {}
+  local w0 = 1 - near[1][2] / rad
+  for i = 1, math.min(8, #near) do
+    local c = near[i][1]
+    local w = ((1 - near[i][2] / rad) / w0) ^ 1.5
+    moved[c] = want * w
+    j.nodes[i], j.ref[i], j.w[i] = c, toCar(pos(c), R, F, U), w
+  end
+  local ok = pcall(function()
+    local seen = {}
+    for c, m in pairs(moved) do
+      for _, e in ipairs(W.nb[c] or {}) do
+        local bc, o = e[1], e[2]
+        if not seen[bc] then
+          seen[bc] = true
+          local pa, pb, mb = pos(c), pos(o), moved[o] or 0
+          local l0 = sqrt((pa[1] - pb[1]) ^ 2 + (pa[2] - pb[2]) ^ 2 + (pa[3] - pb[3]) ^ 2)
+          local l1 = sqrt((pa[1] + dx * m - pb[1] - dx * mb) ^ 2 + (pa[2] + dy * m - pb[2] - dy * mb) ^ 2 + (pa[3] + dz * m - pb[3] - dz * mb) ^ 2)
+          local rl = obj:getBeamRestLength(bc)
+          if rl and rl > 0.005 and l0 > 0.005 then
+            obj:setBeamLength(bc, rl + l1 - l0)
+            j.beams = j.beams + 1
+          end
+        end
+      end
+    end
+  end)
+  if not ok or j.beams == 0 then j.how = 'pushes' end
+  W.jobs = W.jobs or {}
+  W.jobs[#W.jobs + 1] = j
+end
+-- v2.61: every frame for a second after a hit (GE): the dents measured, pushed in further where needed
+function W.step()
+  if not W.jobs or #W.jobs == 0 then return end
+  P = {}
+  local R, F, U = frame()
+  local o = obj:getPosition()
+  local keep = {}
+  for _, j in ipairs(W.jobs) do
+    j.k = j.k + 1
+    local q = toCar(pos(j.nodes[1]), R, F, U)
+    local depth = (q[1] - j.ref[1][1]) * j.dir[1] + (q[2] - j.ref[1][2]) * j.dir[2] + (q[3] - j.ref[1][3]) * j.dir[3]
+    local fin = false
+    if j.how == 'rest lengths' then
+      if j.k >= 3 then
+        if depth >= 0.4 * j.want then fin = true else j.how, j.k, j.restDepth = 'pushes', 0, depth end
+      end
+    elseif j.k % 2 == 1 then
+      if depth >= j.want or j.n >= 7 then
+        fin = true
+      else
+        local dw = { j.dir[1] * R[1] + j.dir[2] * F[1] + j.dir[3] * U[1], j.dir[1] * R[2] + j.dir[2] * F[2] + j.dir[3] * U[2], j.dir[1] * R[3] + j.dir[2] * F[3] + j.dir[3] * U[3] }
+        for i = 1, math.min(3, #j.nodes) do
+          local p, s = pos(j.nodes[i]), 0.03
+          beamstate.addPlanet(vec3(o.x + p[1] - dw[1] * s, o.y + p[2] - dw[2] * s, o.z + p[3] - dw[3] * s), 0.01, -(j.a * j.w[i] * s * s) / G, 0.001)
+        end
+        j.a, j.n = math.min(j.a * 2, 4e5), j.n + 1
+      end
+    end
+    if fin then
+      report(string.format('{"k":"dent","s":"a bullet dent %.1f cm deep (wanted %.1f) by %s (%d beams set%s)"}', depth * 100, j.want * 100,
+        j.how == 'pushes' and string.format('%d pushes, the last %.0f m/s2', j.n, j.a / 2) or 'rest lengths', j.beams,
+        j.restDepth and string.format('; rest lengths alone %.1f cm', j.restDepth * 100) or ''))
+    else
+      keep[#keep + 1] = j
+    end
+  end
+  W.jobs = keep
+end
+-- one bullet: from (px, py, pz) (world) along (dx, dy, dz)
+function W.hit(px, py, pz, dx, dy, dz, dv, ti, gl, en, ra, ef, wname)
+  if not W.tris then W.init() end
+  P = {}
+  local o = obj:getPosition()
+  local ox, oy, oz = px - o.x, py - o.y, pz - o.z
+  local best, bt = 8, nil
+  for i = 1, #W.tris do
+    local t = W.tris[i]
+    local A, B, C = pos(t[1]), pos(t[2]), pos(t[3])
+    local ax, ay, az = A[1] - ox, A[2] - oy, A[3] - oz
+    -- (quick: the ray passes within the triangle's own size of its middle)
+    local mx, my, mz = (A[1] + B[1] + C[1]) / 3 - ox, (A[2] + B[2] + C[2]) / 3 - oy, (A[3] + B[3] + C[3]) / 3 - oz
+    local r2 = math.max((A[1] - B[1]) ^ 2 + (A[2] - B[2]) ^ 2 + (A[3] - B[3]) ^ 2, (A[1] - C[1]) ^ 2 + (A[2] - C[2]) ^ 2 + (A[3] - C[3]) ^ 2,
+      (B[1] - C[1]) ^ 2 + (B[2] - C[2]) ^ 2 + (B[3] - C[3]) ^ 2)
+    local ml = mx * dx + my * dy + mz * dz
+    if ml > -1 and ml < best + 1 + math.sqrt(r2) then
+      local qx, qy, qz = mx - dx * ml, my - dy * ml, mz - dz * ml
+      if qx * qx + qy * qy + qz * qz <= r2 then
+        local e1x, e1y, e1z = B[1] - A[1], B[2] - A[2], B[3] - A[3]
+        local e2x, e2y, e2z = C[1] - A[1], C[2] - A[2], C[3] - A[3]
+        local hx, hy, hz = dy * e2z - dz * e2y, dz * e2x - dx * e2z, dx * e2y - dy * e2x
+        local a = e1x * hx + e1y * hy + e1z * hz
+        if abs(a) > 1e-12 then
+          local f = 1 / a
+          local sx, sy, sz = -ax, -ay, -az
+          local u = f * (sx * hx + sy * hy + sz * hz)
+          if u >= 0 and u <= 1 then
+            local rx, ry, rz = sy * e1z - sz * e1y, sz * e1x - sx * e1z, sx * e1y - sy * e1x
+            local w = f * (dx * rx + dy * ry + dz * rz)
+            if w >= 0 and u + w <= 1 then
+              local tt = f * (e2x * rx + e2y * ry + e2z * rz)
+              if tt > 0 and tt < best then best, bt = tt, i end
+            end
+          end
+        end
+      end
+    end
+  end
+  local how, hx, hy, hz = 'on a collision triangle', nil, nil, nil
+  if bt then
+    hx, hy, hz = ox + dx * best, oy + dy * best, oz + dz * best
+  else
+    -- (no triangle on its line: the first node it passes within 0.3 m of)
+    local bd, bc = 1e9, nil
+    for c, n in pairs(v.data.nodes) do
+      local cid = type(n) == 'table' and n.cid or c
+      local p = pos(cid)
+      local qx, qy, qz = p[1] - ox, p[2] - oy, p[3] - oz
+      local al = qx * dx + qy * dy + qz * dz
+      if al > 0 and al < 8 then
+        local d2 = (qx - dx * al) ^ 2 + (qy - dy * al) ^ 2 + (qz - dz * al) ^ 2
+        if d2 < 0.09 and al < bd then bd, bc = al, cid end
+      end
+    end
+    if not bc then report('{"k":"hit","how":"missed: nothing of the car on its line"}') return end
+    -- (where the line passes it)
+    local p = pos(bc)
+    local al = (p[1] - ox) * dx + (p[2] - oy) * dy + (p[3] - oz) * dz
+    hx, hy, hz, how = ox + dx * al, oy + dy * al, oz + dz * al, 'next to node ' .. bc
+  end
+  -- the dent: dv cm deep (v2.61; 2.6 pushed at m/s: about 1 mm on your Z06)
+  if dv > 0 then W.dentAt(hx, hy, hz, dx, dy, dz, math.min(dv, 10) / 100) end
+  local tire = ''
+  for _, wh in ipairs(W.wheels) do
+    local a, b = pos(wh.a), pos(wh.b)
+    local ux, uy, uz = b[1] - a[1], b[2] - a[2], b[3] - a[3]
+    local l = sqrt(ux * ux + uy * uy + uz * uz)
+    if l > 1e-4 then
+      ux, uy, uz = ux / l, uy / l, uz / l
+      local cx, cy, cz = hx - (a[1] + b[1]) * 0.5, hy - (a[2] + b[2]) * 0.5, hz - (a[3] + b[3]) * 0.5
+      local al = cx * ux + cy * uy + cz * uz
+      local rr = sqrt((cx - ux * al) ^ 2 + (cy - uy * al) ^ 2 + (cz - uz * al) ^ 2)
+      local ww = wheels.wheels and wheels.wheels[wh.id]
+      if abs(al) <= wh.wd * 0.5 + 0.1 and rr <= wh.r + 0.06 and rr >= wh.r * 0.5 and ww and not ww.isTireDeflated and math.random() < ti then
+        beamstate.deflateTire(wh.id)
+        tire = js(wh.name)
+      end
+    end
+  end
+  local glass = gl > 0 and breakGlass(hx, hy, hz, 0.3, gl) or {}
+  local eng, rad = 0, 0
+  if en > 0 and #W.engine > 0 and nearRay(W.engine, hx, hy, hz, dx, dy, dz, 1.0, 0.4) then
+    eng = 1
+    W.engHits = (W.engHits or 0) + 1
+    for _, dev in ipairs(W.devs) do pcall(function() dev:applyDeformGroupDamage(en, 'main') end) end
+    if ef > 0 and W.engHits >= ef and not W.engFire then
+      local p = pos(W.engine[1])
+      local c = igniteNear(p[1], p[2], p[3], 2.0)
+      W.engFire = true
+      report(string.format('{"k":"ignite","s":"the engine caught fire after %d engine hits (node %s)"}', W.engHits, tostring(c)))
+    end
+  end
+  local hitRad = false
+  for k = 0, 6 do   -- (the radiator's beams within 0.25 m of its next 0.6 m)
+    local x, y, z = hx + dx * k * 0.1, hy + dy * k * 0.1, hz + dz * k * 0.1
+    for _, rb in ipairs(ra > 0 and W.rad or {}) do
+      if not hitRad and segDist2(x, y, z, pos(rb[1]), pos(rb[2])) < 0.0625 then hitRad = true end
+    end
+  end
+  if hitRad then
+    rad = 1
+    for _, dev in ipairs(W.devs) do pcall(function() dev:applyDeformGroupDamage(ra, 'radiator') end) end
+  end
+  -- v2.62: where it hit, in the car's frame (right, forward, up from its reference node): GTA draws a bullet hole there
+  local R, F, U = frame()
+  local hc = toCar({ hx, hy, hz }, R, F, U)
+  local hd = toCar({ dx, dy, dz }, R, F, U)  -- v2.7: the bullet's direction (GTA draws the hole where its line meets the panel)
+  report(string.format('{"k":"hit","how":"%s","w":"%s","tire":"%s","glass":"%s","en":%d,"ra":%d,"c":[%.3f,%.3f,%.3f],"dd":[%.4f,%.4f,%.4f]}', how, js(wname), tire, table.concat(glass, ' '), eng, rad,
+    hc[1], hc[2], hc[3], hd[1], hd[2], hd[3]))
+end
+-- v2.7: a car that blew up looks like GTA's wrecks (your 2.63 test 1: whole and out of place among GTA's): some doors, the
+-- hood, the trunk and the bumpers come off (their break groups), every tyre bursts and the body takes deep dents
+function W.wreck()
+  local groups, gl = {}, {}
+  for _, b in pairs(v.data.beams or {}) do
+    if type(b) == 'table' and type(b.cid) == 'number' then
+      local g = b.breakGroup
+      local list = type(g) == 'table' and g or { g }
+      for _, x in ipairs(list) do
+        if type(x) == 'string' and x ~= '' then
+          if not groups[x] then groups[x] = {}; gl[#gl + 1] = x end
+          groups[x][#groups[x] + 1] = b.cid
+        end
+      end
+    end
+  end
+  table.sort(gl)
+  local off, how = {}, 'none worked'
+  for _, g in ipairs(gl) do
+    local l = g:lower()
+    local p = 0
+    if l:find('door') then p = 0.5
+    elseif l:find('hood') or l:find('bonnet') then p = 0.75
+    elseif l:find('trunk') or l:find('tailgate') or l:find('boot') or l:find('hatch') then p = 0.6
+    elseif l:find('bumper') then p = 0.6 end
+    if p > 0 and math.random() < p then
+      if pcall(function() beamstate.breakBreakGroup(g) end) then
+        how = 'beamstate.breakBreakGroup'
+        off[#off + 1] = js(g)
+      else
+        local okN = 0
+        for _, c in ipairs(groups[g]) do if pcall(function() obj:breakBeam(c) end) then okN = okN + 1 end end
+        if okN > 0 then how = 'obj:breakBeam'; off[#off + 1] = js(g) end
+      end
+    end
+  end
+  local tyres = 0
+  for _, wh in ipairs(W.wheels) do
+    if pcall(function() beamstate.deflateTire(wh.id) end) then tyres = tyres + 1 end
+  end
+  -- deep dents: 10 body nodes, pushed in towards the middle
+  local all, cx, cy, cz = {}, 0, 0, 0
+  for c, n in pairs(v.data.nodes) do
+    local cid = type(n) == 'table' and n.cid or c
+    local q = pos(cid)
+    cx, cy, cz = cx + q[1], cy + q[2], cz + q[3]
+    all[#all + 1] = cid
+  end
+  local dents = 0
+  if #all > 0 then
+    cx, cy, cz = cx / #all, cy / #all, cz / #all
+    for _ = 1, 10 do
+      local q = pos(all[math.random(#all)])
+      local dx, dy, dz = cx - q[1], cy - q[2], cz - q[3]
+      local l = sqrt(dx * dx + dy * dy + dz * dz)
+      if l > 0.3 then
+        W.dentAt(q[1], q[2], q[3], dx / l, dy / l, dz / l, 0.08 + math.random() * 0.1)
+        dents = dents + 1
+      end
+    end
+  end
+  report(string.format('{"k":"info","s":"wreck (v2.7): %d of %d break groups off (%s; by %s), %d tyres burst, %d deep dents"}', #off, #gl, table.concat(off, ' '):sub(1, 300), how, tyres,
+    dents))
+end
+-- one explosion at (px, py, pz) (world)
+function W.blast(px, py, pz, accel, r, dt, ig, gr, what, xp)
+  if not W.tris then W.init() end
+  if xp == 1 and not W.boomed then W.forceBoom = (tostring(what):gsub('[()]', '')) end   -- v2.63: a rocket on the car: it blows up now (W.tick)
+  P = {}
+  local o = obj:getPosition()
+  beamstate.addPlanet(vec3(px, py, pz), r, -accel / G, dt)
+  local x, y, z = px - o.x, py - o.y, pz - o.z
+  local ign = ''
+  if ig > 0 and math.random() < ig then
+    local c = igniteNear(x, y, z, 6)
+    if c then ign = ', it set the car on fire (node ' .. c .. ')' end
+  end
+  local broke = gr > 0 and breakGlass(x, y, z, gr, 1.0) or {}
+  report(string.format('{"k":"blast","s":"%s %.1f m from the car: pushed with %.0f m/s2 at 1 m for %.2f s%s; glass/lights broken: %s"}', js(what), sqrt(x * x + y * y + z * z),
+    accel, dt, ign, #broke > 0 and table.concat(broke, ' ') or 'none'))
+end
+-- every 0.25 s: broken glass / lights, the fire, the explosion
+function W.tick(dt, burnS, mode, cx)
+  if not W.tris then W.init() end
+  obj:queueGameEngineLua(string.format('if gtaBridge and gtaBridge.wAlive then gtaBridge.wAlive(%d) end', obj:getID()))
+  local gs = {}
+  for g in pairs(beamstate.deformGroupsTriggerBeam or {}) do gs[#gs + 1] = js(g) end
+  table.sort(gs)
+  local s = table.concat(gs, ',')
+  if s ~= W.dgWas then W.dgWas = s; report('{"k":"dg","g":"' .. s .. '"}') end
+  local n, hot, hc, fireball = 0, 0, nil, false
+  for c, node in pairs(fire.hotNodes or {}) do
+    local i = type(node) == 'table' and tonumber(node.intensity) or 0
+    if i > 0.05 then
+      n = n + 1
+      if i > hot then hot, hc = i, c end
+    end
+    if i > 10 then fireball = true end
+  end
+  local o = obj:getPosition()
+  if n > 0 and not W.boomed then
+    W.burnT = (W.burnT or 0) + dt
+    W.fireT = (W.fireT or 0) + dt
+    if not W.burning or W.fireT >= 0.5 then
+      W.fireT = 0
+      local p = obj:getNodePosition(hc)
+      report(string.format('{"k":"fire","on":1,"n":%d,"t":%.1f,"p":[%.3f,%.3f,%.3f]}', n, W.burnT, o.x + p.x, o.y + p.y, o.z + p.z))
+    end
+    W.burning = true
+  elseif W.burning then
+    W.burning = false
+    report('{"k":"fire","on":0}')
+  end
+  if not W.boomed and (W.forceBoom or fireball or (n > 0 and W.burnT >= burnS)) then
+    W.boomed = true
+    if mode == 1 and (W.forceBoom or not fireball) then pcall(fire.explodeVehicle) end
+    local u = obj:getDirectionVectorUp()
+    beamstate.addPlanet(vec3(o.x - u.x * 0.6, o.y - u.y * 0.6, o.z - u.z * 0.6), cx[2], -cx[1] / G, cx[3])
+    if cx[4] > 0 and math.random() < cx[4] then pcall(fire.igniteVehicle) end
+    P = {}
+    if cx[5] > 0 then breakGlass(0, 0, 0, cx[5], 1.0) end
+    pcall(W.wreck)
+    report(string.format('{"k":"boom","why":"%s","p":[%.3f,%.3f,%.3f]}', W.forceBoom and (js(W.forceBoom) .. ' right at it') or fireball and 'its fuel went up in a fireball' or string.format('it burned %.0f s', W.burnT),
+      o.x, o.y, o.z))
+    W.forceBoom = nil
+  end
+  -- repaired (BeamNG's reset): the timers start over
+  local dmg = 1e9
+  pcall(function() dmg = beamstate.damage end)
+  if n == 0 and (W.boomed or (W.burnT or 0) > 0 or W.engFire) then
+    if dmg < 50 then W.boomed, W.burnT, W.engHits, W.engFire = false, 0, 0, false end
+  end
+  -- v2.62: its damage gone (repaired where it is): GTA takes the bullet holes off
+  if dmg < 1 and (W.dmgMax or 0) > 50 then report('{"k":"repaired"}') end
+  if dmg < 1 then W.dmgMax = 0 elseif dmg < 1e8 then W.dmgMax = math.max(W.dmgMax or 0, dmg) end
+end
+-- v2.7: a GTA car or person hit BeamNG's car (GTA decides): a dent at the contact (world), pushed along (dx, dy, dz), want m deep
+function W.contact(px, py, pz, dx, dy, dz, want)
+  if not W.tris then W.init() end
+  P = {}
+  if want <= 0.003 then return end
+  local o = obj:getPosition()
+  local ox, oy, oz = px - o.x, py - o.y, pz - o.z
+  -- (GTA's contact point is on the drawn car's box: the dent goes on the car's nearest node to it, within 1 m)
+  local bd, bp = 1.0, nil
+  for c, n in pairs(v.data.nodes) do
+    local p = pos(type(n) == 'table' and n.cid or c)
+    local dd = sqrt((p[1] - ox) ^ 2 + (p[2] - oy) ^ 2 + (p[3] - oz) ^ 2)
+    if dd < bd and not nearWheel(p) then bd, bp = dd, p end
+  end
+  if bp then W.dentAt(bp[1], bp[2], bp[3], dx, dy, dz, math.min(want, 0.15)) end
+end
+function W.run(name, ...)
+  local ok, e = pcall(W[name], ...)
+  if not ok and not W.errs[name] then
+    W.errs[name] = true
+    report('{"k":"info","s":"error in the car (' .. name .. '): ' .. js(e) .. '"}')
+  end
+end
+]==]
+
+-- GE side
+wpn.on, wpn.burnS, wpn.mode, wpn.cx, wpn.tT, wpn.aliveT, wpn.injT, wpn.injN, wpn.burning = false, 30, 0, { 500, 1.5, 0.06, 1, 10 }, 0, 0, 0, 0, false
+wpn.hits, wpn.blasts, wpn.logs = 0, 0, 0
+function wpn.start(d, m)
+  wpn.on = tonumber(m.wp) == 1
+  if not wpn.on then logI('weapons: off (GTA\'s ini: Weapons=0, or a GTA plugin before 2.6)'); return end
+  wpn.burnS = math.max(1, tonumber(m.wb) or 30)
+  wpn.mode = tonumber(m.wm) == 1 and 1 or 0
+  if type(m.wx) == 'table' and #m.wx >= 5 then
+    for i = 1, 5 do wpn.cx[i] = tonumber(m.wx[i]) or wpn.cx[i] end
+  end
+  wpn.veh, wpn.id, wpn.ip, wpn.port = d.veh, d.id, d.ip, d.port
+  wpn.inj, wpn.injN = false, 0
+  logI(string.format('weapons: on: the car burns %.0f s before it blows up (%s); its own blast %.0f m/s2 at 1 m', wpn.burnS,
+    wpn.mode == 1 and 'BeamNG\'s explodeVehicle + GTA\'s explosion' or 'GTA\'s explosion', wpn.cx[1]))
+end
+-- every frame: the car's Lua in, its tick, the push a blast gave it
+function wpn.tick()
+  if not wpn.on or not wpn.veh then return end
+  local d = drive
+  if not d and not wpn.burning then return end   -- (after the drive only a car still burning)
+  local t = now()
+  local veh = wpn.veh
+  if not wpn.inj or (t - wpn.aliveT > 3 and t - wpn.injT > 3 and not pz.paused) then
+    if wpn.injN > 10 then return end
+    if wpn.inj then logI('weapons: nothing from the car for 3 s: its Lua code goes in again') end
+    veh:queueLuaCommand(wpn.VEH .. '\ngtabWpn.tris = nil')
+    wpn.inj, wpn.injT, wpn.injN, wpn.aliveT = true, t, wpn.injN + 1, t
+  end
+  if wpn.stepUntil and t < wpn.stepUntil then veh:queueLuaCommand('if gtabWpn then gtabWpn.run("step") end') end   -- v2.61
+  if t - wpn.tT >= 0.25 then
+    local dt = math.min(1, t - wpn.tT)
+    wpn.tT = t
+    local c = wpn.cx
+    veh:queueLuaCommand(string.format('if gtabWpn then gtabWpn.run("tick", %.3f, %.1f, %d, { %.1f, %.2f, %.3f, %.2f, %.1f }) end', dt, wpn.burnS, wpn.mode, c[1], c[2], c[3], c[4], c[5]))
+  end
+  local w = wpn.watch
+  if w and d and type(d.vel) == 'table' then
+    local dv = math.sqrt((d.vel[1] - w.v0[1]) ^ 2 + (d.vel[2] - w.v0[2]) ^ 2 + (d.vel[3] - w.v0[3]) ^ 2)
+    if dv > w.max then w.max = dv end
+    if t > w.t1 then
+      wpn.watch = nil
+      local s = string.format('%s: the car\'s speed changed by %.1f m/s within 0.5 s', w.what, w.max)
+      logI('weapons: ' .. s)
+      pcall(function() udp:sendto('{"t":"fx","k":"dv","s":"' .. s:gsub('"', "'") .. '"}', wpn.ip, wpn.port) end)
+    end
+  end
+end
+function M.wAlive(id) if id == wpn.id then wpn.aliveT = now() end end
+-- the car's reports -> GTA
+function M.wfx(id, s)
+  if id ~= wpn.id or not wpn.ip then return end
+  s = tostring(s)
+  local k = s:match('"k":"(%a+)"') or '?'
+  if k == 'fire' then
+    local on = s:find('"on":1', 1, true) ~= nil
+    if on ~= wpn.burning then logI('weapons: the car ' .. (on and 'is on fire' or 'stopped burning')) end
+    wpn.burning = on
+  elseif k == 'boom' then
+    wpn.stepUntil = now() + 1.5   -- v2.7: the wreck's deep dents are pushed in frame by frame
+    wpn.burning = false
+    logI('weapons: the car blew up: ' .. s)
+  elseif wpn.logs < 120 then
+    wpn.logs = wpn.logs + 1
+    logI('weapons: ' .. s)
+  end
+  pcall(function() udp:sendto('{"t":"fx",' .. s:sub(2), wpn.ip, wpn.port) end)
+end
+handlers.hit = function(m)
+  local d = drive
+  if not (wpn.on and d and type(m.p) == 'table' and type(m.d) == 'table') then return end
+  wpn.hits = wpn.hits + 1
+  wpn.stepUntil = now() + 1.2   -- v2.61: the dent is measured / pushed in frame by frame
+  local n = function(x) return tonumber(x) or 0 end
+  d.veh:queueLuaCommand(string.format('if gtabWpn then gtabWpn.run("hit", %.3f, %.3f, %.3f, %.4f, %.4f, %.4f, %.2f, %.2f, %.2f, %.4f, %.4f, %.0f, %q) end',
+    n(m.p[1]), n(m.p[2]), n(m.p[3]), n(m.d[1]), n(m.d[2]), n(m.d[3]), n(m.dv), n(m.ti), n(m.gl), n(m.en), n(m.ra), n(m.ef), tostring(m.w or '?')))
+end
+-- v2.7: traffic: GTA says one of its cars or people hit BeamNG's car ("tc"): the car's speed changes by dv (BeamNG world, m/s; no
+-- damage, like "bump") and, with weapons on, it takes a dent at the contact
+world.props.tcN, world.props.tcErr = 0, nil
+handlers.tc = function(m)
+  local d = drive
+  if not d or type(m.dv) ~= 'table' then return end
+  local veh = getPlayerVeh()
+  if not veh then return end
+  local n = function(x) return tonumber(x) or 0 end
+  local x, y, z = n(m.dv[1]), n(m.dv[2]), n(m.dv[3])
+  local l = math.sqrt(x * x + y * y + z * z)
+  if l > 15 then x, y, z = x * 15 / l, y * 15 / l, z * 15 / l end
+  local ok, err = pcall(function() veh:applyClusterVelocityScaleAdd(veh:getRefNodeId(), 1, x, y, z) end)
+  if not ok and not world.props.tcErr then world.props.tcErr = tostring(err); logE('traffic: could not push the car: ' .. tostring(err)) end
+  if wpn.on and type(m.p) == 'table' and type(m.d) == 'table' and n(m.dent) > 0 then
+    wpn.stepUntil = now() + 1.2
+    veh:queueLuaCommand(string.format('if gtabWpn then gtabWpn.run("contact", %.3f, %.3f, %.3f, %.4f, %.4f, %.4f, %.3f) end', n(m.p[1]), n(m.p[2]), n(m.p[3]), n(m.d[1]), n(m.d[2]),
+      n(m.d[3]), n(m.dent)))
+  end
+  world.props.tcN = world.props.tcN + 1
+  if world.props.tcN <= 30 then logI(string.format('traffic: %s hit the car: its speed changed by %.1f km/h, dent %.0f mm', tostring(m.w or '?'), l * 3.6, n(m.dent) * 1000)) end
+end
+handlers.blast = function(m)
+  local d = drive
+  if not (wpn.on and d and type(m.p) == 'table') then return end
+  wpn.blasts = wpn.blasts + 1
+  local n = function(x) return tonumber(x) or 0 end
+  local what = 'an explosion (GTA type ' .. tostring(m.ty) .. ')'
+  d.veh:queueLuaCommand(string.format('if gtabWpn then gtabWpn.run("blast", %.3f, %.3f, %.3f, %.1f, %.2f, %.3f, %.2f, %.1f, %q, %d) end', n(m.p[1]), n(m.p[2]), n(m.p[3]), n(m.a), n(m.r),
+    n(m.dt), n(m.ig), n(m.gr), what, n(m.xp)))
+  if type(d.vel) == 'table' then wpn.watch = { t1 = now() + 0.5, v0 = { d.vel[1], d.vel[2], d.vel[3] }, max = 0, what = what } end
+end
+-- export: each flexbody mesh's deformGroup and broken material (GTA hides / frosts it when BeamNG breaks the group)
+function wpn.exportDg(vdata)
+  local dg, n = {}, 0
+  for _, fb in pairs(vdata.flexbodies or {}) do
+    if type(fb) == 'table' and type(fb.mesh) == 'string' and type(fb.deformGroup) == 'string' and not dg[fb.mesh] then
+      dg[fb.mesh] = { fb.deformGroup, tostring(fb.deformMaterialDamaged or '') }
+      n = n + 1
+    end
+  end
+  for _, b in pairs(vdata.beams or {}) do
+    if type(b) == 'table' and type(b.deformSwitches) == 'table' then
+      for _, g in pairs(b.deformSwitches) do
+        if type(g) == 'table' and type(g.mesh) == 'string' and g.deformGroup and not dg[g.mesh] then
+          dg[g.mesh] = { tostring(g.deformGroup), tostring(g.dmgMat or '') }
+          n = n + 1
+        end
+      end
+    end
+  end
+  return n > 0 and dg or nil, n
+end
+
 -- Do several sub-meshes of one ProceduralMesh all get collision? Checked once with two small quads far below
 -- BeamNG's ground (one per sub-mesh, different ground models). If only the first is solid, tiles are built as one
 -- object per surface ("split").
@@ -4828,7 +5522,12 @@ worldUpdate = function(frameMs)
     local F = world.feel
     logI(string.format('ground feel: %d jolts (vertical over 1.5 g) in %.2f km above 50 km/h (%.1f per km); %d flat cells drawn finely (their edges had steps)',
       F.n, F.km, F.km > 0.05 and F.n / F.km or 0, world.splitCells or 0))
-    F.n, F.km, world.splitCells = 0, 0, 0
+    if F.at and #F.at > 0 then
+      local w = {}
+      for _, j in ipairs(F.at) do w[#w + 1] = string.format('%.1f g at GTA %.0f %.0f (%.0f km/h)', j[1], j[2], j[3], j[4]) end
+      logI('ground feel: the hardest jolts: ' .. table.concat(w, '; '))
+    end
+    F.n, F.km, world.splitCells, F.at = 0, 0, 0, nil
     local P, nb = world.props, 0
     for _ in pairs(P.boxes) do nb = nb + 1 end
     if nb > 0 or P.breaks > 0 or P.waits > 0 then
@@ -5062,6 +5761,10 @@ local function onUpdate(dtReal, dtSim, dtRaw)
   local okPh, errPh = pcall(world.phys.tick)   -- v2.52
   if not okPh and not world.phys.tickErr then world.phys.tickErr = true; logE('props: physics: ' .. tostring(errPh)) end
   pcall(world.feel.tick, dtSim)
+  do   -- v2.6: weapons (the car's Lua, its tick; also after the drive while the car burns)
+    local okW, errW = pcall(wpn.tick)
+    if not okW and not wpn.err then wpn.err = true; logE('weapons: ' .. tostring(errW)) end
+  end
   -- v2.01: BeamNG's own device controls off while GTA drives or holds the car parked
   local parked = park.block and not native.userOff and now() - park.t < driveCfg.parkS
   pcall(setNativeBlocked, drive ~= nil or parked, drive and 'GTA drives' or parked and 'GTA is focused, car parked' or 'GTA stopped')

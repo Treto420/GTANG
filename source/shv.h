@@ -18,6 +18,8 @@ SHV_IMPORT void nativeInit(UINT64 hash);
 SHV_IMPORT void nativePush64(UINT64 val);
 SHV_IMPORT PUINT64 nativeCall();
 SHV_IMPORT int worldGetAllObjects(int* arr, int arrSize);  // v2.5: the props around (GTA's object pool)
+SHV_IMPORT int worldGetAllPeds(int* arr, int arrSize);     // v2.6: the people around (shooters)
+SHV_IMPORT int worldGetAllVehicles(int* arr, int arrSize); // v2.7: the cars around (traffic)
 #pragma comment(lib, "ScriptHookV.lib")
 
 #else
@@ -33,6 +35,8 @@ SHV_FN(void, nativeInit, (UINT64 hash), "?nativeInit@@YAX_K@Z")
 SHV_FN(void, nativePush64, (UINT64 val), "?nativePush64@@YAX_K@Z")
 SHV_FN(PUINT64, nativeCall, (), "?nativeCall@@YAPEA_KXZ")
 SHV_FN(int, worldGetAllObjects, (int* arr, int arrSize), "?worldGetAllObjects@@YAHPEAHH@Z")
+SHV_FN(int, worldGetAllPeds, (int* arr, int arrSize), "?worldGetAllPeds@@YAHPEAHH@Z")
+SHV_FN(int, worldGetAllVehicles, (int* arr, int arrSize), "?worldGetAllVehicles@@YAHPEAHH@Z")
 #undef SHV_FN
 
 #endif

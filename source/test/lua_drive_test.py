@@ -56,9 +56,15 @@ function NODEPOS(cid)
   if cid == 3 then return { x = -1.3, y = 0.6, z = 0.3 } end
   if cid == 4 then return hub(1.4, 0.75, 0.3, ANG) end
   if cid == 5 then return hub(-1.3, 0.75, 0.3, ANG) end
+  if cid >= 10 and cid <= 15 then   -- v2.63: the FL wheel's own nodes, 3 on each side of its hub; OFF moves them (the wheel came off)
+    local k = (cid - 10) % 3
+    local a = k * 2.0944
+    return { x = 1.4 + 0.3 * math.cos(a) + OFF[1], y = (cid < 13 and 0.85 or 0.65) + OFF[2], z = 0.3 + 0.3 * math.sin(a) + OFF[3] }
+  end
 end
+OFF = { 0, 0, 0 }
 VDATA = { nodes = nodes,
-  wheels = { [0] = { name = 'FL', node1 = 'fl1', node2 = 'fl2', radius = 0.33, hubNodes = { 'flh' } },
+  wheels = { [0] = { name = 'FL', node1 = 'fl1', node2 = 'fl2', radius = 0.33, hubNodes = { 'flh' }, nodes = { 10, 11, 12, 13, 14, 15 } },
              [1] = { name = 'RL', node1 = 2, node2 = 3, radius = 0.33, nodes = { 5 } } } }
 core_vehicle_manager = { getPlayerVehicleData = function() return { vdata = VDATA } end }
 VEH = { getID = function() return 77 end, getJBeamFilename = function() return 'sdd_s650' end,
@@ -128,6 +134,24 @@ check('turn angle unwrapped (-2.5 rad per frame)', abs(d_ang + 2.5) < 1e-3, d_an
 check('turn angle counts on', abs((poses[-1]['w'][6] - poses[0]['w'][6]) + 2.5 * 29) < 1e-2, poses[-1]['w'][6] - poses[0]['w'][6])
 check('BeamNG time advances', abs((poses[-1]['st'] - poses[0]['st']) - 29 / 60) < 1e-3)
 check('spin flag', p['sp'] == 1)
+
+# 3b. v2.63: the FL wheel comes off its hub (its own nodes 2 m ahead, 0.2 m lower): drawn where they are; back on: on its hub
+lua.execute('OFF = { 2, 0, -0.2 }')
+outbox.clear()
+for i in range(3):
+    inbox.append('{"t":"drive","q":%d,"thr":1.000,"brk":0.000,"str":0.000,"hb":0,"flt":0}' % (i + 50))
+    frame()
+poses = [json.loads(s) for s in outbox if s.startswith('{"t":"pose"')]
+w = poses[-1]['w'] if poses else [0] * 14
+check('v2.63: a wheel off its hub is drawn where it is', abs(w[0] + 0.75) < 1e-3 and abs(w[1] - 3.4) < 1e-3 and abs(w[2] - 0.1) < 1e-3, w[:3])
+lua.execute('OFF = { 0, 0, 0 }')
+outbox.clear()
+for i in range(3):
+    inbox.append('{"t":"drive","q":%d,"thr":1.000,"brk":0.000,"str":0.000,"hb":0,"flt":0}' % (i + 60))
+    frame()
+poses = [json.loads(s) for s in outbox if s.startswith('{"t":"pose"')]
+w = poses[-1]['w'] if poses else [0] * 14
+check('v2.63: back on its hub: on the hub nodes again', abs(w[0] + 0.75) < 1e-3 and abs(w[1] - 1.4) < 1e-3 and abs(w[2] - 0.3) < 1e-3, w[:3])
 
 # 4. failsafe: no controls for 0.6 s
 lua.execute('CMDS = {}')

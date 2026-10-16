@@ -1,59 +1,80 @@
-# GTA x Beam kit v2.55
+# GTA x Beam
 
-Built 2026-10-09. Copy `Gta x Beam V2.54` to `Gta x Beam V2.55`, then extract this zip over it.
+**Drive BeamNG.drive's soft-body cars in GTA V's world.**
 
-## What's new
-1. **Dents: last touch-up.**
-   - **Steering wheel, mirrors, antenna, lights.** BeamNG carries these "props" rigidly on 3 nodes. 2.54 stretched them with those nodes instead.
-     - The 3 nodes sit close together, while the wheel and the antenna reach far from them, so a few mm of node movement got blown up many times.
-     - That is the giant steering wheel (screenshot 2) and the lines shooting into the sky (screenshot 1).
-     - They now move and turn with their nodes but never change size.
-   - Any other point of a panel that sits far from its 3 nodes is carried the same rigid way. That's less roughness where a few nodes hold a big piece.
-   - **Torn pieces** are now also hidden when they are thin on screen. 2.54 could only measure wide ones; the lines got past it.
-2. **Holes in the hill roads (screenshots 5 and 6).**
-   - Where GTA's road has a crack, drain or pothole, the measuring ray slipped through to the ground under it. That left a narrow pit in BeamNG's road.
-   - Pits up to about 2 m wide and over 15 cm deep are now filled to the road around them.
-   - Your saved map gets the same fix when it's read, so no re-measuring is needed.
-3. **The bridge wall (screenshots 3 and 4).**
-   - The tall pale panels in BeamNG's picture are its *ground*, not wall boxes: the rays hit the bridge's beams before the road.
-   - Anything sticking up over 1 m and less than about 2 m wide is now lowered to the road around it.
-   - Real walls and barriers aren't affected: they are found by their own rays.
-   - On a test road with a 3 m tall, 0.5 m wide beam across it every 25 m, 2.54 fell through 3 times and never got past the first one. 2.55 drives straight through.
+GTA x Beam is a "passthrough" bridge. GTA V runs the world, walking and gunplay; BeamNG.drive runs the car physics. Both games run at the same time and talk over a local UDP connection. In GTA you see your BeamNG car, with its real crumple, on GTA's streets.
+
+> Single-player only. Script Hook V closes GTA V in GTA Online. Personal, non-commercial fan project; not affiliated with Rockstar Games or BeamNG GmbH.
+
+## Features
+- **Your BeamNG car in GTA.** Export any BeamNG car (Shift+F11). It is drawn in GTA with its paint, materials, glass and lights, lit by GTA's sun, shadows and reflections.
+- **Drive mode (F10).** BeamNG's physics drive the car. GTA's streets, hills, bridges, walls and props are measured and built in BeamNG as you go, with GTA's ground surfaces (asphalt, dirt, grass...).
+- **Your BeamNG controls.** Pad and keyboard go through your own BeamNG bindings: manual gears, clutch, drive modes. One button swaps the pad between GTA and BeamNG.
+- **Real damage.** BeamNG's dents, broken glass, lost bumpers and wheels show on the car in GTA. Crashes hurt you.
+- **GTA's weapons.** Bullets dent the car, leave holes, pop tyres and break windows. Explosions push it and set it on fire. A car that blows up becomes a charred wreck.
+- **Traffic and people.** GTA's cars and pedestrians push and dent BeamNG's car, and get pushed, damaged and knocked down in return.
+- **Breakable props.** Lamp posts and signs fall the way you hit them. Breaking one can set off a GTA particle effect, such as sparks or a hydrant's water (set in `GtaBeamD1_props.json`).
+- **On foot.** Get out, walk around the car and shoot it. The BeamNG gauge and drive mode stay on.
+- **Pause sync, sound and radio.** Pausing one game pauses the other. BeamNG's engine sound plays while GTA has focus, and GTA's radio plays as the phone radio.
+
+## Requirements
+- GTA V **Legacy** (PC, story mode) with [Script Hook V](http://www.dev-c.com/gtav/scripthookv/) and its ASI loader (`dinput8.dll`).
+- BeamNG.drive (tested on the current public release).
+- A PC that can run both games at once. A GPU with 8 GB or more VRAM is recommended.
 
 ## Install
-1. From `GTA\`, copy all 4 files to `F:\Games\GTA V\Grand Theft Auto V Legacy\` (replace).
-2. **Only the GTA files changed.**
-   - The BeamNG mod stays 2.53.
-   - No new car export is needed.
-3. Check `GtaBeamD1.log`:
-   - It says 2.55.
-   - The `car dents (v2.55)` line now has `N carried rigidly (props, ...)`.
-   - The `ground: levels:` lines now end with `points lifted out of narrow pits, ... lowered from narrow spikes`.
+1. **GTA V:** copy everything in `GTA\` into your GTA V folder (next to `GTA5.exe`):
+   - `GtaBeamD1.asi`
+   - `GtaBeamD1.ini`
+   - `GtaBeamD1_surfaces.json`, `GtaBeamD1_props.json`, `GtaBeamD1_weapons.json`, `GtaBeamD1_traffic.json`
+2. **BeamNG.drive:** make the mod folder `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\unpacked\gtabridge\` and copy into it:
+   - `BeamNG\gtaBridge.lua` → `gtabridge\lua\ge\extensions\gtaBridge.lua`
+   - `BeamNG\scripts_gtabridge\modScript.lua` → `gtabridge\scripts\gtabridge\modScript.lua` (loads the mod when BeamNG starts)
+   - `BeamNG\vehicles\` → `gtabridge\vehicles\`
+3. Start BeamNG first, load the empty level **Grid, Small, Pure** and spawn your car. Then start GTA V (story mode).
 
-## Test (in this order)
-**1. The bridge from screenshot 3** (main)
-- Drive onto it and across.
-- PASS: no wall. In BeamNG, no tall panels on the road.
+## How to use
+| Key | What it does |
+|---|---|
+| **Shift+F11** | Get the car from BeamNG (exports it; the first time takes a while) |
+| **F11** | Put the BeamNG car on the GTA car you're in or next to |
+| **F10** | Drive mode on/off (sit in the driver's seat, standing still) |
+| **Shift+F10** | The on-screen drive check text |
+| **Ctrl+F11** | Re-read the ini and json files |
+| **D-pad down** | Swap the pad between GTA and BeamNG (in drive mode) |
 
-**2. Steering wheel:** look inside the car.
-- PASS: normal size.
+## Settings
+Everything is in `GtaBeamD1.ini`, with comments. Common ones:
+- `TrafficCollision=0` turns off contact with GTA's traffic and people (they pass through your car).
+- `Weapons=0` turns off weapon damage on the car.
+- `DriveGravity` sets how heavy the car feels (1.1 by default).
+- `World=0` uses BeamNG's own map instead of GTA's ground (for testing).
 
-**3. Dents:** a hard crash.
-- PASS: no lines to the sky, no stretched sheets, nothing blown up in size.
+Game content lives in JSON next to the ini:
+- `GtaBeamD1_surfaces.json`: GTA ground material to BeamNG ground model (grip).
+- `GtaBeamD1_props.json`: which props break, stay solid or get knocked over, and their effects.
+- `GtaBeamD1_weapons.json`: damage per weapon group and explosion type.
+- `GtaBeamD1_traffic.json`: masses, pushes, dents and pedestrian knock-downs.
 
-**4. Hill roads from screenshots 5 and 6.**
-- PASS: no holes in BeamNG's road.
+## Logs and bug reports
+Please attach both logs to any bug report:
+- `GtaBeamD1.log` (GTA V folder)
+- `gtabridge_log.txt` (`%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\gtabridge\`)
 
-## Send back
-- **Always send `GtaBeamD1.log` and BeamNG's `gtabridge\gtabridge_log.txt`.**
-  - If the bridge wall is still there, the log's `crash:` line says what BeamNG had there. That's the fastest way to the fix.
-- One line per test (PASS/FAIL), plus screenshot pairs.
+## Known limits
+- GTA's traffic doesn't crumple. GTA cars take GTA's own damage; only your car is soft-body.
+- GTA drivers may not react to your car before a hit.
+- The first drive through an area measures it. A saved map (`GtaBeamD1_map\`) makes later drives instant there. Delete that folder to measure again.
+- Some hillsides and bridge decks can appear a few seconds late. They fill in as you approach.
 
-## Not checked yet (can't be tested here)
-- **Whether the bridge panels were beams.** That's my read of your screenshot 4: pale like the ground, many thin panels side by side. If the wall stays, the log decides.
-- **Your steering wheel's exact setup.** If it's a prop it's fixed. If it's a part on a few nodes, the "far from its nodes" rule covers it.
+## Building from source
+The source is in `source\`.
+- Windows with Visual Studio 2022: run `build_vs2022.bat`. It needs the Script Hook V SDK's `ScriptHookV.lib`.
+- Linux/CI: build with `zig c++ -target x86_64-windows-gnu` (see `source\test\build_all.sh`). That folder also has the tests, including a fake Script Hook V and a fake BeamNG for end-to-end runs under Wine.
 
-## Known gaps
-- Glass and lights that BeamNG hides when they break still show in GTA.
-- Physics props: next.
-- Traffic (with pedestrians and motorcycles) is a later phase.
+## Credits and licences
+- [Script Hook V](http://www.dev-c.com/gtav/scripthookv/) by Alexander Blade.
+- [cgltf](https://github.com/jkuhlmann/cgltf) (MIT), [stb_image](https://github.com/nothings/stb) (MIT / public domain), [bcdec](https://github.com/iOrange/bcdec) (MIT / Unlicense).
+- Inspired by [SkyCraft](https://github.com/chasmlol/SkyCraft) (Skyrim x Minecraft passthrough).
+- Licence texts are in `licences\`.
+- No Rockstar or BeamNG game files are included. The mod reads your own installs at run time.
