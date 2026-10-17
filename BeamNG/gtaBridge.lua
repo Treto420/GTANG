@@ -77,7 +77,7 @@
 --   gtaBridge.soundSession(false) -- v2.4: switch the sound "session" mode off (the GTA plugin's BeamNGSoundWake=session sets it)
 
 local M = {}
-M.version = '2.7'
+M.version = '2.71'
 local logTag = 'gtaBridge'
 
 -- ---------------------------------------------------------------- config
@@ -2072,6 +2072,53 @@ local function drivePose(veh, dt)
   stats.tx = stats.tx + 1
 end
 
+-- v2.71: the driver's eye in the car's frame (right, forward, up from the car's position: the frame of the poses' wheels),
+-- from BeamNG's driver camera (camerasInternal, type "driver"; jbeam space: right = -x, forward = -y, up = z). The jbeam ->
+-- frame shift comes from the car's nodes (their jbeam positions against where they are now), so it doesn't matter which
+-- node the car's position is. GTA puts its player's head there. UNVERIFIED: the vdata field names (the log says what it found)
+local function driverEye(veh)
+  local vd
+  if core_vehicle_manager.getVehicleData then vd = core_vehicle_manager.getVehicleData(veh:getID()) end
+  if not (vd and vd.vdata and vd.vdata.camerasInternal) then vd = core_vehicle_manager.getPlayerVehicleData() or vd end
+  local vdata = vd and vd.vdata
+  if not vdata then return nil, 'no vehicle data' end
+  local cams = vdata.camerasInternal
+  if type(cams) ~= 'table' then return nil, 'no camerasInternal' end
+  local c, how
+  for k, e in pairs(cams) do
+    if type(e) == 'table' and tonumber(e.x) and tonumber(e.y) and tonumber(e.z) and (e.type == 'driver' or k == 'driver' or e.name == 'driver') then c, how = e, 'driver camera'; break end
+  end
+  if not c then
+    for _, e in pairs(cams) do
+      if type(e) == 'table' and tonumber(e.x) and tonumber(e.y) and tonumber(e.z) then c, how = e, 'first inside camera (' .. tostring(e.type or e.name) .. ')'; break end
+    end
+  end
+  if not c then return nil, 'no inside camera with a position' end
+  local f = norm(v3(veh:getDirectionVector()))
+  local u0 = v3(veh:getDirectionVectorUp())
+  local du = dot(f, u0)
+  local u = norm({ u0[1] - f[1] * du, u0[2] - f[2] * du, u0[3] - f[3] * du })
+  local r = cross(f, u)
+  local acc, n = { 0, 0, 0 }, 0
+  for cid, nd in pairs(vdata.nodes or {}) do
+    if n >= 64 then break end
+    local jp = type(nd) == 'table' and nd.pos
+    local jx, jy, jz = jp and tonumber(jp.x or jp[1]), jp and tonumber(jp.y or jp[2]), jp and tonumber(jp.z or jp[3])
+    if jx and jy and jz then
+      local okP, q = pcall(function() return v3(veh:getNodePosition(nd.cid or cid)) end)
+      if okP and q then
+        acc[1] = acc[1] + dot(q, r) + jx
+        acc[2] = acc[2] + dot(q, f) + jy
+        acc[3] = acc[3] + dot(q, u) - jz
+        n = n + 1
+      end
+    end
+  end
+  if n == 0 then return nil, how .. ', but no node positions to place it' end
+  local e = { -tonumber(c.x) + acc[1] / n, -tonumber(c.y) + acc[2] / n, tonumber(c.z) + acc[3] / n }
+  return e, string.format('%s at jbeam %.2f %.2f %.2f, from %d nodes', how, tonumber(c.x), tonumber(c.y), tonumber(c.z), n)
+end
+
 -- v2.0's direct inputs (fallback when your bindings can't be used). Only the parts listed in 'want'.
 local function driveInputCmd(thr, brk, str, hb, flt, want)
   local t = {}
@@ -3114,6 +3161,15 @@ handlers.drive_start = function(m)
                   padm = B and table.concat(B.padComboList or {}, ',') or '', pmod = B and table.concat(B.padModList or {}, ',') or '',
                   padmx = B and B.padComboSetsStr or '',
                   plist = B and tostring(B.padDev or '') or '' }
+  do  -- v2.71: the driver's seat for GTA's player
+    local okE, eye, eyeHow = pcall(driverEye, veh)
+    if okE and eye then
+      drive.okMsg.eye = { tonumber(string.format('%.3f', eye[1])), tonumber(string.format('%.3f', eye[2])), tonumber(string.format('%.3f', eye[3])) }
+      logI(string.format('drive: driver\'s eye %.2f %.2f %.2f m (right, forward, up of the car): %s', eye[1], eye[2], eye[3], tostring(eyeHow)))
+    else
+      logI('drive: no driver seat from BeamNG (' .. tostring(okE and eyeHow or eye) .. '): GTA keeps its own')
+    end
+  end
   -- the car starts from rest: inputs to 0, parking brake off (v2.0 left it on at the end), report helper in
   pcall(function() veh:queueLuaCommand(VEH_HELPER .. "\ninput.event('throttle',0,2) input.event('brake',0,2) input.event('parkingbrake',0,2) input.event('clutch',0,2)") end)
   native.userOff = false
@@ -5463,6 +5519,7 @@ end
 worldDriveEnded = function(d)
   pcall(world.props.clear, 'the drive ended')   -- v2.5 (GTA takes them out itself, unless it closed)
   pcall(world.phys.clear, 'the drive ended')
+  pcall(world.tw.clear, 'the drive ended')   -- v2.71
   if not world.ox then return end
   local veh = getPlayerVeh()
   if not veh then return end
@@ -5577,6 +5634,268 @@ handlers.rm = function(m)
     local p = pendingBuild[id]
     if p then p.cancelled = true end
     enqueue({ kind = 'remove', id = id, t = now(), quiet = true })
+  end
+end
+
+-- ---- v2.71: traffic twins (your choice: "BeamNG twins, GTA look"). When the drive starts GTA asks for a pool of BeamNG
+-- cars ("twp": the models from GtaBeamD1_traffic.json "twinPool"). They are spawned one at a time high above the car,
+-- measured (their size, the middle of their footprint, their body's nodes at rest) and parked (setActive(0): not
+-- drawn, not simulated). When GTA sees one of its cars about to meet yours it asks for a twin ("twa"): the twin is put
+-- exactly where GTA's car is, with its speed, and from then BeamNG moves it: the crash is BeamNG's, soft body against
+-- soft body. Its pose goes back every frame ("twu"; GTA's car copies it) and its dents ("twd"; GTA's car gets GTA
+-- damage there). GTA says when it's done ("twr"): parked again. The pool goes when the drive ends.
+-- UNVERIFIED in BeamNG 0.39: setActive, the vanilla model names (the log says what spawned and how)
+world.tw = { pool = {}, spawnT = 0, logT = 0, poses = 0, acts = 0, fails = 0 }
+world.tw.say = function(t)
+  local d = drive
+  if d then pcall(function() udp:sendto(jsonEncode(t), d.ip, d.port) end) end
+end
+world.tw.frame = function(veh)
+  local f = norm(v3(veh:getDirectionVector()))
+  local u0 = v3(veh:getDirectionVectorUp())
+  local du = dot(f, u0)
+  local u = norm({ u0[1] - f[1] * du, u0[2] - f[2] * du, u0[3] - f[3] * du })
+  return cross(f, u), f, u
+end
+world.tw.setActive = function(e, on)
+  local ok, err = pcall(function() e.veh:setActive(on and 1 or 0) end)
+  if not ok and not world.tw.noActive then
+    world.tw.noActive = tostring(err)
+    logE('traffic twins: setActive failed (' .. tostring(err) .. '): no twins (GTA\'s own traffic contact instead)')
+  end
+  return ok
+end
+world.tw.clear = function(why)
+  local T, n = world.tw, 0
+  for _, e in pairs(T.pool) do
+    if e.veh then pcall(function() e.veh:delete() end); n = n + 1 end
+  end
+  T.pool = {}
+  if n > 0 then logI('traffic twins: ' .. n .. ' taken out (' .. tostring(why) .. ')') end
+end
+handlers.twp = function(m)
+  local T = world.tw
+  if type(m.m) ~= 'table' then return end
+  T.clear('a new pool')
+  for k, model in ipairs(m.m) do
+    if k <= 8 and type(model) == 'string' and model ~= '' then T.pool[k] = { k = k, model = model, state = 'want' } end
+  end
+  T.fallback = type(m.fb) == 'table' and m.fb or { 'fullsize', 'pickup', 'covet' }
+  logI('traffic twins: GTA asked for ' .. #m.m .. ': ' .. table.concat(m.m, ', '))
+end
+-- one spawn a frame (each may hitch BeamNG), 2.5 a second; then measured, parked, GTA told ("twi")
+world.tw.spawnOne = function(e)
+  local T = world.tw
+  local car = drive and drive.veh or getPlayerVeh()
+  local cp = car and v3(car:getPosition()) or { 0, 0, 300 }
+  local pos = vec3(cp[1] + 6 * e.k, cp[2], cp[3] + 150)   -- (in the air: it falls a little until it is parked)
+  local tried = { e.model }
+  for _, f in ipairs(T.fallback or {}) do if f ~= e.model then tried[#tried + 1] = f end end
+  local errs = {}
+  for _, model in ipairs(tried) do
+    local t0 = os.clock()
+    local ok, v = pcall(function()
+      return core_vehicles.spawnNewVehicle(model, { pos = pos, rot = quat(0, 0, 0, 1), autoEnterVehicle = false, cling = false, vehicleName = 'gtab_twin_' .. e.k })
+    end)
+    if ok and v then
+      e.veh, e.model = v, model
+      pcall(function() e.vid = v:getID() end)
+      e.ms = (os.clock() - t0) * 1000
+      break
+    end
+    errs[#errs + 1] = model .. ': ' .. tostring(v)
+  end
+  pcall(function() if car and be:getPlayerVehicle(0):getID() ~= car:getID() then be:enterVehicle(0, car) end end)
+  if not e.veh then
+    e.state = 'fail'
+    T.fails = T.fails + 1
+    logE('traffic twins: twin ' .. e.k .. ' could not be spawned (' .. table.concat(errs, '; ') .. ')')
+    T.say({ t = 'twi', k = e.k, ok = 0, why = 'spawn failed' })
+    return
+  end
+  e.state, e.t0 = 'init', now()
+end
+-- its size, its footprint's middle (o: in its frame from its position) and its body's nodes at rest (not the wheels')
+world.tw.measure = function(e)
+  local veh = e.veh
+  local r, f, u = world.tw.frame(veh)
+  local vd = core_vehicle_manager.getVehicleData(e.vid)
+  local vdata = vd and vd.vdata
+  if not (vdata and vdata.nodes) then return false end
+  local byName = {}
+  for cid, nd in pairs(vdata.nodes) do if type(nd) == 'table' and nd.name then byName[nd.name] = nd.cid or cid end end
+  local function cidOf(x) if type(x) == 'number' then return x end return byName[x] end
+  local axles = {}
+  for _, w in pairs(vdata.wheels or {}) do
+    local a, b = type(w) == 'table' and cidOf(w.node1), type(w) == 'table' and cidOf(w.node2)
+    if a and b then axles[#axles + 1] = { v3(veh:getNodePosition(a)), v3(veh:getNodePosition(b)), (tonumber(w.radius) or 0.35) + 0.1 } end
+  end
+  local all, mn, mx = {}, { 1e9, 1e9, 1e9 }, { -1e9, -1e9, -1e9 }
+  for cid, nd in pairs(vdata.nodes) do
+    local c = type(nd) == 'table' and (nd.cid or cid)
+    if c then
+      local p = v3(veh:getNodePosition(c))
+      local q = { dot(p, r), dot(p, f), dot(p, u) }
+      for i = 1, 3 do mn[i] = math.min(mn[i], q[i]); mx[i] = math.max(mx[i], q[i]) end
+      local wheel = false
+      for _, ax in ipairs(axles) do
+        local ab = sub(ax[2], ax[1])
+        local l2 = math.max(1e-6, dot(ab, ab))
+        local tt = math.max(0, math.min(1, dot(sub(p, ax[1]), ab) / l2))
+        local dd = sub(p, { ax[1][1] + ab[1] * tt, ax[1][2] + ab[2] * tt, ax[1][3] + ab[3] * tt })
+        if dot(dd, dd) < ax[3] * ax[3] then wheel = true; break end
+      end
+      if not wheel then all[#all + 1] = { c, q } end
+    end
+  end
+  if #all < 8 then return false end
+  e.o = { (mn[1] + mx[1]) * 0.5, (mn[2] + mx[2]) * 0.5, mn[3] }
+  e.size = { mx[1] - mn[1], mx[2] - mn[2], mx[3] - mn[3] }
+  local step = math.max(1, math.floor(#all / 300))
+  e.cids, e.rest = {}, {}
+  for i = 1, #all, step do
+    local c, q = all[i][1], all[i][2]
+    e.cids[#e.cids + 1] = c
+    e.rest[#e.rest + 1] = { q[1] - e.o[1], q[2] - e.o[2], q[3] - e.o[3] }
+  end
+  return true
+end
+world.tw.park = function(e)
+  e.state = 'park'
+  e.gid = nil
+  if not world.tw.setActive(e, false) then
+    -- (no setActive: it would fall onto GTA's ground near the car: taken out, GTA's own traffic contact instead)
+    pcall(function() e.veh:delete() end)
+    e.veh, e.state = nil, 'fail'
+    world.tw.say({ t = 'twi', k = e.k, ok = 0, why = 'setActive failed' })
+  end
+end
+handlers.twa = function(m)
+  local T = world.tw
+  local e = T.pool[tonumber(m.k) or -1]
+  if not (e and (e.state == 'park' or e.state == 'live') and type(m.p) == 'table' and type(m.f) == 'table' and type(m.u) == 'table') then
+    T.say({ t = 'twf', k = m.k, why = e and ('not ready (' .. tostring(e.state) .. ')') or 'no such twin' })
+    return
+  end
+  T.setActive(e, true)
+  local f = norm({ m.f[1], m.f[2], m.f[3] })
+  local u0 = { m.u[1], m.u[2], m.u[3] }
+  local du = dot(f, u0)
+  local u = norm({ u0[1] - f[1] * du, u0[2] - f[2] * du, u0[3] - f[3] * du })
+  local r = cross(f, u)
+  local v = type(m.v) == 'table' and m.v or { 0, 0, 0 }
+  local lead = 1 / 60   -- (it moves from the next frame: put where GTA's car will be then)
+  local P = {}
+  for i = 1, 3 do P[i] = m.p[i] + v[i] * lead - (r[i] * e.o[1] + f[i] * e.o[2] + u[i] * e.o[3]) + u[i] * 0.03 end
+  local cands = rotCandidates(f, u)
+  local c = cands[world.conv or 2] or cands[1]
+  local ok, err = pcall(function() e.veh:setPositionRotation(P[1], P[2], P[3], c[2].x, c[2].y, c[2].z, c[2].w) end)
+  if not ok then
+    T.say({ t = 'twf', k = m.k, why = 'teleport failed: ' .. tostring(err) })
+    logE('traffic twins: twin ' .. e.k .. ' teleport failed: ' .. tostring(err))
+    T.park(e)
+    return
+  end
+  e.state, e.gid, e.tA, e.vel, e.velDone, e.frames, e.dmax = 'live', m.id, now(), v, false, 0, 0
+  e.pk = tonumber(m.pk) == 1
+  T.acts = T.acts + 1
+  pcall(function() e.veh:queueLuaCommand(string.format("input.event('throttle',0,2) input.event('brake',0,2) input.event('steering',0,2) input.event('parkingbrake',%d,2)", e.pk and 1 or 0)) end)
+  if T.acts <= 30 then
+    logI(string.format('traffic twins: twin %d (%s) put on GTA car %s at %.1f %.1f %.1f, %.0f km/h%s', e.k, e.model, tostring(m.id), m.p[1], m.p[2], m.p[3],
+      math.sqrt(v[1] ^ 2 + v[2] ^ 2 + v[3] ^ 2) * 3.6, e.pk and ', parked' or ''))
+  end
+end
+handlers.twr = function(m)
+  local e = world.tw.pool[tonumber(m.k) or -1]
+  if e and e.state == 'live' then
+    if world.tw.acts <= 30 then logI(string.format('traffic twins: twin %d parked again (%s; dented up to %.0f mm)', e.k, tostring(m.why), (e.dmax or 0) * 1000)) end
+    world.tw.park(e)
+  end
+end
+world.tw.tick = function()
+  local T, d = world.tw, drive
+  if not d or next(T.pool) == nil then return end
+  local t = now()
+  for _, e in pairs(T.pool) do
+    if e.state == 'want' and t - T.spawnT > 0.4 then
+      T.spawnT = t
+      T.spawnOne(e)
+      break
+    end
+  end
+  local us = {}
+  for _, e in pairs(T.pool) do
+    if e.state == 'init' and t - e.t0 > 0.3 then
+      local ok, good = pcall(T.measure, e)
+      if ok and good then
+        T.park(e)
+        if e.state ~= 'park' then goto nextTwin end
+        logI(string.format('traffic twins: twin %d is a %s (%.1f x %.1f x %.1f m, %d body nodes watched; spawned in %.0f ms)', e.k, e.model, e.size[1], e.size[2], e.size[3], #e.cids, e.ms or 0))
+        T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3] })
+      elseif t - e.t0 > 3 then
+        e.state = 'fail'
+        logE('traffic twins: twin ' .. e.k .. ' (' .. e.model .. ') could not be measured: ' .. tostring(ok and 'no nodes' or good))
+        T.say({ t = 'twi', k = e.k, ok = 0, why = 'not measured' })
+      end
+    elseif e.state == 'live' then
+      e.frames = e.frames + 1
+      local veh = e.veh
+      if not e.velDone and e.frames >= 1 then
+        e.velDone = true
+        local v = e.vel
+        pcall(function() veh:applyClusterVelocityScaleAdd(veh:getRefNodeId(), 1, v[1], v[2], v[3]) end)
+      end
+      local okP = pcall(function()
+        local p = v3(veh:getPosition())
+        local r, f, u = T.frame(veh)
+        local vel = v3(veh:getVelocity())
+        local o = e.o
+        us[#us + 1] = string.format('%d,%.3f,%.3f,%.3f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.3f,%.3f,%.3f', e.k, p[1] + r[1] * o[1] + f[1] * o[2] + u[1] * o[3],
+          p[2] + r[2] * o[1] + f[2] * o[2] + u[2] * o[3], p[3] + r[3] * o[1] + f[3] * o[2] + u[3] * o[3], f[1], f[2], f[3], u[1], u[2], u[3], vel[1], vel[2], vel[3])
+        -- its dents, 5 a second: body nodes 4 cm or more from where they rest, grouped within 0.9 m (the deepest first)
+        if t - (e.dT or 0) > 0.2 and e.frames > 6 then
+          e.dT = t
+          local dn = {}
+          for i, c in ipairs(e.cids) do
+            local q = v3(veh:getNodePosition(c))
+            local a = { dot(q, r) - o[1], dot(q, f) - o[2], dot(q, u) - o[3] }
+            local z = e.rest[i]
+            local dd = math.sqrt((a[1] - z[1]) ^ 2 + (a[2] - z[2]) ^ 2 + (a[3] - z[3]) ^ 2)
+            if dd > 0.04 and dd < 2.0 then dn[#dn + 1] = { z, dd } end
+          end
+          table.sort(dn, function(x, y) return x[2] > y[2] end)
+          local spots = {}
+          for _, n in ipairs(dn) do
+            local near = false
+            for _, sp in ipairs(spots) do
+              if (sp[1] - n[1][1]) ^ 2 + (sp[2] - n[1][2]) ^ 2 + (sp[3] - n[1][3]) ^ 2 < 0.81 then near = true; break end
+            end
+            if not near then spots[#spots + 1] = { n[1][1], n[1][2], n[1][3], n[2] } end
+            if #spots >= 6 then break end
+          end
+          local top = spots[1] and spots[1][4] or 0
+          if top > (e.dmax or 0) + 0.01 then
+            e.dmax = top
+            local flat = {}
+            for _, sp in ipairs(spots) do for i = 1, 4 do flat[#flat + 1] = tonumber(string.format('%.3f', sp[i])) end end
+            T.say({ t = 'twd', k = e.k, s = flat })
+          end
+        end
+      end)
+      if not okP and not e.poseErr then e.poseErr = true; logE('traffic twins: twin ' .. e.k .. ' pose not read') end
+    end
+    ::nextTwin::
+  end
+  if #us > 0 then
+    T.poses = T.poses + #us
+    pcall(function() udp:sendto('{"t":"twu","s":[' .. table.concat(us, ',') .. ']}', d.ip, d.port) end)
+  end
+  if t - T.logT > 10 then
+    T.logT = t
+    local live, park = 0, 0
+    for _, e in pairs(T.pool) do if e.state == 'live' then live = live + 1 elseif e.state == 'park' then park = park + 1 end end
+    if live + park > 0 then logI(string.format('traffic twins: %d live, %d parked; %d put on GTA cars, %d poses to GTA (10 s)', live, park, T.acts, T.poses)) end
+    T.poses = 0
   end
 end
 
@@ -5760,6 +6079,8 @@ local function onUpdate(dtReal, dtSim, dtRaw)
   if not okPr and not world.props.tickErr then world.props.tickErr = true; logE('props: ' .. tostring(errPr)) end
   local okPh, errPh = pcall(world.phys.tick)   -- v2.52
   if not okPh and not world.phys.tickErr then world.phys.tickErr = true; logE('props: physics: ' .. tostring(errPh)) end
+  local okTw, errTw = pcall(world.tw.tick)   -- v2.71
+  if not okTw and not world.tw.tickErr then world.tw.tickErr = true; logE('traffic twins: ' .. tostring(errTw)) end
   pcall(world.feel.tick, dtSim)
   do   -- v2.6: weapons (the car's Lua, its tick; also after the drive while the car burns)
     local okW, errW = pcall(wpn.tick)

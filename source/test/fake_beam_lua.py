@@ -254,8 +254,16 @@ def node_local(cid):
 wheels = [{'name': n, 'node1': i * 3, 'node2': i * 3 + 1, 'radius': 0.33, 'treadNodes': [i * 3 + 2]} for i, (n, x, y, fr) in enumerate(WH)]
 g.core_vehicle_manager = ge.table_from({})
 vdata = to_lua({'vdata': {'wheels': wheels, 'nodes': {}}})
+# v2.71: their jbeam positions (right = -x, forward = -y, up = z, shifted by JB_SHIFT) and (FAKE_SEAT=1) the driver camera: the eye
+# at EYE_TRUE (the car frame of the poses: the model's (-0.37, 0.3, 1.0) + O_TRUE)
+JB_SHIFT = (0.07, 0.3, 0.2)
+EYE_TRUE = (-0.37 + O_TRUE[0], 0.3 + O_TRUE[1], 1.0 + O_TRUE[2])
+def jbeam_of(l): return {'x': -l[0] + JB_SHIFT[0], 'y': -l[1] + JB_SHIFT[1], 'z': l[2] + JB_SHIFT[2]}
 for c in range(12 + len(BODY)):
-    vdata.vdata.nodes[c] = ge.table_from({'cid': c, 'name': 'n%d' % c, 'group': 'body' if c in BODY else 'wheel'})
+    vdata.vdata.nodes[c] = ge.table_from({'cid': c, 'name': 'n%d' % c, 'group': 'body' if c in BODY else 'wheel', 'pos': ge.table_from(jbeam_of(node_local(c)))})
+if os.environ.get('FAKE_SEAT'):   # (only then: the other scenarios' checks take GTA's car on the drawn car's footprint)
+    _cam = jbeam_of(EYE_TRUE); _cam['type'] = 'driver'
+    vdata.vdata.camerasInternal = ge.table_from({'driver': ge.table_from(_cam)})
 # v2.5 (dents): the car's own Lua sees the same nodes (v.data), positions relative to the car (world axes), its frame
 vm.execute('v = { data = { nodes = {}, wheels = {}, refNodes = {} } }')
 for c in range(12 + len(BODY)):
@@ -408,7 +416,92 @@ ge.execute('''
   function PV:getPosition() return self.pos end
   function PV:getNodePosition(c) local n = self.nodes[c + 1]; return { x = n.x - self.pos.x, y = n.y - self.pos.y, z = n.z - self.pos.z } end
   function PV:delete() self.alive = false end
+  -- v2.71: traffic twins: a car-like box (4.6 x 1.8 m, 30 body nodes, 4 wheels) that coasts; TWIN_STEP below hits it
+  TWINS = {}
+  local TV = {}
+  TV.__index = TV
+  local function trot(t, l) local f, r = t.f, { x = t.f.y, y = -t.f.x, z = 0 } return { x = r.x * l[1] + f.x * l[2], y = r.y * l[1] + f.y * l[2], z = l[3] } end
+  function TV:getID() return self.id end
+  function TV:getPosition() return { x = self.pos.x, y = self.pos.y, z = self.pos.z } end
+  function TV:getDirectionVector() return { x = self.f.x, y = self.f.y, z = 0 } end
+  function TV:getDirectionVectorUp() return { x = 0, y = 0, z = 1 } end
+  function TV:getVelocity() return { x = self.vel.x, y = self.vel.y, z = self.vel.z } end
+  function TV:getRefNodeId() return 0 end
+  function TV:getNodePosition(c) local l = self.nodes[c + 1]; local d = self.dent[c + 1] or { 0, 0, 0 }; return trot(self, { l[1] + d[1], l[2] + d[2], l[3] + d[3] }) end
+  function TV:setActive(on) self.active = on == 1 or on == true; TWINLOG(self.name .. ' active ' .. tostring(self.active)) end
+  function TV:setPositionRotation(x, y, z, qx, qy, qz, qw)
+    local f = QROT({ x = qx, y = qy, z = qz, w = qw }, { x = 0, y = -1, z = 0 })
+    local l = math.sqrt(f.x * f.x + f.y * f.y)
+    self.f = { x = f.x / l, y = f.y / l, z = 0 }
+    self.pos = { x = x, y = y, z = z }
+    self.vel = { x = 0, y = 0, z = 0 }
+    self.dent = {}
+    self.hit = nil
+    TWINLOG(string.format('%s teleported to %.2f %.2f %.2f heading %.1f', self.name, x, y, z, math.deg(math.atan2(self.f.y, self.f.x))))
+  end
+  function TV:applyClusterVelocityScaleAdd(c, sc, ax, ay, az) self.vel = { x = self.vel.x * sc + ax, y = self.vel.y * sc + ay, z = self.vel.z * sc + az } end
+  function TV:queueLuaCommand(s) end
+  function TV:delete() self.alive = false end
+  local function spawnTwin(model, o)
+    local t = setmetatable({ id = 3000 + #TWINS, alive = true, active = true, name = o.vehicleName, model = model, pos = { x = o.pos.x, y = o.pos.y, z = o.pos.z },
+                             f = { x = 0, y = -1, z = 0 }, vel = { x = 0, y = 0, z = 0 }, nodes = {}, dent = {} }, TV)
+    for _, x in ipairs({ -0.9, 0, 0.9 }) do for _, y in ipairs({ -2.3, -1.2, 0, 1.2, 2.3 }) do for _, z in ipairs({ -0.2, 0.9 }) do t.nodes[#t.nodes + 1] = { x, y, z } end end end
+    local nb = #t.nodes
+    t.wheels = {}
+    for w, wp in ipairs({ { 0.8, 1.4 }, { -0.8, 1.4 }, { 0.8, -1.4 }, { -0.8, -1.4 } }) do
+      t.nodes[#t.nodes + 1] = { wp[1] - 0.1, wp[2], -0.17 }
+      t.nodes[#t.nodes + 1] = { wp[1] + 0.1, wp[2], -0.17 }
+      t.wheels[w] = { name = 'w' .. w, node1 = #t.nodes - 2, node2 = #t.nodes - 1, radius = 0.33 }
+    end
+    TWINS[#TWINS + 1] = t
+    TWINLOG(string.format('%s spawned: a %s at %.1f %.1f %.1f', t.name, model, o.pos.x, o.pos.y, o.pos.z))
+    return t
+  end
+  -- every frame: twins coast (rolling to a stop); one BeamNG's car runs into is pushed along and dented where it was hit
+  function TWIN_STEP(dt, cx, cy, cz, fx, fy, v)
+    local out = 0
+    for _, t in ipairs(TWINS) do
+      if t.alive and t.active then
+        t.pos = { x = t.pos.x + t.vel.x * dt, y = t.pos.y + t.vel.y * dt, z = t.pos.z }
+        local sp = math.sqrt(t.vel.x ^ 2 + t.vel.y ^ 2)
+        local k = sp > 0 and math.max(0, sp - 2.0 * dt) / sp or 0
+        t.vel = { x = t.vel.x * k, y = t.vel.y * k, z = 0 }
+        local tc = { x = t.pos.x + t.f.x * 0.0, y = t.pos.y + t.f.y * 0.0 }
+        local dx, dy = tc.x - cx, tc.y - cy
+        local ra, fa, rb, fb = { fy, -fx }, { fx, fy }, { t.f.y, -t.f.x }, { t.f.x, t.f.y }
+        local sep = false
+        for _, a in ipairs({ ra, fa, rb, fb }) do
+          local dist = math.abs(dx * a[1] + dy * a[2])
+          local r1 = 0.95 * math.abs(ra[1] * a[1] + ra[2] * a[2]) + 2.3 * math.abs(fa[1] * a[1] + fa[2] * a[2])
+          local r2 = 0.9 * math.abs(rb[1] * a[1] + rb[2] * a[2]) + 2.3 * math.abs(fb[1] * a[1] + fb[2] * a[2])
+          if dist > r1 + r2 then sep = true end
+        end
+        if not sep and not t.hit and math.abs(t.pos.z - cz) < 3 then
+          t.hit = true
+          t.vel = { x = t.vel.x + fx * v * 0.6, y = t.vel.y + fy * v * 0.6, z = 0 }
+          -- dented where BeamNG's car's front met it: the nodes within 1.2 m of that spot, 15 cm along the car's way
+          local hx, hy = cx + fx * 2.3, cy + fy * 2.3
+          local nd = 0
+          for c, l in ipairs(t.nodes) do
+            local w = trot(t, l)
+            if (t.pos.x + w.x - hx) ^ 2 + (t.pos.y + w.y - hy) ^ 2 < 1.44 then
+              local r = { t.f.y, -t.f.x }
+              t.dent[c] = { 0.15 * (fx * r[1] + fy * r[2]), 0.15 * (fx * t.f.x + fy * t.f.y), 0 }
+              nd = nd + 1
+            end
+          end
+          TWINLOG(string.format('TWINHIT %s at %.2f m/s: %d nodes dented, pushed to %.2f m/s', t.name, v, nd, math.sqrt(t.vel.x ^ 2 + t.vel.y ^ 2)))
+          out = v * 0.5
+        end
+      end
+    end
+    return out
+  end
   core_vehicles = { spawnNewVehicle = function(model, o)
+    if model ~= 'gtab_prop' then
+      if model == 'nosuchcar' then error('no such model') end
+      return spawnTwin(model, o)
+    end
     local v = o.config.vars
     local gx, gy, gz = v['$gx'], v['$gy'], v['$gz']
     local L = { {-gx/2,-gy/2,0}, {gx/2,-gy/2,0}, {-gx/2,gy/2,0}, {gx/2,gy/2,0}, {-gx/2,-gy/2,gz}, {gx/2,-gy/2,gz}, {-gx/2,gy/2,gz}, {gx/2,gy/2,gz} }
@@ -423,6 +516,13 @@ ge.execute('''
     return pv
   end }
   core_vehicle_manager.getVehicleData = function(id)
+    for _, t in ipairs(TWINS) do
+      if t.id == id then
+        local nodes = {}
+        for c = 1, #t.nodes do nodes[c - 1] = { cid = c - 1, name = 't' .. (c - 1) } end
+        return { vdata = { nodes = nodes, wheels = t.wheels } }
+      end
+    end
     local nodes = {}
     for c = 0, 7 do nodes[c] = { cid = c, name = 'g' .. c } end
     return { vdata = { nodes = nodes } }
@@ -441,6 +541,9 @@ ge.execute('''
     pv.knocked = true
   end
 ''')
+def twinlog(m):
+    ev.write('%.3f TWIN %s\n' % (st, m)); ev.flush()
+g.TWINLOG = twinlog
 def proplog(name, anch, gx, gy, gz, gm):
     ev.write('%.3f PROPSPAWN %s anchored %s %.2f x %.2f x %.2f m %.0f kg\n' % (st, name, anch, gx, gy, gz, gm)); ev.flush()
 g.PROPLOG = proplog
@@ -754,6 +857,11 @@ while time.perf_counter() < end:
         ev.write('%.3f PHYSHIT %s anchored %s at %.2f m/s\n' % (st, pv.name, pv.anchored, car['v'])); ev.flush()
         car['v'] = max(0.0, car['v'] - (3.0 if pv.anchored else 0.5))
         ge.eval('PROP_KNOCK')(pv, math.radians(80), f0[0] * 1.0, f0[1] * 1.0)
+    # v2.71: against a traffic twin
+    o = to_world(O_TRUE)
+    twin_dv = ge.eval('TWIN_STEP')(dt, car['x'], car['y'], car['z'] - o[2], f[0], f[1], car['v'])
+    if twin_dv > 0:
+        car['v'] = max(0.0, car['v'] - twin_dv)
     # v2.51: BeamNG's car against the props' boxes (rigid: about 30 g while its front is inside one)
     hp = prop_hit()
     if hp:

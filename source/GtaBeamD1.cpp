@@ -116,7 +116,7 @@
 #include "carmodel.h"
 #include "shv.h"
 
-#define D1_VERSION "2.7"
+#define D1_VERSION "2.71"
 
 namespace
 {
@@ -261,6 +261,17 @@ namespace
 		// v2.51: did a knocked prop really go over in GTA (measured 1 s after)
 		constexpr UINT64 HAS_OBJECT_BEEN_BROKEN = 0x8ABFB70C49CC43E2;
 		constexpr UINT64 GET_ENTITY_UPRIGHT_VALUE = 0x95EED5A694951F9F;
+		// v2.71: a knocked map prop is swapped for a copy the plugin owns (GTA's map props don't move for a script)
+		constexpr UINT64 REQUEST_MODEL = 0x963D27A58DF860AC;
+		constexpr UINT64 HAS_MODEL_LOADED = 0x98A4EB5D89A0C952;
+		constexpr UINT64 SET_MODEL_AS_NO_LONGER_NEEDED = 0xE532F5D78798DAAB;
+		constexpr UINT64 CREATE_OBJECT = 0x509D5878EB39E842;                 // model, x y z, isNetwork, scriptHostObj, dynamic
+		constexpr UINT64 DELETE_OBJECT = 0x539E0AE3E6634B9F;                 // Object*
+		constexpr UINT64 CREATE_MODEL_HIDE_EXCLUDING_SCRIPT_OBJECTS = 0x3A52AE588830BF7F;  // x y z, radius, model, p5
+		constexpr UINT64 REMOVE_MODEL_HIDE = 0xD9E3006FB3CBD765;             // x y z, radius, model, p5 (false)
+		// v2.71: the driver's seat and visibility
+		constexpr UINT64 GET_ENTITY_ALPHA = 0x5A47B3B5E63E94C6;
+		constexpr UINT64 SET_VEHICLE_AS_NO_LONGER_NEEDED = 0x629BFA74418D6239;  // Vehicle* (v2.71: a twinned GTA car back to GTA)
 	}
 
 	// GTA control ids (input group 0)
@@ -394,6 +405,8 @@ namespace
 		bool  autoLoad = true;         // load CarFile (or the default export path) at start
 		int   hideMode = -1;           // -1 auto (ShadowMode=gta: transparent, else ghost), 0 transparent (GTA keeps its shadow), 1 invisible, 2 ghost
 		bool  showDriver = true;       // v1.9.3: the player stays visible in the (ghost) GTA car
+		bool  driverSeat = true;       // v2.71: drive mode: GTA's car is placed so your head sits at BeamNG's driver camera
+		float seatAdj[3] = {};         // v2.71: and moved this much from there (right, forward, up; m)
 		int   drawStage = 1;           // v1.9.3: 1 auto (inside GTA's frame when found, else at Present), 0 present (v1.9.1)
 		float hdrSunToSky = 6.0f;      // inside GTA's frame: sunlight vs. light from the sky
 		float hdrAmbient = 1.0f;       // inside GTA's frame: light from the surroundings
@@ -538,6 +551,8 @@ namespace
 		bool        propPhysics = true;       // PropPhysics: v2.52: props as weighted boxes BeamNG simulates (GTA's prop copies them)
 		int         propPhysicsMax = 10;      // PropPhysicsMax: v2.52: that many at once (each one may hitch BeamNG for a moment when it comes)
 		bool        trafficCollision = true;  // TrafficCollision: v2.7: GTA's cars and people and BeamNG's car push each other
+		int         trafficTwins = 4;         // TrafficTwins: v2.71: BeamNG cars that take GTA's cars' place for a crash (0: v2.7's push only)
+		bool        worldDeep = true;         // WorldDeep: v2.71: no ground in a point's window: looked for below it, then above it
 		bool        weapons = true;           // Weapons: v2.6: GTA's bullets and explosions hit BeamNG's car; fire; the driver gets hurt
 		int         carExplosion = 0;         // CarExplosion: v2.6: how the burning car blows up: 0 gta (GTA's explosion pushes BeamNG's car), 1 beamng (+ BeamNG's own)
 	} g_cfg;
@@ -686,6 +701,10 @@ namespace
 		GetPrivateProfileStringA(kSec, "HideMode", "auto", hm, sizeof(hm), path);
 		c.hideMode = _stricmp(hm, "invisible") == 0 ? 1 : _stricmp(hm, "transparent") == 0 ? 0 : _stricmp(hm, "ghost") == 0 ? 2 : -1;
 		c.showDriver = GetPrivateProfileIntA(kSec, "ShowDriver", 1, path) != 0;
+		c.driverSeat = GetPrivateProfileIntA(kSec, "DriverSeat", 1, path) != 0;
+		c.seatAdj[0] = IniFloat(path, "DriverSeatRightM", 0.0f);
+		c.seatAdj[1] = IniFloat(path, "DriverSeatForwardM", 0.0f);
+		c.seatAdj[2] = IniFloat(path, "DriverSeatUpM", 0.0f);
 		char dsg[32];
 		GetPrivateProfileStringA(kSec, "DrawStage", "auto", dsg, sizeof(dsg), path);
 		c.drawStage = _stricmp(dsg, "present") == 0 ? 0 : 1;
@@ -960,6 +979,8 @@ namespace
 			Log("settings: v2.52: physics props %d (%d at once); ground heights to BeamNG in mm", int(c.propPhysics), c.propPhysicsMax);
 			c.weapons = GetPrivateProfileIntA(kSec, "Weapons", 1, path) != 0;
 			c.trafficCollision = GetPrivateProfileIntA(kSec, "TrafficCollision", 1, path) != 0;
+			c.trafficTwins = std::clamp(int(GetPrivateProfileIntA(kSec, "TrafficTwins", 4, path)), 0, 8);
+			c.worldDeep = GetPrivateProfileIntA(kSec, "WorldDeep", 1, path) != 0;
 			{
 				char ce[32] = "";
 				GetPrivateProfileStringA(kSec, "CarExplosion", "gta", ce, sizeof(ce), path);
@@ -1348,7 +1369,15 @@ namespace
 	void UpdateDriver(int veh, bool drawnHidden)
 	{
 		const int  ped = Call<int>(N::PLAYER_PED_ID);
-		const bool want = drawnHidden && !g_cfg.showDriver && veh && Call<int>(N::IS_PED_IN_VEHICLE, ped, veh, 0);
+		const bool inVeh = drawnHidden && veh && Call<int>(N::IS_PED_IN_VEHICLE, ped, veh, 0);
+		const bool want = inVeh && !g_cfg.showDriver;
+		// v2.71: shown: hiding the car hides you with it (your v2.7 note: gone from F10 on, back only after getting out and in)
+		if (inVeh && g_cfg.showDriver && (!Call<int>(N::IS_ENTITY_VISIBLE, ped) || Call<int>(N::GET_ENTITY_ALPHA, ped) < 255)) {
+			static int shown = 0;
+			CallVoid(N::SET_ENTITY_VISIBLE, ped, 1, 0);
+			CallVoid(N::RESET_ENTITY_ALPHA, ped);
+			if (shown++ < 10) Log("driver (v2.71): you were hidden with the car: shown again (ShowDriver=1)");
+		}
 		if (want && g_hiddenPed != ped) {
 			if (g_hiddenPed) CallVoid(N::SET_ENTITY_VISIBLE, g_hiddenPed, 1, 0);
 			CallVoid(N::SET_ENTITY_VISIBLE, ped, 0, 0);
@@ -1828,6 +1857,7 @@ namespace
 		uint32_t          dmCount = 0, dmLost = 0;
 		std::vector<std::string> pbkQ;  // v2.51: "pbk" (BeamNG's car broke a prop's box: knock it over in GTA)
 		std::vector<std::string> ppQ;   // v2.52: physics props: "pp" poses, "pk" knocked, "pqf" one failed, "pqs" they work or not
+		std::vector<std::string> twQ;   // v2.71: traffic twins: "twi" ready, "twu" poses, "twd" dents, "twf" failed
 		std::vector<std::string> fxQ;   // v2.6: "fx" from BeamNG's car: hits it took, its fire, its explosion, its broken glass
 	} g_dnet;
 
@@ -1877,6 +1907,9 @@ namespace
 		bool     anchored = false;
 		double   Ag[3] = {}, Ab[3] = {}, th = 0, cth = 1, sth = 0;
 		double   lx = 0, ly = 0, lz = 0;  // GTA car origin -> drawn car origin (its model's footprint centre, bottom)
+		// v2.71: the seat: your head in GTA's car (its frame, at F10) and BeamNG's driver eye (its vehicle frame, from drive_ok)
+		double   headG[3] = {}, eyeB[3] = {};
+		bool     headOk = false, eyeOk = false, seatDone = false;
 		// steering sign
 		float    sign = 1.0f;
 		bool     signLocked = false;
@@ -2037,9 +2070,10 @@ namespace
 		// where the BeamNG car's origin goes: the GTA model's footprint centre at its lowest point
 		// (v2.0 drive mode: the GTA car is put where BeamNG has the car, so no ini offsets/turn then)
 		const bool   drv = g_drv.state == 2;
-		const double lx = (g_tgt.dmin.x + g_tgt.dmax.x) * 0.5 + (drv ? 0.0 : g_cfg.offX);
-		const double ly = (g_tgt.dmin.y + g_tgt.dmax.y) * 0.5 + (drv ? 0.0 : g_cfg.offY);
-		const double lz = g_tgt.dmin.z + (drv ? 0.0 : g_cfg.offZ);
+		// (v2.71: in drive mode the offset the car is put with: the seat moves it)
+		const double lx = drv ? g_drv.lx : (g_tgt.dmin.x + g_tgt.dmax.x) * 0.5 + g_cfg.offX;
+		const double ly = drv ? g_drv.ly : (g_tgt.dmin.y + g_tgt.dmax.y) * 0.5 + g_cfg.offY;
+		const double lz = drv ? g_drv.lz : g_tgt.dmin.z + g_cfg.offZ;
 		c.ox = p.x + R[0] * lx + F[0] * ly + U[0] * lz;
 		c.oy = p.y + R[1] * lx + F[1] * ly + U[1] * lz;
 		c.oz = p.z + R[2] * lx + F[2] * ly + U[2] * lz;
@@ -3093,6 +3127,10 @@ namespace
 					AcquireSRWLockExclusive(&g_dnet.lock);
 					if (g_dnet.fxQ.size() < 512) g_dnet.fxQ.push_back(std::move(s));
 					ReleaseSRWLockExclusive(&g_dnet.lock);
+				} else if (ty == "twu" || ty == "twd" || ty == "twi" || ty == "twf") {
+					AcquireSRWLockExclusive(&g_dnet.lock);
+					if (g_dnet.twQ.size() < 1024) g_dnet.twQ.push_back(std::move(s));
+					ReleaseSRWLockExclusive(&g_dnet.lock);
 				} else if (ty == "pp" || ty == "pk" || ty == "pqf" || ty == "pqs") {
 					AcquireSRWLockExclusive(&g_dnet.lock);
 					if (g_dnet.ppQ.size() < 1024) g_dnet.ppQ.push_back(std::move(s));
@@ -4023,6 +4061,8 @@ namespace
 		std::vector<uint8_t>  src;         // known points: 0 measured, 1 copied from a neighbour's edge, 2 filled in
 		std::vector<uint8_t>  tries;
 		std::vector<uint8_t>  fl;          // rays GTA lost for this point
+		std::vector<uint8_t>  deep;        // v2.71: 0 the normal window, 1 looked below it, 2 looked above it (no ground in the normal one)
+		uint16_t              deepFound = 0, deepMiss = 0;  // v2.71: points the deep search found ground for / found none above or below
 		std::vector<uint8_t>  leaf;        // per 0.5 m cell: the size (in points) of the flat cell it is part of (1 = finest)
 		std::vector<std::array<int16_t, 3>> test;  // cells to look at when the current pass is done (a0, b0, size)
 		int                   left = 0;    // points needed or waiting
@@ -4121,6 +4161,7 @@ namespace
 		uint32_t voidPts = 0, voidTiles = 0, swaps = 0, keptRm = 0, idleSent = 0, levelMiss = 0;  // v2.43
 		uint32_t noLevelTiles = 0, levelMoved = 0;                                                // v2.5
 		uint32_t underPts = 0, jointPts = 0;                                                      // v2.62
+		uint32_t deepRays = 0, deepHits = 0, aboveKept = 0, aboveDropped = 0;                    // v2.71
 		uint32_t soonPartial = 0;                                                                 // v2.63
 		// v2.51: jumps: the car in the air (GTA's ground more than 1.2 m under it) and where it will land (its flight followed
 		// against GTA's map): the ground there is built first, at the landing's level
@@ -4628,6 +4669,7 @@ namespace
 		t.src.assign(np, 0);
 		t.tries.assign(np, 0);
 		t.fl.assign(np, 0);
+		t.deep.assign(np, 0);
 		t.leaf.assign(size_t(t.n - 1) * (t.n - 1), 1);
 		t.t0 = NowSeconds();
 		t.gen = ++w.gen;
@@ -5278,6 +5320,99 @@ namespace
 
 	// all points of a pass answered: the next finer pass where it's needed, or done (holes filled from neighbours / left
 	// out / tried again)
+	// v2.71: after a fall, what the tiles around a spot were (for the next fix: no WorldDebug needed)
+	void WorldDumpAround(double x, double y, double z, const char* what)
+	{
+		static int dumps = 0;
+		if (++dumps > 8) return;
+		WorldState& w = g_world;
+		const int   ci = int(floor(x / WTileM())), cj = int(floor(y / WTileM()));
+		Log("ground dump (%s, GTA %.1f %.1f %.1f): the tiles around it", what, x, y, z);
+		for (int dj = -1; dj <= 1; ++dj)
+			for (int di = -1; di <= 1; ++di) {
+				const int64_t k = WKey(ci + di, cj + dj);
+				auto          it = w.tiles.find(k);
+				if (it == w.tiles.end()) {
+					Log("  tile %d,%d: not live (%s)", ci + di, cj + dj, w.cache.count(k) ? "in the cache" : "never measured here");
+					continue;
+				}
+				const WTile& t = it->second;
+				int          miss = 0, voids = 0, deep = 0;
+				for (int q = 0; q < t.n * t.n; ++q) {
+					miss += !std::isfinite(t.z[q]) && t.ps[q] != 5;
+					voids += t.ps[q] == 5;
+					deep += q < int(t.deep.size()) && t.deep[q] > 0;
+				}
+				double zc = NAN;
+				GridZ(t.z, t.n, t.step, t.i, t.j, x, y, zc);
+				Log("  tile %d,%d: state %d%s%s%s, level %.1f (measured for %.1f%s%s), %d points empty, %d left out (another level), %d looked deeper, "
+				    "partial %d, gaps %d, measured again %d, ground at the spot %.1f, cost %.0f m",
+					t.i, t.j, t.state, t.sent ? " sent" : "", t.draft ? " draft" : "", t.healOld ? " (old version in BeamNG)" : "", t.lv, t.lvE,
+					t.refCar ? ", from the car" : t.hasFrom ? ", from a neighbour" : "", t.noGround ? ", no ground at all" : "", miss, voids, deep, t.partial, t.gaps,
+					t.heal, zc, ChainCost(k));
+			}
+	}
+
+	// v2.71: ground found ABOVE a point's normal window (src 3) is kept only where it meets ground found in a normal window next
+	// to it: along its row or column, the nearest measured point within 2 m, no steeper than 50 degrees between them (a hillside
+	// rising from the road). Kept points pass it on to their neighbours. A roof or an overpass deck (a wall or open space between
+	// it and the road) is dropped.
+	void ConfirmAbove(WTile& t)
+	{
+		WorldState& w = g_world;
+		const int   n = t.n;
+		bool        any = false;
+		for (int k = 0; k < n * n && !any; ++k) any = t.ps[k] == 2 && t.src[k] == 3;
+		if (!any) return;
+		for (int pass = 0, changed = 1; changed && pass < 2 * n; ++pass) {
+			changed = 0;
+			for (int b = 0; b < n; ++b)
+				for (int a = 0; a < n; ++a) {
+					const int k = b * n + a;
+					if (t.ps[k] != 2 || t.src[k] != 3) continue;
+					const int dirs[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+					bool      ok = false;
+					for (const auto& dd : dirs) {
+						for (int s = 1; s <= int(2.0 / t.step + 0.5) && !ok; ++s) {
+							const int a2 = a + dd[0] * s, b2 = b + dd[1] * s;
+							if (a2 < 0 || b2 < 0 || a2 >= n || b2 >= n) break;
+							const int k2 = b2 * n + a2;
+							if (t.ps[k2] != 2 || !std::isfinite(t.z[k2])) continue;
+							// (up to 70 degrees: a wall between them is a building's or a bridge's; where they meet, the cells are measured
+							// every 0.5 m, so the nearest point across a wall is close and the step shows)
+							if (t.src[k2] != 3) ok = fabs(double(t.z[k2]) - t.z[k]) <= 2.75 * s * t.step;
+							break;  // (the nearest measured point decides)
+						}
+						if (ok) break;
+					}
+					// on the tile's edge: the same point of a finished neighbour (a hillside going on from the tile before)
+					if (!ok && (a == 0 || b == 0 || a == n - 1 || b == n - 1)) {
+						const int nbs[4][3] = { { -1, 0, a == 0 }, { 1, 0, a == n - 1 }, { 0, -1, b == 0 }, { 0, 1, b == n - 1 } };
+						for (const auto& q : nbs) {
+							if (!q[2] || ok) continue;
+							auto nb = w.tiles.find(WKey(t.i + q[0], t.j + q[1]));
+							if (nb == w.tiles.end() || nb->second.state != 2 || nb->second.n != n) continue;
+							const int a2 = q[0] ? (q[0] < 0 ? n - 1 : 0) : a, b2 = q[1] ? (q[1] < 0 ? n - 1 : 0) : b;
+							const float z2 = nb->second.z[b2 * n + a2];
+							ok = std::isfinite(z2) && fabs(double(z2) - t.z[k]) <= 0.5;
+						}
+					}
+					if (ok) {
+						t.src[k] = 0;
+						++w.aboveKept;
+						changed = 1;
+					}
+				}
+		}
+		for (int k = 0; k < n * n; ++k)
+			if (t.ps[k] == 2 && t.src[k] == 3) {
+				t.z[k] = NAN;
+				t.ps[k] = 3;
+				t.src[k] = 0;
+				++w.aboveDropped;
+			}
+	}
+
 	void WorldFinish(int64_t key)
 	{
 		WorldState& w = g_world;
@@ -5319,6 +5454,7 @@ namespace
 			if (t.test.empty()) break;
 		}
 		const int np = t.n * t.n;
+		ConfirmAbove(t);  // v2.71
 		// the points nobody measured: on BeamNG's triangles of the flat cell they are in
 		for (int b = 0; b < t.n; ++b)
 			for (int a = 0; a < t.n; ++a) {
@@ -5557,7 +5693,8 @@ namespace
 			t.z[r.pt] = endZ;
 			t.mat[r.pt] = mat;
 			t.ps[r.pt] = 2;
-			t.src[r.pt] = 0;
+			t.src[r.pt] = (r.pt < int(t.deep.size()) && t.deep[r.pt] == 2) ? 3 : 0;  // v2.71: (3: found above the window, not confirmed yet)
+			if (r.pt < int(t.deep.size()) && t.deep[r.pt]) ++w.deepHits, ++t.deepFound;
 			--t.left;
 			++t.rays;
 			++w.hits;
@@ -5576,6 +5713,17 @@ namespace
 					t.next = std::min(t.next, r.pt);
 					return;
 				}
+			}
+			// v2.71: no ground in the normal window: below it, then above it (near the car's way; WorldDeep=0: off). A tile where
+			// 6 points found nothing either way and none found ground (water, a void): the rest not (rays for the tiles around)
+			if (st == 2 && r.pt < int(t.deep.size()) && t.deep[r.pt] == 2) ++t.deepMiss;
+			if (st == 2 && g_cfg.worldDeep && !t.wide && !t.pre && r.pt < int(t.deep.size()) && t.deep[r.pt] < 2 && ChainCost(r.key) <= 3.0 * w.urgentM &&
+			    (t.deepFound > 0 || t.deepMiss < 6)) {
+				++t.deep[r.pt];
+				++w.deepRays;
+				t.ps[r.pt] = 4;
+				t.next = std::min(t.next, r.pt);
+				return;
 			}
 			// no ground in the window: none at this level here (v2.5: no second, wider try: it found other levels' ground)
 			++t.tries[r.pt];
@@ -5643,6 +5791,18 @@ namespace
 		if (t.wide) {
 			z0 = float(ref + 25.0);
 			z1 = float(ref - 30.0);
+		}
+		// v2.71: a point the normal window found nothing for: below it (the foot of a drop off the road: a car going over
+		// the edge lands there), then above it (a hillside rising more than WorldUpM over the road: rays starting inside the
+		// hill see nothing). What is found above is kept only where it meets the ground found next to it (WorldFinish: not
+		// a roof, not an overpass)
+		const int dp = k < int(t.deep.size()) ? t.deep[k] : 0;
+		if (dp == 1) {
+			z0 = float(ref - g_cfg.worldDownM + 0.2);
+			z1 = float(ref - g_cfg.worldDownM - 28.0);
+		} else if (dp == 2) {
+			z0 = float(ref + g_cfg.worldUpM + 22.0);
+			z1 = float(ref + g_cfg.worldUpM - 0.2);
 		}
 	}
 
@@ -6149,6 +6309,7 @@ namespace
 		t.src.assign(np, 0);
 		t.tries.assign(np, 0);
 		t.fl.assign(np, 0);
+		t.deep.assign(np, 0);
 		for (int k = 0; k < np; ++k) {
 			if (kind[k] == 2) continue;
 			t.z[k] = zmin + float(zc[k] / 1000.0);
@@ -6513,6 +6674,11 @@ namespace
 			w.aheadN ? w.aheadSum / w.aheadN : 0.0, w.aheadN, w.usN ? w.usSum / w.usN / 1000.0 : 0.0, w.usMax / 1000.0, g_map.readTiles, g_map.regionsRead,
 			g_map.wroteTiles, g_map.regions.size(), g_map.pending, g_map.errors, ms.empty() ? "none yet" : ms.c_str());
 		g_map.readTiles = g_map.regionsRead = g_map.wroteTiles = 0;
+		if (w.deepRays)
+			Log("ground: v2.71: %u rays looked below / above points with no ground in their window, %u found ground; found above and kept (meets the "
+			    "ground next to it) %u, dropped (a roof, an overpass) %u",
+				w.deepRays, w.deepHits, w.aboveKept, w.aboveDropped);
+		w.deepRays = w.deepHits = w.aboveKept = w.aboveDropped = 0;
 		Log("ground: levels: %u tiles swapped for the car's level, %u wanted tiles known only at another level (measured), %u points left out under edges (%u tiles "
 		    "all another level's); static world: %u far tiles taken out of BeamNG (budget %d triangles), %u sent while standing; v2.5: %u tiles with nothing at "
 		    "the car's level (left empty), %u levels moved onto their own ground; v2.54: %u swaps held (that spot was swapped under 5 s ago), %u swapped tiles "
@@ -7122,7 +7288,10 @@ namespace
 		if (now - w.airCheckT < 0.05) return;
 		w.airCheckT = now;
 		double       p[3], n[3];
-		const double a[3] = { w.cx, w.cy, w.cz + 0.5 }, b[3] = { w.cx, w.cy, w.cz - 80.0 };
+		// v2.71: from 2.5 m over the car (2.63 started 0.5 m over it: a car sinking into a gap in a bridge deck was under the
+		// deck's top, the ray saw the river 7 m below and took it for a jump: the deck's tiles were built at the river's level,
+		// your fall off the bridge in test 2). GTA's surface at or over the car's bottom: not in the air
+		const double a[3] = { w.cx, w.cy, w.cz + 2.5 }, b[3] = { w.cx, w.cy, w.cz - 80.0 };
 		const int    r = MapRay(a, b, p, n);
 		if (r < 0) return;
 		w.airH = r == 1 ? w.cz - p[2] : 80.0;
@@ -7370,7 +7539,7 @@ namespace
 					miss.push_back({ c.first, k });
 				} else if (it->second.state == 3 && it->second.gaps < 5 && now - it->second.tGap > 1.0) {
 					miss.push_back({ c.first + 0.5, k });
-				} else if (c.first <= std::max(24.0, 2.0 * w.urgentM) && now - it->second.tGap > 3.0 &&
+				} else if (c.first <= std::max(24.0, 2.0 * w.urgentM) && now - it->second.tGap > 1.5 &&
 				           ((it->second.state == 3 && it->second.gaps >= 99 && it->second.noGround && HealCount(k, now) < 3) ||
 				            (it->second.state == 2 && it->second.sent && !it->second.pre && it->second.partial > 0 && HealCount(k, now) < 2))) {
 					// v2.7: empty or part-empty tiles stayed that way for good (v2.63: gaps = 99, partial tiles never again): game-breaking
@@ -7445,7 +7614,9 @@ namespace
 							t.tries[q] = 0;
 							t.fl[q] = 0;
 							t.z[q] = NAN;
+							if (q < t.deep.size()) t.deep[q] = 0;  // v2.71
 						}
+					t.deepFound = t.deepMiss = 0;
 					std::fill(t.leaf.begin(), t.leaf.end(), uint8_t(1));
 					t.left = NeedCoarse(t);
 					if (t.left == 0) WorldFinish(m.second);
@@ -7750,6 +7921,15 @@ namespace
 		double   P0[3] = {}, A0[3][3] = {}, Cg0[3] = {};
 		double   brokenT = 0, brokenC[3] = {};
 		bool     checked = true;
+		int      copy = 0;         // v2.71: the plugin's copy that took its place in GTA (0: none yet)
+		bool     isCopy = false;   // v2.71: this one is a copy
+	};
+	// v2.71: a map prop swapped for the plugin's copy (where, to bring the map's back when the player is far)
+	struct PropCopy
+	{
+		int      orig = 0;
+		uint32_t model = 0;
+		double   p[3] = {}, t = 0;
 	};
 	struct PropCfg
 	{
@@ -7780,12 +7960,16 @@ namespace
 		// v2.52: physics props: -1 not known yet, 1 BeamNG spawns them, 0 it can't (fixed boxes instead)
 		int           physOk = -1;
 		std::set<int> knockedEnts;  // knocked over by BeamNG's car: loose when they go in again
+		std::map<int, PropCopy> copies;  // v2.71: by the copy's handle
+		std::set<int>           hidden;  // v2.71: map props swapped for a copy (skipped)
+		double                  copyT = 0;
+		uint32_t                copyN = 0, copyWait = 0, copyFail = 0, copyGone = 0, copyLogs = 0;
 		uint32_t      physSent = 0, physPoses = 0, physKnocked = 0, physFails = 0, physLogs = 0;
 		double   bumpSum = 0, scanUs = 0, scanUsMax = 0, measUs = 0;
 	} g_props;
 
 	const char* kPropsDefault = R"JSON({
-  "about": "GTA x Beam v2.7: GTA's props near BeamNG's car. v2.7: a broken prop gives GTA's particle effect named by its 'fx' (sparks, water, none; not given: hydrants water, breakaway props sparks); fxSparks / fxWater = [asset, effect]. v2.52: the nearest breakaway and soft ones are physics props (weighted boxes BeamNG simulates, GTA's prop copies them; PropPhysics in the ini): 'mass' (kg) sets one's weight (not listed: by its size), 'break' how hard a post must be hit to snap. kind: 'soft' (bins, cones, boxes: GTA knocks it over and BeamNG's car loses a little speed, 'bump' m/s), 'breakaway' (posts, poles, signs, traffic lights, fences: a box in BeamNG your car really hits; it breaks when the car has lost 'break' m/s against it, then GTA knocks it over), 'solid' (a box that never breaks), 'ignore'. Not listed: breakable and tall or wide = breakaway, big or tall = solid, the rest soft. 'model' is the model name or its hash (0x...). GtaBeamD1_props_seen.txt lists the models your drives met. Ctrl+F11 re-reads this file.",
+  "about": "GTA x Beam v2.71: GTA's props near BeamNG's car. v2.71: a knocked prop is swapped for a copy that falls with GTA's physics (the map's own don't move); hydrants listed. v2.7: a broken prop gives GTA's particle effect named by its 'fx' (sparks, water, none; not given: hydrants water, breakaway props sparks); fxSparks / fxWater = [asset, effect]. v2.52: the nearest breakaway and soft ones are physics props (weighted boxes BeamNG simulates, GTA's prop copies them; PropPhysics in the ini): 'mass' (kg) sets one's weight (not listed: by its size), 'break' how hard a post must be hit to snap. kind: 'soft' (bins, cones, boxes: GTA knocks it over and BeamNG's car loses a little speed, 'bump' m/s), 'breakaway' (posts, poles, signs, traffic lights, fences: a box in BeamNG your car really hits; it breaks when the car has lost 'break' m/s against it, then GTA knocks it over), 'solid' (a box that never breaks), 'ignore'. Not listed: breakable and tall or wide = breakaway, big or tall = solid, the rest soft. 'model' is the model name or its hash (0x...). GtaBeamD1_props_seen.txt lists the models your drives met. Ctrl+F11 re-reads this file.",
   "fxSparks": ["core", "ent_brk_sparking_wires"],
   "fxWater": ["core", "ent_sht_water"],
   "props": [
@@ -7797,6 +7981,9 @@ namespace
     { "model": "prop_streetlight_03", "kind": "breakaway", "break": 3.0 },
     { "model": "prop_traffic_01a", "kind": "breakaway", "break": 4.0 },
     { "model": "prop_fire_hydrant_1", "kind": "breakaway", "break": 4.0, "fx": "water" },
+    { "model": "prop_fire_hydrant_2", "kind": "breakaway", "break": 4.0, "fx": "water" },
+    { "model": "prop_fire_hydrant_2_l1", "kind": "breakaway", "break": 4.0, "fx": "water" },
+    { "model": "prop_fire_hydrant_4", "kind": "breakaway", "break": 4.0, "fx": "water" },
     { "model": "prop_bin_01a", "kind": "soft", "bump": 0.6 },
     { "model": "prop_roadcone02a", "kind": "soft", "bump": 0.1 }
   ]
@@ -8280,22 +8467,132 @@ namespace
 		if (P.fxN++ < 20) Log("props: %s at the broken prop 0x%08X (%s/%s): %s", how.c_str(), L.model, fx[0].c_str(), fx[1].c_str(), ok ? "started" : "GTA didn't start it");
 	}
 
-	void PropKnock(PropLive& L, const PropModel& m, const double V[3])
+	// v2.71: your v2.7 log: every knocked map prop "moved 0.00 m, upright 1.00" (GTA's map props don't move for a script). The
+	// map's prop is hidden (CREATE_MODEL_HIDE_EXCLUDING_SCRIPT_OBJECTS, and made invisible without collision) and a copy the
+	// plugin owns is put exactly where it stood; the copy moves (GTA's physics, or BeamNG's box for a physics prop). 0: the
+	// model isn't loaded yet (asked for: try again next tick)
+	int PropSwap(PropLive& L)
+	{
+		PropState& P = g_props;
+		if (L.isCopy) return L.ent;
+		if (L.copy) return L.copy;
+		CallVoid(N::REQUEST_MODEL, L.model);
+		if (!Call<int>(N::HAS_MODEL_LOADED, L.model)) {
+			++P.copyWait;
+			return 0;
+		}
+		const int c = Call<int>(N::CREATE_OBJECT, L.model, float(L.ps[0]), float(L.ps[1]), float(L.ps[2] + 0.05), 0, 1, 1);
+		if (!c) {
+			if (P.copyFail++ < 10) Log("props: GTA didn't make a copy of prop 0x%08X", L.model);
+			return 0;
+		}
+		const double* R = L.ax[0];
+		const double* F = L.ax[1];
+		const double* U = L.ax[2];
+		CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, c, float(L.ps[0]), float(L.ps[1]), float(L.ps[2]), 0, 0, 0);
+		CallVoid(N::SET_ENTITY_ROTATION, c, float(asin(std::clamp(F[2], -1.0, 1.0)) / kDeg), float(atan2(-R[2], U[2]) / kDeg), float(atan2(-F[0], F[1]) / kDeg), 2, 1);
+		CallVoid(N::CREATE_MODEL_HIDE_EXCLUDING_SCRIPT_OBJECTS, float(L.ps[0]), float(L.ps[1]), float(L.ps[2]), 0.5f, L.model, 1);
+		CallVoid(N::SET_ENTITY_VISIBLE, L.ent, 0, 0);
+		CallVoid(N::SET_ENTITY_COLLISION, L.ent, 0, 0);
+		CallVoid(N::SET_MODEL_AS_NO_LONGER_NEEDED, L.model);
+		PropCopy pc;
+		pc.orig = L.ent;
+		pc.model = L.model;
+		memcpy(pc.p, L.ps, sizeof(pc.p));
+		pc.t = NowSeconds();
+		P.copies[c] = pc;
+		P.hidden.insert(L.ent);
+		L.copy = c;
+		++P.copyN;
+		if (P.copyLogs++ < 30) Log("props: map prop 0x%08X swapped for the plugin's copy (it moves; the map's is hidden)", L.model);
+		return c;
+	}
+
+	// the knock itself, on the copy (a script's object: GTA's physics moves it)
+	void PropPush(int ent, const PropLive& L, const PropModel& m, const double V[3])
 	{
 		const double spd = sqrt(V[0] * V[0] + V[1] * V[1] + V[2] * V[2]);
 		const double vx = spd > 0.1 ? V[0] / spd : L.ax[1][0], vy = spd > 0.1 ? V[1] / spd : L.ax[1][1];
 		const double s = std::max(spd, 3.0);
 		const double k = g_cfg.propPush * (m.push >= 0 ? m.push : 1.0);
-		CallVoid(N::SET_ENTITY_DYNAMIC, L.ent, 1);
-		CallVoid(N::ACTIVATE_PHYSICS, L.ent);
+		CallVoid(N::FREEZE_ENTITY_POSITION, ent, 0);
+		CallVoid(N::SET_ENTITY_DYNAMIC, ent, 1);
+		CallVoid(N::ACTIVATE_PHYSICS, ent);
 		if (m.kind == kPropBreak && L.he[2] > 0.8) {
 			// v2.7: a post, sign or lamp falls the way the car hit it: pushed at its top along the car's way, little lift (2.63 threw it up)
-			CallVoid(N::APPLY_FORCE_TO_ENTITY, L.ent, 1, float(vx * s * 0.9 * k), float(vy * s * 0.9 * k), float(0.3 * k), 0.0f, 0.0f, float(L.he[2] * 1.6), 0, 0, 1, 1, 0, 1);
+			CallVoid(N::APPLY_FORCE_TO_ENTITY, ent, 1, float(vx * s * 0.9 * k), float(vy * s * 0.9 * k), float(0.3 * k), 0.0f, 0.0f, float(L.he[2] * 1.6), 0, 0, 1, 1, 0, 1);
 		} else {
-			CallVoid(N::APPLY_FORCE_TO_ENTITY, L.ent, 1, float(vx * s * 0.8 * k), float(vy * s * 0.8 * k), float((1.0 + 0.1 * s) * k), 0.0f, 0.0f, float(L.he[2] * 0.5), 0, 0,
+			// v2.71: a bin or a hydrant also gets part of the car's speed (it flies off, not just tips)
+			const double v = std::min(spd * 0.5, 12.0) * k;
+			CallVoid(N::SET_ENTITY_VELOCITY, ent, float(vx * v), float(vy * v), float(0.15 * v));
+			CallVoid(N::APPLY_FORCE_TO_ENTITY, ent, 1, float(vx * s * 0.8 * k), float(vy * s * 0.8 * k), float((1.0 + 0.1 * s) * k), 0.0f, 0.0f, float(L.he[2] * 0.5), 0, 0,
 				1, 1, 0, 1);
 		}
+	}
+
+	// a knock waiting for its copy's model (map props' models are normally loaded: at once)
+	struct PropKnockWait
+	{
+		int    ent;
+		double V[3], t;
+	};
+	std::vector<PropKnockWait> g_propWait;
+
+	void PropKnock(PropLive& L, const PropModel& m, const double V[3])
+	{
 		PropFx(L, m);
+		const int c = PropSwap(L);
+		if (c) {
+			PropPush(c, L, m, V);
+			return;
+		}
+		g_propWait.push_back({ L.ent, { V[0], V[1], V[2] }, NowSeconds() });
+	}
+
+	// v2.71: the copies: knocks that waited for a model; far from the player (150 m): the copy goes, the map's prop comes back
+	void PropCopiesTick()
+	{
+		PropState&   P = g_props;
+		const double now = NowSeconds();
+		for (size_t i = 0; i < g_propWait.size();) {
+			PropKnockWait& w = g_propWait[i];
+			auto           it = P.live.find(w.ent);
+			auto           mi = it == P.live.end() ? P.models.end() : P.models.find(it->second.model);
+			int            c = 0;
+			if (mi != P.models.end()) {
+				c = PropSwap(it->second);
+				if (c) PropPush(c, it->second, mi->second, w.V);
+			}
+			if (c || mi == P.models.end() || now - w.t > 1.5) {
+				if (!c && P.copyFail++ < 10) Log("props: no copy of a knocked prop within 1.5 s (its model didn't load): it stays");
+				g_propWait.erase(g_propWait.begin() + i);
+			} else
+				++i;
+		}
+		if (P.copies.empty() || now - P.copyT < 1.0) return;
+		P.copyT = now;
+		const NVec3 me = Call<NVec3>(N::GET_ENTITY_COORDS, Call<int>(N::PLAYER_PED_ID), 0);
+		double      oldT = 1e30;
+		int         oldC = 0;
+		for (auto& kv : P.copies) {
+			if (kv.second.t < oldT) oldT = kv.second.t, oldC = kv.first;
+		}
+		for (auto it = P.copies.begin(); it != P.copies.end();) {
+			const PropCopy& pc = it->second;
+			const double    dx = pc.p[0] - me.x, dy = pc.p[1] - me.y;
+			const bool      over = P.copies.size() > 60 && it->first == oldC;
+			if (dx * dx + dy * dy < 150.0 * 150.0 && !over) {
+				++it;
+				continue;
+			}
+			int h = it->first;
+			if (Call<int>(N::DOES_ENTITY_EXIST, h)) CallVoid(N::DELETE_OBJECT, &h);
+			CallVoid(N::REMOVE_MODEL_HIDE, float(pc.p[0]), float(pc.p[1]), float(pc.p[2]), 0.5f, pc.model, 0);
+			P.hidden.erase(pc.orig);
+			P.knockedEnts.erase(pc.orig);
+			++P.copyGone;
+			it = P.copies.erase(it);
+		}
 	}
 
 	// ---------------------------------------------------------------------------------------
@@ -8393,8 +8690,9 @@ namespace
 						const double* R = L.A0[0];
 						const double* F = L.A0[1];
 						const double* U = L.A0[2];
-						CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, L.ent, float(L.P0[0]), float(L.P0[1]), float(L.P0[2]), 0, 0, 0);
-						CallVoid(N::SET_ENTITY_ROTATION, L.ent, float(asin(std::clamp(F[2], -1.0, 1.0)) / kDeg), float(atan2(-R[2], U[2]) / kDeg), float(atan2(-F[0], F[1]) / kDeg), 2, 1);
+						const int e = L.copy ? L.copy : L.ent;  // (v2.71: the copy)
+						CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, e, float(L.P0[0]), float(L.P0[1]), float(L.P0[2]), 0, 0, 0);
+						CallVoid(N::SET_ENTITY_ROTATION, e, float(asin(std::clamp(F[2], -1.0, 1.0)) / kDeg), float(atan2(-R[2], U[2]) / kDeg), float(atan2(-F[0], F[1]) / kDeg), 2, 1);
 					}
 					std::string why;
 					JsonStr(s, "why", why);
@@ -8455,14 +8753,16 @@ namespace
 				rot(L.A0[1], F);
 				rot(L.A0[2], U);
 				const double O[3] = { L.Cg0[0] + v[1] + r1[0], L.Cg0[1] + v[2] + r1[1], L.Cg0[2] + v[3] + r1[2] };
+				const int    e = PropSwap(L);  // v2.71: the map's prop doesn't move: its copy does
+				if (!e) continue;
 				if (!L.frozen) {
-					CallVoid(N::FREEZE_ENTITY_POSITION, L.ent, 1);  // (GTA's own physics off it: BeamNG moves it now)
+					CallVoid(N::FREEZE_ENTITY_POSITION, e, 1);  // (GTA's own physics off it: BeamNG moves it now)
 					L.frozen = true;
 				}
-				CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, L.ent, float(O[0]), float(O[1]), float(O[2]), 0, 0, 0);
+				CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, e, float(O[0]), float(O[1]), float(O[2]), 0, 0, 0);
 				// GTA rotation order 2 (as for the drawn car: DrvSetPuppet)
 				const double pitch = asin(std::clamp(F[2], -1.0, 1.0)) / kDeg, yaw = atan2(-F[0], F[1]) / kDeg, roll = atan2(-R[2], U[2]) / kDeg;
-				CallVoid(N::SET_ENTITY_ROTATION, L.ent, float(pitch), float(roll), float(yaw), 2, 1);
+				CallVoid(N::SET_ENTITY_ROTATION, e, float(pitch), float(roll), float(yaw), 2, 1);
 				++P.physPoses;
 			}
 		}
@@ -8474,6 +8774,7 @@ namespace
 		PropState&  P = g_props;
 		DriveState& d = g_drv;
 		const ULONGLONG ms = GetTickCount64();
+		PropCopiesTick();  // v2.71 (also out of drive mode: far copies go, the map's props come back)
 		if (!g_cfg.props || d.state != 2 || !d.fixedMap || !d.carPoseOk) {
 			if (!P.live.empty()) PropsRemoveAll(d.state != 2 ? "drive mode off" : "props off");
 			AcquireSRWLockExclusive(&g_dnet.lock);
@@ -8537,7 +8838,7 @@ namespace
 			std::vector<std::pair<double, int>> cands;  // v2.52: physics prop candidates (distance squared, entity)
 			for (int q = 0; q < n; ++q) {
 				const int e = P.buf[q];
-				if (!e || !Call<int>(N::DOES_ENTITY_EXIST, e)) continue;
+				if (!e || P.hidden.count(e) || !Call<int>(N::DOES_ENTITY_EXIST, e)) continue;  // (v2.71: swapped for a copy)
 				const NVec3 p = Call<NVec3>(N::GET_ENTITY_COORDS, e, 0);
 				const double dx = p.x - d.carO[0], dy = p.y - d.carO[1];
 				if (dx * dx + dy * dy > R * R || fabs(p.z - d.carO[2]) > 30.0) continue;
@@ -8550,6 +8851,7 @@ namespace
 				PropLive& L = P.live[e];
 				if (L.scan == 0) ++m.seen, P.seenDirty = true;
 				L.ent = e;
+				L.isCopy = P.copies.count(e) != 0;  // v2.71: the plugin's copy: GTA's (no box in BeamNG; a soft one can be kicked again)
 				L.model = model;
 				L.scan = P.scan;
 				const double ax[3][3] = { { rt.x, rt.y, rt.z }, { fw.x, fw.y, fw.z }, { up.x, up.y, up.z } };
@@ -8573,7 +8875,7 @@ namespace
 							Call<int>(N::HAS_OBJECT_BEEN_BROKEN, e, 0));
 					}
 				}
-				if (L.phys) continue;  // v2.52: BeamNG simulates it (its pose comes back as "pp")
+				if (L.phys || L.isCopy) continue;  // v2.52: BeamNG simulates it (its pose comes back as "pp")
 				{
 					// v2.52: posts, signs, bins: a physics prop when near enough (below); litter isn't
 					const double vol = 8.0 * L.he[0] * L.he[1] * L.he[2];
@@ -8675,7 +8977,7 @@ namespace
 			}
 			// gone or out of range: forgotten (their boxes out of BeamNG)
 			for (auto it = P.live.begin(); it != P.live.end();) {
-				if (it->second.scan == P.scan) {
+				if (it->second.scan == P.scan || (it->second.phys && it->second.copy)) {  // (v2.71: hidden, its copy follows BeamNG's box)
 					++it;
 					continue;
 				}
@@ -8701,6 +9003,11 @@ namespace
 				if (mi == P.models.end()) continue;  // (not classified yet: GtaBeamD1_props.json was just read again)
 				PropModel& m = mi->second;
 				if (m.kind != kPropSoft || L.broken || L.phys) continue;  // (v2.52: a physics prop is BeamNG's)
+				if (L.isCopy) {  // v2.71: the copy of a physics prop BeamNG still moves: BeamNG's too
+					auto ci = P.copies.find(L.ent);
+					auto oi = ci == P.copies.end() ? P.live.end() : P.live.find(ci->second.orig);
+					if (oi != P.live.end() && oi->second.phys) continue;
+				}
 				if (now - L.lastHit < 2.0) continue;
 				const double dx = L.c[0] - d.carO[0], dy = L.c[1] - d.carO[1];
 				if (dx * dx + dy * dy > (l + 4.0) * (l + 4.0)) continue;
@@ -8739,6 +9046,10 @@ namespace
 					P.physOk == 1 ? "BeamNG spawns them" : P.physOk == 0 ? "BeamNG can't (fixed boxes instead)" : "not confirmed yet", liveN, P.physSent, P.physFails, P.physKnocked,
 					P.physPoses);
 			}
+			if (P.copyN || P.copyGone || P.copyFail)
+				Log("props: v2.71: %u map props swapped for the plugin's copies (%u ticks waited for a model, %u failed), %u copies out (far away: the map's props back), %zu now (10 s)",
+					P.copyN, P.copyWait, P.copyFail, P.copyGone, P.copies.size());
+			P.copyN = P.copyWait = P.copyGone = 0;
 			P.physSent = P.physPoses = P.physFails = P.physKnocked = 0;
 			P.hits = P.bumps = P.sentN = P.rmN = P.scans = P.breaks = P.measured = P.measRays = 0;
 			P.bumpSum = P.scanUs = P.scanUsMax = P.measUs = 0;
@@ -9657,10 +9968,16 @@ namespace
   "gtaDamagePerMs": 25,
   "pedKnockMs": 2.0,
   "pedHurtPerMs": 6,
-  "pedThrow": 1.0,
+  "pedThrow": 0.5,
   "pedSlowMs": 0.4,
   "riderKnockMs": 4.0,
-  "cooldownS": 0.5
+  "cooldownS": 0.5,
+  "twinsAbout": "v2.71 (TrafficTwins in the ini: how many): BeamNG cars that take a GTA car's place just before it meets yours, so the crash is BeamNG's (both soft body); GTA's car copies its twin and gets GTA damage where the twin is dented. twinPool: BeamNG's model names (vanilla), the GTA car gets the one closest in length; twinFallback: tried when one doesn't spawn. twinLeadS: how far ahead a meeting is seen; twinGtaDamage: GTA damage per metre of dent; twinStillS: a twin standing still this long goes back to GTA.",
+  "twinPool": ["fullsize", "covet", "roamer", "pessima", "pickup", "van", "sunburst", "etk800"],
+  "twinFallback": ["fullsize", "pickup", "covet"],
+  "twinLeadS": 0.6,
+  "twinGtaDamage": 6000,
+  "twinStillS": 2.0
 }
 )JSON";
 	struct TrafficState
@@ -9668,13 +9985,34 @@ namespace
 		bool                    cfgLoaded = false;
 		std::string             cfgSource;
 		double                  rangeM = 40, beamMass = 1500, bounce = 0.15, pushGta = 1, pushBeam = 1, dentPerMs = 0.006, dentMax = 0.12, gtaDmg = 25;
-		double                  pedKnock = 2.0, pedHurt = 6, pedThrow = 1.0, pedSlow = 0.4, riderKnock = 4.0, cooldown = 0.5;
+		double                  pedKnock = 2.0, pedHurt = 6, pedThrow = 0.5, pedSlow = 0.4, riderKnock = 4.0, cooldown = 0.5;
 		double                  classMass[23] = { 1300, 1400, 1700, 2100, 1600, 1400, 1400, 1500, 250, 2000, 9000, 3000, 2500, 90, 1500, 5000, 5000, 3000, 2200, 6000, 9000, 20000, 1000 };
 		std::vector<int>        buf;
 		std::vector<int>        nearV, nearP;  // the cars / people within rangeM (rescanned every 10 ticks)
 		std::map<int, double>   lastHit;
 		uint32_t                tick = 0, carHits = 0, pedHits = 0, riders = 0, logs = 0;
 		double                  logT = 0, dvSum = 0;
+		// v2.71: twins
+		struct Twin
+		{
+			int         state = 0;  // 0 asked for, 1 ready (parked in BeamNG), 2 on a GTA car, -1 failed
+			std::string model;
+			double      w = 0, l = 0, h = 0;
+			int         ent = 0;
+			double      tA = 0, tPose = 0, tStill = 0, dmax = 0;
+			double      mc[3] = {}, mnz = 0, gw = 0, gl = 0, gh = 0;  // the GTA car's model: its middle, bottom, size
+			bool        posed = false;
+			double      V[3] = {};
+			uint32_t    poses = 0;
+			std::map<int, double> applied;  // its dents given to GTA's car (by 0.5 m cell)
+		};
+		std::vector<Twin>       twins;
+		bool                    twAsked = false;
+		std::string             twPool[8], twFb[3];
+		int                     twPoolN = 0, twFbN = 0;
+		double                  twLead = 0.6, twDmg = 6000, twStill = 2.0;
+		std::map<int, double>   twDone;  // GTA cars a twin just left (not twinned again, not pushed the 2.7 way for 2 s)
+		uint32_t                twActs = 0, twRel = 0, twDents = 0, twFails = 0, twPoses = 0;
 	};
 	TrafficState g_traffic;
 
@@ -9721,19 +10059,205 @@ namespace
 		double cm[23];
 		const int n = JsonNums(s, "classMassKg", cm, 23);
 		for (int i = 0; i < n; ++i) T.classMass[i] = std::clamp(cm[i], 20.0, 100000.0);
+		// v2.71: twins (an older file without them: the built-in pool)
+		T.twPoolN = std::max(0, JsonStrs(js, "twinPool", T.twPool, 8));
+		if (T.twPoolN == 0) T.twPoolN = std::max(0, JsonStrs(kTrafficDefault, "twinPool", T.twPool, 8));
+		T.twFbN = std::max(0, JsonStrs(js, "twinFallback", T.twFb, 3));
+		if (T.twFbN == 0) T.twFbN = std::max(0, JsonStrs(kTrafficDefault, "twinFallback", T.twFb, 3));
+		num("twinLeadS", T.twLead, 0.1, 2.0);
+		num("twinGtaDamage", T.twDmg, 0, 100000);
+		num("twinStillS", T.twStill, 0.5, 20);
 		T.cfgLoaded = true;
 		Log("traffic (v2.7): %s; range %.0f m, BeamNG's car taken as %.0f kg, pushes x%.1f (GTA) / x%.1f (BeamNG), dents %.1f mm per m/s (max %.0f mm)%s", T.cfgSource.c_str(), T.rangeM,
 			T.beamMass, T.pushGta, T.pushBeam, T.dentPerMs * 1000, T.dentMax * 1000, g_cfg.trafficCollision ? "" : "; TrafficCollision=0: off");
+	}
+
+	// ---------------------------------------------------------------------------------------
+	// v2.71: traffic twins (your v2.7 test: GTA's cars vanished or didn't dent; you chose "BeamNG twins, GTA look"). The BeamNG
+	// mod keeps a pool of TrafficTwins BeamNG cars, parked (not drawn, not simulated). A GTA car about to meet yours (their boxes
+	// overlap within twinLeadS at their speeds) gets the free twin closest to it in length: the twin is put where it is, with its
+	// speed, and BeamNG's physics take over (the crash is soft body against soft body). GTA's car copies its twin's pose every
+	// tick and gets GTA's damage where the twin is dented. Standing still for twinStillS, far, gone or 30 s on: back to GTA.
+	// A GTA car with no twin free gets v2.7's push.
+	// ---------------------------------------------------------------------------------------
+	void TwinRelease(TrafficState& T, int k, const char* why)
+	{
+		TrafficState::Twin& tw = T.twins[k];
+		if (tw.state != 2) return;
+		char m[128];
+		snprintf(m, sizeof(m), "{\"t\":\"twr\",\"k\":%d,\"why\":\"%s\"}", k + 1, why);
+		DrvSend(m);
+		if (tw.ent && Call<int>(N::DOES_ENTITY_EXIST, tw.ent)) {
+			if (tw.posed) CallVoid(N::SET_ENTITY_VELOCITY, tw.ent, float(tw.V[0]), float(tw.V[1]), float(tw.V[2]));
+			int h = tw.ent;
+			CallVoid(N::SET_VEHICLE_AS_NO_LONGER_NEEDED, &h);
+		}
+		T.twDone[tw.ent] = NowSeconds() + (tw.dmax < 0.01 ? 4.0 : 0.0);  // (not twinned again for 2 s; 6 s after a twin with no crash)
+		if (T.logs++ < 80)
+			Log("traffic twins: GTA car %d back to GTA (%s; after %.1f s, %u poses copied, its twin dented up to %.0f mm)", tw.ent, why, NowSeconds() - tw.tA, tw.poses, tw.dmax * 1000);
+		tw.state = 1;
+		tw.ent = 0;
+		tw.posed = false;
+		tw.applied.clear();
+		tw.dmax = tw.tStill = 0;
+		tw.poses = 0;
+		++T.twRel;
+	}
+	void TwinsEnd(TrafficState& T, const char* why)
+	{
+		for (size_t k = 0; k < T.twins.size(); ++k) TwinRelease(T, int(k), why);
+		T.twins.clear();
+		T.twAsked = false;
+	}
+	// BeamNG's answers: ready ("twi"), poses ("twu": the last one per twin is copied), dents ("twd"), a failed put ("twf")
+	void TwinsMsgs(TrafficState& T)
+	{
+		std::vector<std::string> q;
+		AcquireSRWLockExclusive(&g_dnet.lock);
+		q.swap(g_dnet.twQ);
+		ReleaseSRWLockExclusive(&g_dnet.lock);
+		std::vector<std::array<double, 13>> last(T.twins.size());
+		std::vector<bool>                   have(T.twins.size(), false);
+		const double                        now = NowSeconds();
+		for (const std::string& s : q) {
+			std::string ty;
+			JsonStr(s, "t", ty);
+			if (ty == "twu") {
+				const size_t a = s.find('[');
+				if (a == std::string::npos) continue;
+				const char* p = s.c_str() + a + 1;
+				while (*p && *p != ']') {
+					std::array<double, 13> v{};
+					int                    n = 0;
+					for (; n < 13; ++n) {
+						char* e = nullptr;
+						v[n] = strtod(p, &e);
+						if (e == p) break;
+						p = e;
+						while (*p == ',' || *p == ' ') ++p;
+					}
+					if (n < 13) break;
+					const int k = int(v[0]) - 1;
+					if (k >= 0 && k < int(T.twins.size())) last[k] = v, have[k] = true;
+				}
+				continue;
+			}
+			const int k = int(JsonNum(s, "k", 0)) - 1;
+			if (k < 0 || k >= int(T.twins.size())) continue;
+			TrafficState::Twin& tw = T.twins[k];
+			if (ty == "twi") {
+				if (JsonNum(s, "ok", 0) > 0.5) {
+					JsonStr(s, "model", tw.model);
+					tw.w = JsonNum(s, "w", 0);
+					tw.l = JsonNum(s, "l", 0);
+					tw.h = JsonNum(s, "h", 0);
+					if (tw.state == 0) tw.state = 1;
+					Log("traffic twins: twin %d ready: a %s (%.1f x %.1f x %.1f m)", k + 1, tw.model.c_str(), tw.w, tw.l, tw.h);
+				} else {
+					std::string why;
+					JsonStr(s, "why", why);
+					if (tw.state == 2) TwinRelease(T, k, "failed");
+					tw.state = -1;
+					++T.twFails;
+					Log("traffic twins: twin %d failed in BeamNG (%s): GTA cars get v2.7's push instead", k + 1, why.c_str());
+				}
+			} else if (ty == "twf") {
+				std::string why;
+				JsonStr(s, "why", why);
+				++T.twFails;
+				if (T.logs++ < 80) Log("traffic twins: twin %d couldn't be put on GTA's car (%s)", k + 1, why.c_str());
+				if (tw.state == 2) {
+					T.twDone[tw.ent] = now;
+					tw.state = 1;
+					tw.ent = 0;
+				}
+			} else if (ty == "twd" && tw.state == 2 && tw.ent && tw.w > 0.1 && tw.l > 0.1 && tw.h > 0.1) {
+				// its dents (its frame from its footprint's middle, bottom) -> GTA's car's model frame, scaled by the two sizes
+				double sp[24];
+				const int ns = JsonNums(s.c_str(), "s", sp, 24) / 4;
+				for (int i = 0; i < ns; ++i) {
+					const double x = tw.mc[0] + sp[i * 4] * tw.gw / tw.w, y = tw.mc[1] + sp[i * 4 + 1] * tw.gl / tw.l, z = tw.mnz + sp[i * 4 + 2] * tw.gh / tw.h;
+					const double dd = sp[i * 4 + 3];
+					const int    cell = (int(floor(x * 2)) + 64) * 65536 + (int(floor(y * 2)) + 64) * 256 + (int(floor(z * 2)) + 64);
+					double&      ap = tw.applied[cell];
+					tw.dmax = std::max(tw.dmax, dd);
+					if (dd < ap + 0.015) continue;
+					CallVoid(N::SET_VEHICLE_DAMAGE, tw.ent, float(x), float(y), float(z), float(T.twDmg * (dd - ap)), float(std::clamp(0.5 + dd * 2.0, 0.5, 1.5)), 1);
+					ap = dd;
+					++T.twDents;
+				}
+			}
+		}
+		// GTA's car where its twin is (its model's footprint middle, bottom = the twin's)
+		for (size_t k = 0; k < T.twins.size(); ++k) {
+			TrafficState::Twin& tw = T.twins[k];
+			if (!have[k] || tw.state != 2 || !tw.ent || !Call<int>(N::DOES_ENTITY_EXIST, tw.ent)) continue;
+			const auto&  v = last[k];
+			const double Pb[3] = { v[1], v[2], v[3] }, Fb[3] = { v[4], v[5], v[6] }, Ub[3] = { v[7], v[8], v[9] }, Vb[3] = { v[10], v[11], v[12] };
+			double       P[3], F[3], U[3], V[3], R[3];
+			DrvMapPoint(Pb, P);
+			DrvMapDir(Fb, F);
+			DrvMapDir(Ub, U);
+			DrvMapDir(Vb, V);
+			Orthonormal(F, U);
+			Cross3(F, U, R);
+			double O[3];
+			for (int i = 0; i < 3; ++i) O[i] = P[i] - (R[i] * tw.mc[0] + F[i] * tw.mc[1] + U[i] * tw.mnz);
+			CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, tw.ent, float(O[0]), float(O[1]), float(O[2]), 0, 0, 0);
+			CallVoid(N::SET_ENTITY_ROTATION, tw.ent, float(asin(std::clamp(F[2], -1.0, 1.0)) / kDeg), float(atan2(-R[2], U[2]) / kDeg), float(atan2(-F[0], F[1]) / kDeg), 2, 1);
+			CallVoid(N::SET_ENTITY_VELOCITY, tw.ent, float(V[0]), float(V[1]), float(V[2]));
+			memcpy(tw.V, V, sizeof(tw.V));
+			tw.posed = true;
+			tw.tPose = now;
+			++tw.poses;
+			++T.twPoses;
+			const double sp = sqrt(V[0] * V[0] + V[1] * V[1] + V[2] * V[2]);
+			if (sp > 0.7) tw.tStill = 0;
+			else if (tw.tStill == 0) tw.tStill = now;
+			// the twin fell through a gap in GTA's ground in BeamNG: GTA's car stays on GTA's ground, back to GTA
+			double gz = 0;
+			if (g_cfg.world && WorldGroundAt(P[0], P[1], gz) && P[2] < gz - 2.5) {
+				CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, tw.ent, float(O[0]), float(O[1]), float(gz - tw.mnz + 0.3), 0, 0, 0);
+				TwinRelease(T, int(k), "its twin fell through GTA's ground in BeamNG");
+			}
+		}
+	}
+
+	// two flat boxes (centre, right, forward, half sizes) overlap? (separating axes)
+	bool FlatBoxes(const double ca[2], const double ra[2], const double fa[2], double wa, double la, const double cb[2], const double rb[2], const double fb[2], double wb, double lb)
+	{
+		const double* axes[4] = { ra, fa, rb, fb };
+		const double  dx = cb[0] - ca[0], dy = cb[1] - ca[1];
+		for (const double* a : axes) {
+			const double dist = fabs(dx * a[0] + dy * a[1]);
+			const double r1 = wa * fabs(ra[0] * a[0] + ra[1] * a[1]) + la * fabs(fa[0] * a[0] + fa[1] * a[1]);
+			const double r2 = wb * fabs(rb[0] * a[0] + rb[1] * a[1]) + lb * fabs(fb[0] * a[0] + fb[1] * a[1]);
+			if (dist > r1 + r2) return false;
+		}
+		return true;
 	}
 
 	void TrafficTick(bool paused)
 	{
 		TrafficState& T = g_traffic;
 		DriveState&   d = g_drv;
+		if (d.state != 2 && !T.twins.empty()) TwinsEnd(T, "drive mode off");  // v2.71
 		if (!g_cfg.trafficCollision || d.state != 2 || !d.fixedMap || !d.carPoseOk || paused) return;
 		if (!T.cfgLoaded) LoadTraffic();
 		const double now = NowSeconds();
 		const int    me = Call<int>(N::PLAYER_PED_ID);
+		// v2.71: the twins' pool asked for once a drive; BeamNG's answers
+		if (!T.twAsked && g_cfg.trafficTwins > 0 && T.twPoolN > 0) {
+			T.twAsked = true;
+			T.twins.assign(size_t(g_cfg.trafficTwins), TrafficState::Twin{});
+			std::string m = "{\"t\":\"twp\",\"m\":[", fb;
+			for (int k = 0; k < g_cfg.trafficTwins; ++k) m += std::string(k ? "," : "") + "\"" + T.twPool[k % T.twPoolN] + "\"";
+			for (int k = 0; k < T.twFbN; ++k) fb += std::string(k ? "," : "") + "\"" + T.twFb[k] + "\"";
+			m += "],\"fb\":[" + fb + "]}";
+			DrvSend(m.c_str());
+			Log("traffic twins (v2.71): asked BeamNG for %d twins (%s)", g_cfg.trafficTwins, m.c_str());
+		}
+		if (!T.twins.empty()) TwinsMsgs(T);
 		// the cars and people near the car (the pools every 10 ticks)
 		if (T.tick++ % 10 == 0) {
 			T.buf.resize(1024);
@@ -9802,6 +10326,74 @@ namespace
 			double       c[3], he[3] = { (mx.x - mn.x) * 0.5, (mx.y - mn.y) * 0.5, (mx.z - mn.z) * 0.5 };
 			const double pp[3] = { ps.x, ps.y, ps.z };
 			for (int k = 0; k < 3; ++k) c[k] = pp[k] + ax[0][k] * mc[0] + ax[1][k] * mc[1] + ax[2][k] * mc[2];
+			if (!T.twins.empty()) {
+				// v2.71: about to meet the car (their boxes, 25 cm bigger, at their speeds within twinLeadS) and not too high or low: a twin
+				const NVec3  ve0 = Call<NVec3>(N::GET_ENTITY_VELOCITY, e);
+				const int    cls = std::clamp(Call<int>(N::GET_VEHICLE_CLASS, e), 0, 22);
+				const bool   kind = cls != 8 && cls != 13 && cls != 14 && cls != 15 && cls != 16 && cls != 21;  // (not bikes, boats, aircraft, trains)
+				auto         flat = [](const double* v, double* o) {
+                    const double l2 = sqrt(v[0] * v[0] + v[1] * v[1]);
+                    o[0] = l2 > 1e-6 ? v[0] / l2 : 1.0;
+                    o[1] = l2 > 1e-6 ? v[1] / l2 : 0.0;
+				};
+				double ra[2], fa[2], rb[2], fb[2];
+				flat(d.carR, ra);
+				flat(d.carF, fa);
+				flat(ax[0], rb);
+				flat(ax[1], fb);
+				double meetT = -1;
+				if (kind && fabs(c[2] - cc[2]) < 3.0) {
+					for (int st = 0; st <= 4 && meetT < 0; ++st) {
+						const double tt = T.twLead * st / 4.0;
+						const double ca[2] = { cc[0] + d.carV[0] * tt, cc[1] + d.carV[1] * tt }, cb[2] = { c[0] + ve0.x * tt, c[1] + ve0.y * tt };
+						if (FlatBoxes(ca, ra, fa, w * 0.5 + 0.25, l * 0.5 + 0.25, cb, rb, fb, he[0] + 0.25, he[1] + 0.25)) meetT = tt;
+					}
+				}
+				// twinned (BeamNG has it: back to GTA when they won't meet after all), or a twin just left it (no 2.7 push on top)
+				int twK = -1;
+				for (size_t k = 0; k < T.twins.size(); ++k)
+					if (T.twins[k].state == 2 && T.twins[k].ent == e) twK = int(k);
+				if (twK >= 0 && meetT < 0 && T.twins[twK].dmax < 0.01 && now - T.twins[twK].tA > 0.8) TwinRelease(T, twK, "they didn't meet");
+				auto dn = T.twDone.find(e);
+				if (twK >= 0 || (dn != T.twDone.end() && now - dn->second < 2.0)) continue;
+				int best = -1;
+				for (size_t k = 0; meetT >= 0 && k < T.twins.size(); ++k)
+					if (T.twins[k].state == 1 && (best < 0 || fabs(T.twins[k].l - 2 * he[1]) < fabs(T.twins[best].l - 2 * he[1]))) best = int(k);
+				if (best >= 0) {
+					TrafficState::Twin& tw = T.twins[best];
+					double Pg[3], Pb[3], Fb[3], Ub[3], Vb[3];
+					for (int k = 0; k < 3; ++k) Pg[k] = pp[k] + ax[0][k] * mc[0] + ax[1][k] * mc[1] + ax[2][k] * mn.z;
+					const double fg[3] = { fw.x, fw.y, fw.z }, ug[3] = { up.x, up.y, up.z }, vg[3] = { ve0.x, ve0.y, ve0.z };
+					DrvUnmapPoint(Pg, Pb);
+					DrvUnmapDir(fg, Fb);
+					DrvUnmapDir(ug, Ub);
+					DrvUnmapDir(vg, Vb);
+					const double spd = sqrt(ve0.x * ve0.x + ve0.y * ve0.y + ve0.z * ve0.z);
+					const int    pk = spd < 0.5 && !Call<int>(N::GET_PED_IN_VEHICLE_SEAT, e, -1, 0) ? 1 : 0;
+					char         m[420];
+					snprintf(m, sizeof(m), "{\"t\":\"twa\",\"k\":%d,\"id\":%d,\"p\":[%.3f,%.3f,%.3f],\"f\":[%.5f,%.5f,%.5f],\"u\":[%.5f,%.5f,%.5f],\"v\":[%.3f,%.3f,%.3f],\"pk\":%d}",
+						best + 1, e, Pb[0], Pb[1], Pb[2], Fb[0], Fb[1], Fb[2], Ub[0], Ub[1], Ub[2], Vb[0], Vb[1], Vb[2], pk);
+					DrvSend(m);
+					CallVoid(N::SET_ENTITY_AS_MISSION_ENTITY, e, 0, 1);  // (GTA doesn't take it away while BeamNG has it)
+					tw.state = 2;
+					tw.ent = e;
+					tw.tA = now;
+					tw.tPose = tw.tStill = tw.dmax = 0;
+					tw.posed = false;
+					tw.poses = 0;
+					tw.applied.clear();
+					memcpy(tw.mc, mc, sizeof(tw.mc));
+					tw.mnz = mn.z;
+					tw.gw = mx.x - mn.x;
+					tw.gl = mx.y - mn.y;
+					tw.gh = mx.z - mn.z;
+					++T.twActs;
+					if (T.logs++ < 80)
+						Log("traffic twins: GTA car %d (class %d, %.1f m long, %.0f km/h%s) meets the car in %.2f s: twin %d (%s, %.1f m) takes its place", e, cls, tw.gl, spd * 3.6,
+							pk ? ", parked" : "", meetT, best + 1, tw.model.c_str(), tw.l);
+					continue;
+				}
+			}
 			double n[2], vn = 0;
 			NVec3  ve{};
 			if (!touching(e, c, ax, he, n, vn, ve)) continue;
@@ -9837,6 +10429,24 @@ namespace
 				Log("traffic: BeamNG's car and a GTA car (class %d, %.0f kg) met at %.0f km/h closing: GTA's car pushed %.1f km/h, BeamNG's %.1f km/h, dent %.0f mm", cls, mE, vn * 3.6,
 					dvE * 3.6, dvBn * 3.6, dent * 1000);
 		}
+		// v2.71: twins back to GTA
+		for (size_t k = 0; k < T.twins.size(); ++k) {
+			TrafficState::Twin& tw = T.twins[k];
+			if (tw.state != 2) continue;
+			const char* why = nullptr;
+			NVec3       p{};
+			const bool  alive = tw.ent && Call<int>(N::DOES_ENTITY_EXIST, tw.ent);
+			if (alive) p = Call<NVec3>(N::GET_ENTITY_COORDS, tw.ent, 0);
+			const double dist = alive ? hypot(p.x - cc[0], p.y - cc[1]) : 0;
+			if (!alive) why = "GTA's car is gone";
+			else if (now - tw.tA > 1.0 && (tw.tPose == 0 || now - tw.tPose > 1.0)) why = "no poses from BeamNG";
+			else if (dist > 45.0) why = "far from your car";
+			else if (tw.tStill > 0 && now - tw.tStill > T.twStill) why = "standing still";
+			else if (tw.dmax < 0.01 && now - tw.tA > 2.0 && dist > 10.0) why = "no crash";
+			else if (now - tw.tA > 30.0) why = "30 s";
+			if (why) TwinRelease(T, int(k), why);
+		}
+		for (auto it = T.twDone.begin(); it != T.twDone.end();) it = now - it->second > 5.0 ? T.twDone.erase(it) : std::next(it);
 		// people: only by a moving car (on foot the parked car is solid in GTA: people walk around it)
 		for (int e : (d.foot || sqrt(d.carV[0] * d.carV[0] + d.carV[1] * d.carV[1]) < 2.0) ? std::vector<int>{} : T.nearP) {
 			if (!Call<int>(N::DOES_ENTITY_EXIST, e) || Call<int>(N::IS_PED_DEAD_OR_DYING, e, 1)) continue;
@@ -9861,6 +10471,13 @@ namespace
 			if (T.carHits + T.pedHits > 0 || T.logT == 0)
 				Log("traffic: 10 s: %zu cars and %zu people near, %u car hits (BeamNG's car pushed %.1f km/h in all), %u people hit, %u riders knocked off", T.nearV.size(), T.nearP.size(),
 					T.carHits, T.dvSum * 3.6, T.pedHits, T.riders);
+			if (T.twActs + T.twRel + T.twFails > 0) {
+				int ready = 0, on = 0;
+				for (const auto& tw : T.twins) ready += tw.state == 1, on += tw.state == 2;
+				Log("traffic twins: 10 s: %u GTA cars got a twin, %u back to GTA, %u poses copied, %u dents given to GTA's cars, %u failed; now %d ready, %d on GTA cars", T.twActs, T.twRel,
+					T.twPoses, T.twDents, T.twFails, ready, on);
+				T.twActs = T.twRel = T.twPoses = T.twDents = T.twFails = 0;
+			}
 			T.logT = now;
 			T.carHits = T.pedHits = T.riders = 0;
 			T.dvSum = 0;
@@ -10071,6 +10688,18 @@ namespace
 		d.lx = (g_tgt.dmin.x + g_tgt.dmax.x) * 0.5;
 		d.ly = (g_tgt.dmin.y + g_tgt.dmax.y) * 0.5;
 		d.lz = g_tgt.dmin.z;
+		{
+			// v2.71: your head in GTA's car (SKEL_Head, in the car's frame), while it still stands where GTA put it
+			const int   ped = Call<int>(N::PLAYER_PED_ID);
+			const NVec3 hd = Call<NVec3>(N::GET_PED_BONE_COORDS, ped, 31086, 0.0f, 0.0f, 0.0f);
+			const NVec3 hl = Call<NVec3>(N::GET_OFFSET_FROM_ENTITY_GIVEN_WORLD_COORDS, d.veh, hd.x, hd.y, hd.z);
+			d.headG[0] = hl.x;
+			d.headG[1] = hl.y;
+			d.headG[2] = hl.z;
+			d.headOk = Call<int>(N::IS_PED_IN_VEHICLE, ped, d.veh, 0) && std::isfinite(hl.x) && std::isfinite(hl.y) && std::isfinite(hl.z) &&
+			           fabs(hl.x) < 3.0 && fabs(hl.y) < 5.0 && fabs(hl.z) < 3.0;
+			d.eyeOk = d.seatDone = false;
+		}
 		if (g_cfg.driveSteerSign != 0) {
 			d.sign = g_cfg.driveSteerSign;
 			d.signLocked = true;
@@ -10220,6 +10849,7 @@ namespace
 			if (d.sw) SoundWake("drive start");  // BeamNG was muted in the background: wake it so its sound plays
 		}
 		JsonStr(reply, "veh", d.vehB);
+		d.eyeOk = JsonNums(reply.c_str(), "eye", d.eyeB, 3) == 3;  // v2.71: BeamNG's driver camera
 		std::string ver;
 		JsonStr(reply, "v", ver);
 		d.nwB = std::max(0, JsonStrs(reply, "wheels", d.nameB, kDrvWheels));
@@ -10427,6 +11057,37 @@ namespace
 			Notify("Drive ON: GTA's controls drive the BeamNG car. %s again: stop.", KeyName(g_cfg.driveKey));
 	}
 
+	// v2.71: your seat (your v2.7 note: the player should sit in each BeamNG car's driver seat). GTA's hidden car is put so
+	// your head is where BeamNG's driver camera is: the drawn car's origin offset becomes your head (GTA car frame) + the eye
+	// in front of it - BeamNG's eye (the car file's frame) - DriverSeat*M. GTA's car is hidden and without collision in drive
+	// mode, so it can sit anywhere. The eye is taken 9 cm ahead of and 7 cm over SKEL_Head (UNVERIFIED: tune with DriverSeat*M)
+	void DrvSeat()
+	{
+		DriveState& d = g_drv;
+		if (d.seatDone) return;
+		d.seatDone = true;
+		if (!g_cfg.driverSeat) return;
+		if (!d.eyeOk || !d.headOk) {
+			Log("drive (v2.71): driver's seat: %s: GTA's car stays on the drawn car's footprint", !d.eyeOk ? "BeamNG sent no driver camera" : "your head wasn't found in GTA's car");
+			return;
+		}
+		const double eye[3] = { d.eyeB[0] - d.o[0], d.eyeB[1] - d.o[1], d.eyeB[2] - d.o[2] };  // the car file's frame
+		const double kEye[3] = { 0.0, 0.09, 0.07 };
+		double       L[3];
+		for (int k = 0; k < 3; ++k) L[k] = d.headG[k] + kEye[k] - eye[k] - g_cfg.seatAdj[k];
+		const double mv = sqrt((L[0] - d.lx) * (L[0] - d.lx) + (L[1] - d.ly) * (L[1] - d.ly) + (L[2] - d.lz) * (L[2] - d.lz));
+		if (eye[2] < 0.3 || eye[2] > 3.0 || fabs(eye[0]) > 1.5 || mv > 2.5) {
+			Log("drive (v2.71): driver's seat: BeamNG's eye %.2f %.2f %.2f m (the car file's frame) looks wrong (GTA's car would move %.2f m): not used", eye[0], eye[1], eye[2], mv);
+			return;
+		}
+		Log("drive (v2.71): driver's seat: BeamNG's eye at %.2f %.2f %.2f m (right, forward, up of the car file), your head in GTA's car at %.2f %.2f %.2f: GTA's car "
+		    "moved %.2f m against the drawn car (offset %.2f %.2f %.2f -> %.2f %.2f %.2f)",
+			eye[0], eye[1], eye[2], d.headG[0], d.headG[1], d.headG[2], mv, d.lx, d.ly, d.lz, L[0], L[1], L[2]);
+		d.lx = L[0];
+		d.ly = L[1];
+		d.lz = L[2];
+	}
+
 	// where the car-space origin is in BeamNG's vehicle frame (v2.4: from DriveTick, unchanged)
 	void DrvOriginUpdate(double now)
 	{
@@ -10475,6 +11136,7 @@ namespace
 					memcpy(d.o, fo, sizeof(d.o));
 					Log("drive: no wheels matched; car origin from the car file: %.3f %.3f %.3f m (%s)", fo[0], fo[1], fo[2], d.m.originHow.c_str());
 				}
+				DrvSeat();
 			}
 		}
 	}
@@ -11294,7 +11956,10 @@ namespace
 			DrvMapDir(Vd, Vw);
 			memcpy(d.lastV, Vw, sizeof(d.lastV));
 			d.lastVOk = true;
-			if (d.fixedMap) WorldCar(O, Vw, U);
+			// v2.71: not while BeamNG's car is under GTA's ground (fell through a gap, waiting to be put back): the levels around it
+			// were measured for the falling car (your test 2 log: the deck's tiles were swapped for the river's level, the
+			// put-back spot with them: it fell again)
+			if (d.fixedMap && d.underT <= 0) WorldCar(O, Vw, U);
 			// v2.5: for the props it hits
 			memcpy(d.carO, O, sizeof(d.carO));
 			memcpy(d.carR, R, sizeof(d.carR));
@@ -11348,6 +12013,7 @@ namespace
 					while (!d.fallLog.empty() && d.fallLog.front() < now - 30.0) d.fallLog.erase(d.fallLog.begin());
 					Log("drive: BeamNG's car fell through GTA's ground (%.1f m under it at %.1f %.1f for %.1f s; tile there %s; fall %zu in 30 s)", gz - O[2], O[0], O[1],
 						underFor, acked ? "built" : "NOT built yet", d.fallLog.size());
+					WorldDumpAround(g_world.cx, g_world.cy, g_world.cz, "where it was last on the ground");  // v2.71 (the world froze there)
 					if (d.fallLog.size() >= 3) {
 						DriveStop("BeamNG's car fell through GTA's ground 3 times in 30 s: send GtaBeamD1.log", true);
 						return;
@@ -13254,6 +13920,16 @@ void Occlusion(float3 P, float3 Nc, float3 Ngc, float3 Rm, float3 Rcc, out float
 }
 
 float3 ToCar(float3 v) { return float3(dot(v, carRight.xyz), dot(v, carFwd.xyz), dot(v, carUp.xyz)); }
+// v2.71: smooth value noise (the charred paint: your v2.7 screenshot showed 17 cm blocks)
+float Hash3(float3 p) { return frac(sin(dot(p, float3(12.9898, 78.233, 37.719))) * 43758.5453); }
+float VNoise(float3 p)
+{
+	float3 c = floor(p), f = frac(p);
+	f = f * f * (3.0 - 2.0 * f);
+	float a0 = lerp(Hash3(c), Hash3(c + float3(1, 0, 0)), f.x), a1 = lerp(Hash3(c + float3(0, 1, 0)), Hash3(c + float3(1, 1, 0)), f.x);
+	float b0 = lerp(Hash3(c + float3(0, 0, 1)), Hash3(c + float3(1, 0, 1)), f.x), b1 = lerp(Hash3(c + float3(0, 1, 1)), Hash3(c + float3(1, 1, 1)), f.x);
+	return lerp(lerp(a0, a1, f.y), lerp(b0, b1, f.y), f.z);
+}
 
 // v2.61: broken glass / lamps: a crack pattern on the car's own surface (cells about 7 cm; lines where two cells meet)
 float2 CrackHash(float2 p) { p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3))); return frac(sin(p) * 43758.5453); }
@@ -13371,7 +14047,7 @@ float4 Shade(VSOut i, out ShadeInfo si)
 	// v2.7: a blown-up car: charred dark and dull, a little rust-brown, uneven (like GTA's wrecks)
 	if (holeInfo.y > 0.0) {
 		float3 Pw = ToCar(i.rel - carPos.xyz);
-		float  nz = frac(sin(dot(floor(Pw * 6.0), float3(12.9898, 78.233, 37.719))) * 43758.5453);
+		float  nz = 0.6 * VNoise(Pw * 2.5) + 0.4 * VNoise(Pw * 9.0 + 17.0);
 		float  b = holeInfo.y * (0.82 + 0.15 * nz);
 		base.rgb = lerp(base.rgb, lerp(float3(0.025, 0.022, 0.02), float3(0.09, 0.05, 0.03), nz * 0.6), b);
 		metal = lerp(metal, 0.15, b);

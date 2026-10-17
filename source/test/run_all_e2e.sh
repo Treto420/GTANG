@@ -57,6 +57,13 @@ r script_foot.txt 120 FAKE_FOOT=1 FAKE_SHATTER=1 "FAKE_CAM=-4.5 5.5 3.5 -21.5 -1
 cp ini_saved.txt GtaBeamD1.ini; rm -f GtaBeamD1_weapons.json
 # v2.7: a parked GTA car on the way (both pushed, GTA's damaged, BeamNG's slowed); the ground 16 m below beside the road (empty tiles
 # near the standing car measured again, the second time with the tall window, kept); the crash-hurt rule
-r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1; python3 ../check_v27.py traffic | tail -1
+cp GtaBeamD1.ini ini_saved.txt
+sed -i 's/^TrafficTwins=.*/TrafficTwins=0/' GtaBeamD1.ini; grep -q '^TrafficTwins=' GtaBeamD1.ini || echo 'TrafficTwins=0' >> GtaBeamD1.ini
+r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1; python3 ../check_v27.py traffic | tail -1   # (v2.7's push: TrafficTwins=0)
+cp ini_saved.txt GtaBeamD1.ini
+r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1; python3 ../check_v27.py twins | tail -1     # v2.71: BeamNG twins
 r script_ring.txt 120 FAKE_RAYCAP=12 FAKE_DROP=1;    python3 ../check_v27.py drop | tail -1
 python3 ../check_v27.py crash | tail -1
+# v2.71: a hillside rising past the window beside the road (found from above, kept); a roof beside it (dropped)
+r script_world.txt 90 FAKE_RAYCAP=12 FAKE_HILL=1 FAKE_SEAT=1; python3 ../check_v27.py hill | tail -1; python3 ../check_v27.py seat | tail -1
+r script_world.txt 90 FAKE_RAYCAP=12 FAKE_ROOF=1; python3 ../check_v27.py roof | tail -1

@@ -72,6 +72,8 @@ static bool g_nadeDone = false;
 // 0.5 s, from +1.5 s), get back in at +7 s; fake_foot_done.txt at +12 s. Particle effects: the first fire name is unknown here
 // (GTA would return 0), the second one starts.
 static bool   g_footOut = false, g_footDone = false;
+static bool   g_playerVis = true;  // v2.71
+static int    g_playerAlpha = 255;
 static double g_fT0 = -1;
 static int    g_fxNext = 6000;
 struct FakeRay { int h; float x0, y0, z0, x1, y1, z1; unsigned tick; bool now; };
@@ -96,6 +98,12 @@ static double FakeGround(double x, double y, bool* hit, unsigned* mat)
 	// v2.7: FAKE_DROP=1: right of the car's line (heading 110 deg), from 8.5 m off it, the ground is 16 m lower (a ridge road's drop:
 	// out of the rays' normal reach, 12 m down)
 	if (Env("FAKE_DROP") && 0.93969 * x + 0.34202 * y > 8.5) z -= 16.0;
+	// v2.71: FAKE_HILL=1: left of the car's line, from 8 m off it, a hillside rising 1.2 m per m (50 degrees) up to 18 m (out of
+	// the rays' normal reach, 4 m up: they start inside it)
+	if (Env("FAKE_HILL")) {
+		const double off = -(0.93969 * x + 0.34202 * y) - 8.0;
+		if (off > 0) z += std::min(18.0, off * 1.2);
+	}
 	if (x > 3.5 && x < 4.0) z += 0.15;  // a curb
 	// v2.54: FAKE_CREST=1: the road goes over a crest at 70 m along the car's line (a ramp meeting a bridge deck: 1.2 m up
 	// and down within a few metres) with a 0.2 m joint across the road at its top (a low face, not a wall)
@@ -227,7 +235,10 @@ static bool FakeHRay(double x0, double y0, double z0, double x1, double y1, doub
 // v2.5: FAKE_PROPS=1: props in GTA's object pool (handles 9000+) along the car's line: lamp posts 4.5 m right of it every
 // 20 m (breakable, 0.4 x 0.4 x 8 m), a bin ON the line at s 45 (0.6 x 0.6 x 1 m), a lamp post ON it at s 80, a container 7 m
 // left at s 100 (6 x 2.4 x 2.6 m: solid), a can (tiny: ignored) and one attached to something (skipped)
-struct FakeProp { int h; double x, y, yaw; unsigned model; bool frag, attached, pushed; bool posed = false, frozen = false; double z = 0, R[3][3] = {}; int poses = 0; };
+struct FakeProp { int h; double x, y, yaw; unsigned model; bool frag, attached, pushed; bool posed = false, frozen = false; double z = 0, R[3][3] = {}; int poses = 0;
+                  int src = 0; bool hidden = false; };  // v2.71: a script's copy of map prop src (map props don't move for a script, copies do); hidden by a model hide
+static int Shown(const FakeProp* fp) { return fp->src ? fp->src : fp->h; }  // (the prints name the map prop a copy stands for)
+static int g_copyNext = 9500;
 static std::vector<FakeProp> g_props;
 static bool g_propsInit = false;
 static const unsigned kMLamp = 0xA1110001u, kMBin = 0xA1110002u, kMCont = 0xA1110003u, kMCan = 0xA1110004u;
@@ -330,6 +341,17 @@ static bool FakeRayHit(double x, double y, double z0, double z1, double* z, unsi
 		const double top = g + 22.0;
 		if (z0 >= top && top >= z1) { *z = top; *mat = 0x10DD5498u; return true; }
 	}
+	// v2.71: FAKE_ROOF=1: a building left of the car's line (8 to 18 m off it, 30 to 50 m along it), its roof 8 m up: rays from
+	// over it see the roof, rays starting inside it see nothing (no floor)
+	if (Env("FAKE_ROOF")) {
+		const double off = -(0.93969 * x + 0.34202 * y), along = -0.34202 * x + 0.93969 * y;
+		if (off > 8.0 && off < 18.0 && along > 30.0 && along < 50.0) {
+			const double top = g + 8.0;
+			if (z0 >= top && top >= z1) { *z = top; *mat = 0xCDEB5023u; return true; }
+			*z = g;
+			return false;
+		}
+	}
 	const double h = RampH(x, y);
 	if (h > 0) {
 		const double top = g + h;
@@ -426,7 +448,7 @@ int worldGetAllObjects(int* arr, int arrSize)
 {
 	InitProps();
 	int n = 0;
-	for (auto& p : g_props) if (n < arrSize) arr[n++] = p.h;
+	for (auto& p : g_props) if (n < arrSize && !p.hidden) arr[n++] = p.h;
 	return n;
 }
 
@@ -665,13 +687,47 @@ PUINT64 nativeCall()
 		break; }
 	case 0x0C112765300C7E1E: { FakeProp* fp = PropOf(int(g_args[0])); RetI(fp && fp->frag ? 1 : 0); break; }      // GET_IS_ENTITY_A_FRAG
 	case 0xB346476EF1A64897: { FakeProp* fp = PropOf(int(g_args[0])); RetI(fp && fp->attached ? 1 : 0); break; }  // IS_ENTITY_ATTACHED
-	case 0x47D6F43D77935C75: RetI(1); break;                                                                      // IS_ENTITY_VISIBLE
+	case 0x47D6F43D77935C75: { FakeProp* fp = PropOf(int(g_args[0])); RetI(int(g_args[0]) == 1 ? int(g_playerVis) : fp && fp->hidden ? 0 : 1); break; }      // IS_ENTITY_VISIBLE
 	case 0x1718DE8E3F2823CA: { printf("FAKE: entity %d dynamic %d\n", int(g_args[0]), int(g_args[1])); fflush(stdout); break; }  // SET_ENTITY_DYNAMIC
 	case 0x710311ADF0E20730: break;                                                                               // ACTIVATE_PHYSICS
 	case 0xC5F68BE9613E2D18: {                                // APPLY_FORCE_TO_ENTITY: the prop flies off (moved 30 m away)
 		FakeProp* fp = PropOf(int(g_args[0]));
-		printf("FAKE: prop %d pushed (type %d, %.1f %.1f %.1f)\n", int(g_args[0]), int(g_args[1]), F(2), F(3), F(4)); fflush(stdout);
+		if (fp && !fp->src) { printf("FAKE: map prop %d pushed: GTA doesn't move it\n", fp->h); fflush(stdout); break; }   // v2.71 (his v2.7 log)
+		printf("FAKE: prop %d pushed (type %d, %.1f %.1f %.1f)%s\n", fp ? Shown(fp) : int(g_args[0]), int(g_args[1]), F(2), F(3), F(4), fp ? " (its copy)" : ""); fflush(stdout);
 		if (fp) { fp->pushed = true; fp->x += 100.0; }   // flown off the road
+		break; }
+	// v2.71: model loading, the plugin's copies of map props, model hides
+	case 0x963D27A58DF860AC: break;                                                    // REQUEST_MODEL
+	case 0x98A4EB5D89A0C952: RetI(1); break;                                           // HAS_MODEL_LOADED
+	case 0xE532F5D78798DAAB: break;                                                    // SET_MODEL_AS_NO_LONGER_NEEDED
+	case 0x509D5878EB39E842: {                                                         // CREATE_OBJECT
+		InitProps();
+		const unsigned m = unsigned(g_args[0]);
+		FakeProp* orig = nullptr;
+		for (auto& p : g_props) if (!p.src && p.model == m && (p.x - F(1)) * (p.x - F(1)) + (p.y - F(2)) * (p.y - F(2)) < 1.0) orig = &p;
+		FakeProp c{ g_copyNext++, F(1), F(2), orig ? orig->yaw : 0.0, m, orig && orig->frag, false, false };
+		c.src = orig ? orig->h : -1;
+		c.posed = true; c.z = F(3);
+		{ const double a = c.yaw * 3.14159265358979 / 180.0; const double R[3][3] = { { cos(a), -sin(a), 0 }, { sin(a), cos(a), 0 }, { 0, 0, 1 } }; memcpy(c.R, R, sizeof(R)); }
+		printf("FAKE: copy %d of prop %d made (model 0x%08X, dynamic %d)\n", c.h, c.src, m, int(g_args[6])); fflush(stdout);
+		g_props.push_back(c);
+		RetI(c.h);
+		break; }
+	case 0x539E0AE3E6634B9F: {                                                         // DELETE_OBJECT
+		int* h = reinterpret_cast<int*>(g_args[0]);
+		for (size_t i = 0; i < g_props.size(); ++i) if (g_props[i].h == *h && g_props[i].src) { printf("FAKE: copy %d deleted\n", *h); fflush(stdout); g_props.erase(g_props.begin() + i); break; }
+		*h = 0;
+		break; }
+	case 0x3A52AE588830BF7F: case 0xD9E3006FB3CBD765: {                                // CREATE_MODEL_HIDE_EXCLUDING_SCRIPT_OBJECTS, REMOVE_MODEL_HIDE
+		const bool hide = g_hash == 0x3A52AE588830BF7F;
+		for (auto& p : g_props) {
+			bool gh; unsigned mt;
+			const double z = FakeGround(p.x, p.y, &gh, &mt);
+			if (!p.src && p.model == unsigned(g_args[4]) && (p.x - F(0)) * (p.x - F(0)) + (p.y - F(1)) * (p.y - F(1)) + (z - F(2)) * (z - F(2)) <= F(3) * F(3)) {
+				p.hidden = hide;
+				printf("FAKE: map prop %d %s\n", p.h, hide ? "hidden" : "back"); fflush(stdout);
+			}
+		}
 		break; }
 	case 0x1899F328B0E12848: {                                // GET_OFFSET_FROM_ENTITY_IN_WORLD_COORDS
 		const double l[3] = { F(1), F(2), F(3) };
@@ -682,19 +738,26 @@ PUINT64 nativeCall()
 	}
 	// v2.0 drive mode natives
 	case 0x239A3351AC1DA385:                                  // SET_ENTITY_COORDS_NO_OFFSET (v2.52: props too)
+		if (int(g_args[0]) == 9001) {   // v2.71: the traffic car copies its BeamNG twin
+			static int n = 0;
+			g_tc[0] = F(1); g_tc[1] = F(2); g_tc[2] = F(3);
+			if (n++ % 20 == 0) { printf("FAKE: traffic car posed %.2f %.2f %.2f (%d)\n", g_tc[0], g_tc[1], g_tc[2], n); fflush(stdout); }
+			break;
+		}
 		if (FakeProp* fp = PropOf(int(g_args[0]))) {
 			if (!fp->posed) { const double a = fp->yaw * 3.14159265358979 / 180.0; const double R[3][3] = { { cos(a), -sin(a), 0 }, { sin(a), cos(a), 0 }, { 0, 0, 1 } }; memcpy(fp->R, R, sizeof(R)); }
 			fp->posed = true; fp->x = F(1); fp->y = F(2); fp->z = F(3); ++fp->poses;
-			if (fp->poses <= 3 || fp->poses % 20 == 0) { printf("FAKE: prop %d posed %.2f %.2f %.2f (%d, frozen %d)\n", fp->h, fp->x, fp->y, fp->z, fp->poses, int(fp->frozen)); fflush(stdout); }
+			if (fp->poses <= 3 || fp->poses % 20 == 0) { printf("FAKE: prop %d posed %.2f %.2f %.2f (%d, frozen %d)\n", Shown(fp), fp->x, fp->y, fp->z, fp->poses, int(fp->frozen)); fflush(stdout); }
 			break;
 		}
 		g_pos[0] = F(1); g_pos[1] = F(2); g_pos[2] = F(3); PuppetLog("coords"); break;
 	case 0x8524A8B0171D5E07:                                  // SET_ENTITY_ROTATION (v2.52: props too)
+		if (int(g_args[0]) == 9001) { g_tcYaw = F(3); break; }   // v2.71
 		if (FakeProp* fp = PropOf(int(g_args[0]))) {
 			double save[3][3]; memcpy(save, g_rot, sizeof(save));
 			SetBasisEuler2(F(1), F(2), F(3));
 			memcpy(fp->R, g_rot, sizeof(fp->R)); memcpy(g_rot, save, sizeof(save));
-			if (fp->poses <= 3) { printf("FAKE: prop %d turned: up %.2f %.2f %.2f\n", fp->h, fp->R[0][2], fp->R[1][2], fp->R[2][2]); fflush(stdout); }
+			if (fp->poses <= 3) { printf("FAKE: prop %d turned: up %.2f %.2f %.2f\n", Shown(fp), fp->R[0][2], fp->R[1][2], fp->R[2][2]); fflush(stdout); }
 			break;
 		}
 		SetBasisEuler2(F(1), F(2), F(3) + (Env("FAKE_ROTWRONG") ? 30.0f : 0.0f)); PuppetLog("rot"); break;
@@ -797,7 +860,8 @@ PUINT64 nativeCall()
 	case 0x157F93B036700462: RetI(0); break;                  // IS_RADAR_HIDDEN
 	case 0x9EB6522EA68F22FE: RetI(1); break;                  // IS_RADAR_PREFERENCE_SWITCHED_ON
 	case 0xAF754F20EB5CD51A: RetI(1); break;                  // IS_MINIMAP_RENDERING
-	case 0xBB40DD2270B65366: RetI(g_footOut ? 0 : 1); break;  // GET_PED_IN_VEHICLE_SEAT -> the player (v2.61: not while out)
+	case 0xBB40DD2270B65366: RetI(int(g_args[0]) == 9001 || g_footOut ? 0 : 1); break;  // GET_PED_IN_VEHICLE_SEAT -> the player (v2.61: not while out; v2.71: the parked car: nobody)
+	case 0x629BFA74418D6239: printf("FAKE: vehicle %d no longer needed\n", *reinterpret_cast<int*>(g_args[0])); fflush(stdout); break;   // SET_VEHICLE_AS_NO_LONGER_NEEDED (v2.71)
 	case 0xEC3C9B8D5327B563: {                                // GET_CONTROL_NORMAL
 		const int c = int(g_args[1]);
 		RetF(c == 59 ? 0.5f : c == 71 ? 1.0f : 0.0f);
@@ -917,8 +981,13 @@ PUINT64 nativeCall()
 		RetI(++g_collCalls > wait ? 1 : 0); break; }
 	case 0xD05A3241B9A86F19: break;                                     // SET_ENTITY_FLAG_SUPPRESS_SHADOW
 	case 0xA3EE4A07279BB9DB: RetI(g_footOut ? 0 : 1); break;            // IS_PED_IN_VEHICLE (v2.61: not while out)
-	case 0xEA1C610A04DB6BBB: if (int(g_args[0]) == 1) { printf("FAKE: player visible %d\n", int(g_args[1])); fflush(stdout); } break;  // SET_ENTITY_VISIBLE
-	case 0x9B1E824FFBB7027A: if (int(g_args[0]) == 1) { printf("FAKE: player alpha reset\n"); fflush(stdout); } break;              // RESET_ENTITY_ALPHA
+	case 0xEA1C610A04DB6BBB:                                                                                                        // SET_ENTITY_VISIBLE
+		if (int(g_args[0]) == 1) { g_playerVis = g_args[1] != 0; printf("FAKE: player visible %d\n", int(g_args[1])); fflush(stdout); }
+		if (int(g_args[0]) == 100 && !g_args[1] && !g_footOut && g_playerVis) { g_playerVis = false; printf("FAKE: player hidden with the car\n"); fflush(stdout); }  // v2.71: (as GTA)
+		break;
+	case 0x9B1E824FFBB7027A: if (int(g_args[0]) == 1) { g_playerAlpha = 255; printf("FAKE: player alpha reset\n"); fflush(stdout); } break;              // RESET_ENTITY_ALPHA
+	case 0x44A0870B7E92D7C0: if (int(g_args[0]) == 100 && !g_footOut) g_playerAlpha = int(g_args[1]); break;   // SET_ENTITY_ALPHA (v2.71: the car's goes to its driver, as GTA)
+	case 0x5A47B3B5E63E94C6: RetI(int(g_args[0]) == 1 ? g_playerAlpha : 255); break;                           // GET_ENTITY_ALPHA (v2.71)
 	case 0xAD738C3085FE7E11: printf("FAKE: entity %d is a mission entity\n", int(g_args[0])); fflush(stdout); break;                 // SET_ENTITY_AS_MISSION_ENTITY
 	case 0xB80D8756B4668AB6: break;                                                                                                   // REQUEST_NAMED_PTFX_ASSET
 	case 0x8702416E512EC454: RetI(1); break;                                                                                          // HAS_NAMED_PTFX_ASSET_LOADED
