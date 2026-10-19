@@ -14,7 +14,7 @@ GTA x Beam is a "passthrough" bridge. GTA V runs the world, walking and gunplay;
 - **GTA's weapons.** Bullets dent the car, leave holes, pop tyres and break windows. Explosions push it and set it on fire. A car that blows up becomes a charred wreck.
 - **Traffic crashes in BeamNG.** A GTA car about to hit yours gets a BeamNG "twin": the crash happens in BeamNG, soft body against soft body. The GTA car copies its twin's movement and takes GTA damage where the twin is dented. Pedestrians are knocked down; riders come off their bikes.
 - **Breakable props.** Lamp posts, signs and hydrants fall the way you hit them. Breaking one can set off a GTA particle effect, such as sparks or a hydrant's water (set in `GtaBeamD1_props.json`).
-- **Your driver's seat.** In drive mode you sit where the BeamNG car's driver camera is, so first person looks out of the BeamNG car.
+- **Your driver's seat.** In drive mode you sit where the BeamNG car's driver camera is, so first person looks out of the BeamNG car. Ctrl+Shift+F10 lets you move yourself in the seat with the arrow keys; it's saved per car. The driver's door opens in BeamNG when you get in or out.
 - **On foot.** Get out, walk around the car and shoot it. The BeamNG gauge and drive mode stay on.
 - **Pause sync, sound and radio.** Pausing one game pauses the other. BeamNG's engine sound plays while GTA has focus, and GTA's radio plays as the phone radio.
 
@@ -42,13 +42,14 @@ GTA x Beam is a "passthrough" bridge. GTA V runs the world, walking and gunplay;
 | **F10** | Drive mode on/off (sit in the driver's seat, standing still) |
 | **Shift+F10** | The on-screen drive check text |
 | **Ctrl+F11** | Re-read the ini and json files |
+| **Ctrl+Shift+F10** | Seat adjust (in drive mode): arrow keys and Page Up / Page Down move you; press again to save it for this car |
 | **D-pad down** | Swap the pad between GTA and BeamNG (in drive mode) |
 
 ## Settings
 Everything is in `GtaBeamD1.ini`, with comments. Common ones:
 - `TrafficCollision=0` turns off contact with GTA's traffic and people (they pass through your car).
 - `TrafficTwins` sets how many BeamNG twins wait for GTA's cars (4 by default; 0 = a simpler push without BeamNG crashes).
-- `DriverSeatForwardM`, `DriverSeatUpM`, `DriverSeatRightM` move you in the seat.
+- `DriverSeatForwardM`, `DriverSeatUpM`, `DriverSeatRightM` move you in the seat for every car (Ctrl+Shift+F10 does it per car, saved in `GtaBeamD1_seats.json`).
 - `Weapons=0` turns off weapon damage on the car.
 - `DriveGravity` sets how heavy the car feels (1.1 by default).
 - `World=0` uses BeamNG's own map instead of GTA's ground (for testing).
@@ -67,7 +68,7 @@ Please attach both logs to any bug report:
 ## Known limits
 - GTA's cars crumple only in BeamNG. In GTA they show GTA's own damage at the dented spots. The twins are vanilla BeamNG cars matched by size, not GTA's models.
 - Up to 4 GTA cars at once get a twin (`TrafficTwins`). Others, and bikes, get the simpler push.
-- Starting drive mode spawns the twins in BeamNG: it may hitch for a moment.
+- The first F10 of a BeamNG session loads the twins (about 10 s; BeamNG freezes for a moment per car). Later F10s reuse them.
 - GTA drivers may not react to your car before a hit.
 - The first drive through an area measures it. A saved map (`GtaBeamD1_map\`) makes later drives instant there. Delete that folder to measure again.
 - Some hillsides and bridge decks can appear a few seconds late. They fill in as you approach.

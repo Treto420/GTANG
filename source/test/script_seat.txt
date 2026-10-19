@@ -1,0 +1,11 @@
+5 pad 0,0,0,0,0,0,0
+40 key f11
+100 key f10
+250 key ctrlshiftf10
+260 keydown 26
+290 keyup 26
+300 keydown 21
+310 keyup 21
+330 key ctrlshiftf10
+400 key f10
+450 quit

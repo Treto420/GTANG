@@ -8,6 +8,9 @@
             not endlessly; nothing fell through.
   hill    : FAKE_HILL=1, script_world.txt: a 50-degree hillside beside the road rising past the rays' reach. PASS = it is found
             from above and kept (it meets the road), nothing fell through.
+  startpad: FAKE_HOLE=1 FAKE_STARTY=75 (v2.72): F10 over a hole: a pad there, placed once, no loop.
+  seatadj : script_seat.txt (v2.72): Ctrl+Shift+F10 seat adjust, saved per car.
+  door    : (after the foot run) v2.72: the driver's door opens and shuts in BeamNG.
   seat    : (after any drive run) v2.71: the driver's seat from BeamNG's driver camera; you visible in drive mode.
   crash   : the 2.63 log's lethal crash (a glance off a wall: 32 km/h lost, the velocity turned by 77 km/h) costs a little
             health now (unit check of the rule, no run)."""
@@ -62,20 +65,52 @@ if mode == 'traffic':
     check('BUMP' in ev, 'the fake BeamNG car\'s speed changed')
     check('traffic (v2.7): ' in log and 'GtaBeamD1_traffic.json' in log, 'GtaBeamD1_traffic.json read or written')
     check('fell through' not in log, 'nothing fell through')
+    if 'traffic person 9002 stands' in host:   # v2.72 (FAKE_PED=1): a person 12 m ahead
+        import math
+        ph = re.search(r'traffic: BeamNG\'s car hit a person at (\d+) km/h', log)
+        pv = re.findall(r'person 9002 velocity ([-\d.]+) ([-\d.]+) ([-\d.]+)', host)
+        check(ph is not None and len(pv) >= 2, 'v2.72: the person was hit and got a speed on 2 ticks (%s, %s)' % (ph and ph.group(0), pv[:2]))
+        if ph and pv:
+            kmh, (vx, vy, vz) = float(ph.group(1)), map(float, pv[0])
+            hz = math.hypot(vx, vy) * 3.6
+            check(vz >= 3.0 or hz > kmh, 'v2.72: out of the car\'s way: thrown up (%.1f m/s) or shoved ahead faster than it (%.0f vs %.0f km/h)' % (vz, hz, kmh))
+        check(re.search(r'traffic: the person hit at \d+ km/h, 0\.5 s later: exists', log) is not None, 'v2.72: the hit person is watched (0.5 s log)')
 elif mode == 'twins':
     # v2.71 (FAKE_TRAFFIC=1, TrafficTwins=4): the parked GTA car gets a BeamNG twin before the car meets it; the crash is the
     # fake BeamNG's (the twin pushed and dented); GTA's car copies the twin and gets GTA damage at its dents; back to GTA once still
-    check('traffic twins (v2.71): asked BeamNG for 4 twins' in log, 'v2.71: GTA asked for the pool')
+    check('traffic twins: asked BeamNG for 4 twins' in log, 'v2.71: GTA asked for the pool')
+    i_ask, i_on = log.find('traffic twins: asked BeamNG'), log.find('Drive ON on GTA')
+    check(0 <= i_ask < i_on, 'v2.72: asked when the drive starts, before the car is put on GTA\'s ground')
     check(len(re.findall(r'traffic twins: twin \d ready', log)) == 4, 'v2.71: 4 twins spawned, measured, parked (%d)' % len(re.findall(r'traffic twins: twin \d ready', log)))
     check(ev.count('active false') >= 4, 'v2.71: parked (setActive 0) in BeamNG')
     check(re.search(r'GTA car 9001 .*meets the car in [\d.]+ s: twin \d', log) is not None, 'v2.71: the GTA car got a twin before the meeting')
     check('TWINHIT' in ev, 'v2.71: BeamNG\'s car hit the twin in BeamNG')
     check('FAKE: traffic car posed' in host and re.search(r'traffic car velocity set -?[1-9]', host) is not None, 'v2.71: GTA\'s car copied its twin (pushed along)')
-    dm = re.findall(r'FAKE: vehicle 9001 damaged at ([-\d.]+) ([-\d.]+) ([-\d.]+) by (\d+)', host)
-    check(len(dm) >= 1 and all(float(x[3]) > 100 for x in dm), 'v2.71: GTA damage where the twin was dented (%s)' % dm[:3])
+    dm = re.findall(r'GTA car 9001 dented at ([-\d.]+) ([-\d.]+) ([-\d.]+): wanted (\d+) mm, GTA shows (\d+) mm after (\d+) steps', log)
+    check(len(dm) >= 1 and all(int(x[4]) >= int(x[3]) and int(x[5]) > 1 for x in dm), 'v2.72: GTA dents where the twin was dented, stepped until GTA shows them (%s)' % dm[:3])
+    rad = re.findall(r'FAKE: vehicle 9001 damaged at [-\d.]+ [-\d.]+ [-\d.]+ by (\d+) radius (\d+)', host)
+    check(rad and all(x[0] == x[1] for x in rad), 'v2.72: damage = radius (%s)' % rad[:3])
     check(re.search(r'GTA car 9001 back to GTA \(standing still', log) is not None and 'vehicle 9001 no longer needed' in host, 'v2.71: back to GTA once it stood still')
     check('traffic: BeamNG\'s car and a GTA car' not in log, 'v2.71: no v2.7 push on top')
     check('fell through' not in log, 'nothing fell through')
+elif mode == 'startpad':
+    # v2.72 (FAKE_HOLE=1 FAKE_STARTY=75: F10 over the hole): BeamNG lays a pad there once and puts the car on it; no loop
+    check('a 12 m pad at' in mlog, 'v2.72: BeamNG laid a pad under the start spot (%s)' % re.findall(r'a 12 m pad at [^\n]*', mlog)[:1])
+    m = re.search(r"BeamNG's car is on GTA's ground \(start\).*?; ([\d.]+) s after asking", log)
+    check(m is not None and float(m.group(1)) < 12.0, 'v2.72: placed once, not after 21 s of asks restarting the wait (%s s)' % (m and m.group(1)))
+    check(log.count("asking BeamNG to put its car on GTA's ground (fell)") <= 1, 'v2.72: no fall loop')
+elif mode == 'seatadj':
+    # v2.72 (script_seat.txt): Ctrl+Shift+F10, up arrow held, Page Up, Ctrl+Shift+F10: saved for this car, the car moved under you
+    m = re.search(r'seat \(v2\.72\): saved for (\S+): ([-\d.]+) right, ([-\d.]+) forward, ([-\d.]+) up', log)
+    check(m is not None and float(m.group(3)) > 0.05 and float(m.group(4)) > 0.02 and abs(float(m.group(2))) < 0.01, 'v2.72: seat adjust saved (%s)' % (m and m.groups(),))
+    js = rd('GtaBeamD1_seats.json')
+    check(m is not None and ('"%s"' % m.group(1)) in js, 'v2.72: GtaBeamD1_seats.json has it')
+    check('fell through' not in log, 'nothing fell through')
+elif mode == 'door':
+    # v2.72 (after the foot run): getting out and back in opens and shuts BeamNG's driver door (the fake car's doorFLCoupler)
+    check('door (v2.72): GTA opened its car\'s driver door' in log and 'door (v2.72): GTA shut its car\'s driver door' in log, 'v2.72: GTA saw its door open and shut')
+    check('the driver\'s: doorFLCoupler' in mlog, 'v2.72: the BeamNG mod found the driver\'s door controller (%s)' % re.findall(r'door: the car.s door controllers: [^\n]*', mlog)[:1])
+    check(ev.count('toggle doorFLCoupler') >= 2, 'v2.72: opened and shut (%d toggles)' % ev.count('toggle doorFLCoupler'))
 elif mode == 'drop':
     again = re.findall(r'ground: tile (-?\d+),(-?\d+) (?:is empty|has empty cells) near the car: measured again \(try (\d)(, tall window)?\)', log)
     kept = re.findall(r'ground: tile (-?\d+),(-?\d+): found with the tall window \(below the level', log)
@@ -86,9 +121,9 @@ elif mode == 'drop':
     check(len(again) < 200, 'not endlessly (%d tries in all)' % len(again))
     check('fell through' not in log, 'the car on the road didn\'t fall')
 elif mode == 'roof':
-    m = re.findall(r'found above and kept \(meets the ground next to it\) (\d+), dropped \(a roof, an overpass\) (\d+)', log)
-    dropped, kept = sum(int(x[1]) for x in m), sum(int(x[0]) for x in m)
-    check(dropped > 20 and kept < dropped / 4, 'v2.71: the roof found from above was dropped (%d points dropped, %d kept)' % (dropped, kept))
+    # v2.72: ground found above the window is kept (a roof beside the road becomes a block where the building is)
+    kept = sum(int(x) for x in re.findall(r'found ground \((\d+) of them above it: kept, v2\.72\)', log))
+    check(kept > 20, 'v2.72: the roof found from above is kept, a block where the building is (%d points)' % kept)
     check('fell through' not in log, 'nothing fell through')
 elif mode == 'seat':
     # v2.71 (any drive run): the fake's driver camera: the eye at (-0.37, 0.3, 1.0) of the car file; your head in GTA's car at
@@ -103,10 +138,7 @@ elif mode == 'seat':
     check(i >= 0 and 'FAKE: player visible 1' in host[i:], 'v2.71: hidden with the car at F10, then shown again')
     check('fell through' not in log, 'nothing fell through')
 elif mode == 'hill':
-    m = re.findall(r'v2\.71: (\d+) rays looked below / above points with no ground in their window, (\d+) found ground; found above and kept \(meets the ground next to it\) (\d+), dropped \(a roof, an overpass\) (\d+)', log)
-    kept = sum(int(x[2]) for x in m)
-    dropped = sum(int(x[3]) for x in m)
-    check(kept > 100, 'v2.71: the hillside over the window found from above and kept (%d points; %d dropped)' % (kept, dropped))
-    check(dropped < kept, 'v2.71: most of it kept (it meets the road: %d kept, %d dropped)' % (kept, dropped))
+    kept = sum(int(x) for x in re.findall(r'found ground \((\d+) of them above it: kept, v2\.72\)', log))
+    check(kept > 100, 'v2.72: the hillside over the window found from above and kept, all of it (%d points)' % kept)
     check('fell through' not in log, 'nothing fell through')
 print('ALL PASS' if not fails else 'FAILED: %d' % len(fails))

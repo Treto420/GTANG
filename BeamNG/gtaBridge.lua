@@ -77,7 +77,7 @@
 --   gtaBridge.soundSession(false) -- v2.4: switch the sound "session" mode off (the GTA plugin's BeamNGSoundWake=session sets it)
 
 local M = {}
-M.version = '2.71'
+M.version = '2.72'
 local logTag = 'gtaBridge'
 
 -- ---------------------------------------------------------------- config
@@ -2119,6 +2119,47 @@ local function driverEye(veh)
   return e, string.format('%s at jbeam %.2f %.2f %.2f, from %d nodes', how, tonumber(c.x), tonumber(c.y), tonumber(c.z), n)
 end
 
+-- v2.72: the same in the car's own Lua (v.data.camerasInternal; its nodes' jbeam positions against where they are now)
+dents.EYE = [==[   -- (a field: Lua's 200-locals limit, no globals)
+do
+  local cams, c, how = v.data and v.data.camerasInternal, nil, nil
+  if type(cams) == 'table' then
+    for k, e in pairs(cams) do
+      if type(e) == 'table' and tonumber(e.x) and tonumber(e.y) and tonumber(e.z) and (e.type == 'driver' or k == 'driver' or e.name == 'driver') then c, how = e, 'driver camera'; break end
+    end
+    if not c then for _, e in pairs(cams) do if type(e) == 'table' and tonumber(e.x) then c, how = e, 'first inside camera (' .. tostring(e.type or e.name) .. ')'; break end end end
+  end
+  local function tell(e, h)
+    obj:queueGameEngineLua(string.format('if gtaBridge and gtaBridge.eyeFromCar then gtaBridge.eyeFromCar(%s, %q) end', e and string.format('{%.4f,%.4f,%.4f}', e[1], e[2], e[3]) or 'nil', h))
+  end
+  if not c then tell(nil, 'no camerasInternal in the car either') else
+    local f, u = obj:getDirectionVector(), obj:getDirectionVectorUp()
+    local fl = math.sqrt(f.x * f.x + f.y * f.y + f.z * f.z)
+    local fx, fy, fz = f.x / fl, f.y / fl, f.z / fl
+    local du = u.x * fx + u.y * fy + u.z * fz
+    local ux, uy, uz = u.x - fx * du, u.y - fy * du, u.z - fz * du
+    local ul = math.sqrt(ux * ux + uy * uy + uz * uz)
+    ux, uy, uz = ux / ul, uy / ul, uz / ul
+    local rx, ry, rz = fy * uz - fz * uy, fz * ux - fx * uz, fx * uy - fy * ux
+    local a1, a2, a3, n = 0, 0, 0, 0
+    for cid, nd in pairs(v.data.nodes or {}) do
+      if n >= 64 then break end
+      local jp = type(nd) == 'table' and nd.pos
+      if jp and tonumber(jp.x) then
+        local q = obj:getNodePosition(nd.cid or cid)
+        a1 = a1 + (q.x * rx + q.y * ry + q.z * rz) + jp.x
+        a2 = a2 + (q.x * fx + q.y * fy + q.z * fz) + jp.y
+        a3 = a3 + (q.x * ux + q.y * uy + q.z * uz) - jp.z
+        n = n + 1
+      end
+    end
+    if n == 0 then tell(nil, how .. ', but no node positions') else
+      tell({ -tonumber(c.x) + a1 / n, -tonumber(c.y) + a2 / n, tonumber(c.z) + a3 / n }, string.format('%s at jbeam %.2f %.2f %.2f, from %d nodes (the car\'s Lua)', how, c.x, c.y, c.z, n))
+    end
+  end
+end
+]==]
+
 -- v2.0's direct inputs (fallback when your bindings can't be used). Only the parts listed in 'want'.
 local function driveInputCmd(thr, brk, str, hb, flt, want)
   local t = {}
@@ -3163,11 +3204,15 @@ handlers.drive_start = function(m)
                   plist = B and tostring(B.padDev or '') or '' }
   do  -- v2.71: the driver's seat for GTA's player
     local okE, eye, eyeHow = pcall(driverEye, veh)
+    drive.driverLeft = not (okE and eye and eye[1] > 0)   -- v2.72: the driver's door side (right = +)
     if okE and eye then
       drive.okMsg.eye = { tonumber(string.format('%.3f', eye[1])), tonumber(string.format('%.3f', eye[2])), tonumber(string.format('%.3f', eye[3])) }
       logI(string.format('drive: driver\'s eye %.2f %.2f %.2f m (right, forward, up of the car): %s', eye[1], eye[2], eye[3], tostring(eyeHow)))
     else
-      logI('drive: no driver seat from BeamNG (' .. tostring(okE and eyeHow or eye) .. '): GTA keeps its own')
+      -- v2.72: the game engine's vehicle data had no cameras in your v2.71 log: read them in the car's own Lua (v.data), answered
+      -- a frame later ("eye" to GTA, which seats you again)
+      logI('drive: no driver camera in the game engine\'s data (' .. tostring(okE and eyeHow or eye) .. '): asking the car\'s own Lua')
+      pcall(function() veh:queueLuaCommand(dents.EYE) end)
     end
   end
   -- the car starts from rest: inputs to 0, parking brake off (v2.0 left it on at the end), report helper in
@@ -5354,6 +5399,30 @@ world.tileUnder = function(x, y)
   end
   return nil
 end
+-- v2.72: the teleport's pad over a hole (12 m square, 4 cm under the spot); it goes once the car is 20 m from it
+world.tpPad = function(X, f)
+  local l = math.sqrt(f[1] * f[1] + f[2] * f[2])
+  local fx, fy = l > 0.1 and f[1] / l or 0, l > 0.1 and f[2] / l or 1
+  local rx, ry, h, z = fy, -fx, 6, X[3] - 0.04
+  local v = {}
+  for _, c in ipairs({ { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) do
+    v[#v + 1] = { X[1] + (rx * c[1] + fx * c[2]) * h, X[2] + (ry * c[1] + fy * c[2]) * h, z }
+  end
+  local ok, res = buildSurface('gtab_tppad', v, { 0, 1, 2, 0, 2, 3 }, surfMaterial(resolveGround('ASPHALT')))
+  if ok then world.tppad = { X[1], X[2] } end
+  logI(string.format('ground: no GTA tile under the spot at %.1f %.1f yet: a 12 m pad at %.2f under it (%s)', X[1], X[2], z, ok and 'built' or ('FAILED ' .. tostring(res))))
+  return ok and true or false
+end
+world.tpPadTick = function()
+  local pp = world.tppad
+  if not pp or world.tp then return end
+  local veh = getPlayerVeh()
+  local p = veh and veh:getPosition()
+  if p and (p.x - pp[1]) ^ 2 + (p.y - pp[2]) ^ 2 < 400 then return end
+  removeSurface('gtab_tppad')
+  world.tppad = nil
+  logI('ground: the teleport\'s pad is gone (the car left it)')
+end
 world.removePad = function()
   if world.padOn then
     removeSurface('gtab_pad')
@@ -5393,6 +5462,7 @@ local function tpFinish(ok, msg)
 end
 local function tpUpdate()
   local tp = world.tp
+  world.tpPadTick()   -- v2.72
   if not tp then return end
   local t = now()
   if t - tp.t0 > 10 then tpFinish(false, 'not done in 10 s (state ' .. tp.state .. ', ' .. (tp.note or '') .. ')'); return end
@@ -5415,6 +5485,13 @@ local function tpUpdate()
   if tp.state == 'wait' then
     -- the tiles under the target first (built, collision reloaded); v2.43: a repair is where the car already is
     local under = m.repair or world.tileUnder(X[1], X[2])
+    -- v2.72: still no GTA tile under the spot after 1.5 s (a hole GTA's rays couldn't fill): a 12 m pad there, so the car
+    -- doesn't land on nothing and fall again (the v2.71 F10 loop: start, fall, put back on the same hole)
+    if not under and t - tp.t0 > 1.5 and not tp.pad then
+      tp.pad = world.tpPad(X, f)
+      under = tp.pad
+    end
+    if tp.pad then under = true end
     if not m.repair and (queueLen() > 0 or collisionDirty or not under) then
       tp.note = (not under) and 'no tile under the target yet' or 'tiles still building'
       if not (t - tp.t0 > 5 and queueLen() == 0 and not collisionDirty) then return end
@@ -5519,7 +5596,7 @@ end
 worldDriveEnded = function(d)
   pcall(world.props.clear, 'the drive ended')   -- v2.5 (GTA takes them out itself, unless it closed)
   pcall(world.phys.clear, 'the drive ended')
-  pcall(world.tw.clear, 'the drive ended')   -- v2.71
+  pcall(world.tw.parkAll, 'the drive ended')   -- v2.72: parked, kept for the next F10 (spawning one freezes BeamNG 2-3 s)
   if not world.ox then return end
   local veh = getPlayerVeh()
   if not veh then return end
@@ -5673,12 +5750,40 @@ world.tw.clear = function(why)
   T.pool = {}
   if n > 0 then logI('traffic twins: ' .. n .. ' taken out (' .. tostring(why) .. ')') end
 end
+world.tw.parkAll = function(why)
+  local n = 0
+  for _, e in pairs(world.tw.pool) do
+    if e.state == 'live' then world.tw.park(e); n = n + 1 end
+  end
+  if n > 0 then logI('traffic twins: ' .. n .. ' parked (' .. tostring(why) .. ')') end
+end
+-- (a twin still there: its vehicle answers)
+world.tw.alive = function(e)
+  if not e.veh then return false end
+  local ok, id = pcall(function() return e.veh:getID() end)
+  return ok and id ~= nil and (not be or not be.getObjectByID or be:getObjectByID(id) ~= nil)
+end
 handlers.twp = function(m)
   local T = world.tw
   if type(m.m) ~= 'table' then return end
+  -- v2.72: the same pool as before, still there (parked since the last drive): kept, GTA told at once
+  local same = #m.m > 0
+  for k, model in ipairs(m.m) do
+    local e = T.pool[k]
+    if not (e and (e.want == model or e.model == model) and (e.state == 'want' or e.state == 'init' or ((e.state == 'park' or e.state == 'live') and T.alive(e)))) then same = false end
+  end
+  for k in pairs(T.pool) do if k > #m.m then same = false end end
+  if same then
+    for _, e in pairs(T.pool) do
+      if e.state == 'live' then T.park(e) end
+      if e.state == 'park' then T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3] }) end
+    end
+    logI('traffic twins: GTA asked for the same ' .. #m.m .. ': kept from before')
+    return
+  end
   T.clear('a new pool')
   for k, model in ipairs(m.m) do
-    if k <= 8 and type(model) == 'string' and model ~= '' then T.pool[k] = { k = k, model = model, state = 'want' } end
+    if k <= 8 and type(model) == 'string' and model ~= '' then T.pool[k] = { k = k, model = model, want = model, state = 'want' } end
   end
   T.fallback = type(m.fb) == 'table' and m.fb or { 'fullsize', 'pickup', 'covet' }
   logI('traffic twins: GTA asked for ' .. #m.m .. ': ' .. table.concat(m.m, ', '))
@@ -5692,6 +5797,10 @@ world.tw.spawnOne = function(e)
   local tried = { e.model }
   for _, f in ipairs(T.fallback or {}) do if f ~= e.model then tried[#tried + 1] = f end end
   local errs = {}
+  pcall(function()   -- (one left from before a Lua reload)
+    local old = scenetree.findObject('gtab_twin_' .. e.k)
+    if old then old:delete() end
+  end)
   for _, model in ipairs(tried) do
     local t0 = os.clock()
     local ok, v = pcall(function()
@@ -5760,6 +5869,17 @@ world.tw.measure = function(e)
   end
   return true
 end
+-- v2.72: the body's nodes as they are now (its frame from its footprint's middle): the shape dents are measured against
+world.tw.takeRest = function(e)
+  local veh = e.veh
+  local r, f, u = world.tw.frame(veh)
+  local rest = {}
+  for i, c in ipairs(e.cids) do
+    local q = v3(veh:getNodePosition(c))
+    rest[i] = { dot(q, r) - e.o[1], dot(q, f) - e.o[2], dot(q, u) - e.o[3] }
+  end
+  e.rest = rest
+end
 world.tw.park = function(e)
   e.state = 'park'
   e.gid = nil
@@ -5787,9 +5907,10 @@ handlers.twa = function(m)
   local lead = 1 / 60   -- (it moves from the next frame: put where GTA's car will be then)
   local P = {}
   for i = 1, 3 do P[i] = m.p[i] + v[i] * lead - (r[i] * e.o[1] + f[i] * e.o[2] + u[i] * e.o[3]) + u[i] * 0.03 end
-  local cands = rotCandidates(f, u)
-  local c = cands[world.conv or 2] or cands[1]
-  local ok, err = pcall(function() e.veh:setPositionRotation(P[1], P[2], P[3], c[2].x, c[2].y, c[2].z, c[2].w) end)
+  -- v2.72: setPositionRotation's own rotation convention (v2.71 took the one learned for the player's safeTeleport: twins could
+  -- face backwards); checked 2 frames later against the asked forward, the next one tried if wrong, the good one kept
+  e.tpTo = { P = P, f = f, u = u, ci = T.ci or 2 }
+  local ok, err = T.tpTwin(e)
   if not ok then
     T.say({ t = 'twf', k = m.k, why = 'teleport failed: ' .. tostring(err) })
     logE('traffic twins: twin ' .. e.k .. ' teleport failed: ' .. tostring(err))
@@ -5797,6 +5918,7 @@ handlers.twa = function(m)
     return
   end
   e.state, e.gid, e.tA, e.vel, e.velDone, e.frames, e.dmax = 'live', m.id, now(), v, false, 0, 0
+  e.rest = nil   -- (taken again 3 frames after the teleport: its shape here, repaired, upright)
   e.pk = tonumber(m.pk) == 1
   T.acts = T.acts + 1
   pcall(function() e.veh:queueLuaCommand(string.format("input.event('throttle',0,2) input.event('brake',0,2) input.event('steering',0,2) input.event('parkingbrake',%d,2)", e.pk and 1 or 0)) end)
@@ -5804,6 +5926,71 @@ handlers.twa = function(m)
     logI(string.format('traffic twins: twin %d (%s) put on GTA car %s at %.1f %.1f %.1f, %.0f km/h%s', e.k, e.model, tostring(m.id), m.p[1], m.p[2], m.p[3],
       math.sqrt(v[1] ^ 2 + v[2] ^ 2 + v[3] ^ 2) * 3.6, e.pk and ', parked' or ''))
   end
+end
+world.tw.tpTwin = function(e)
+  local to = e.tpTo
+  local cands = rotCandidates(to.f, to.u)
+  local c = cands[to.ci] or cands[2] or cands[1]
+  if not c then return false, 'no rotation' end
+  return pcall(function() e.veh:setPositionRotation(to.P[1], to.P[2], to.P[3], c[2].x, c[2].y, c[2].z, c[2].w) end)
+end
+-- ---- v2.72: the driver's door opens when GTA's does (you get in or out): the car's own door latch controller (BeamNG's
+-- clickable doors: an advancedCouplerControl named like doorFLCoupler / door_FL_coupler), toggled open, toggled shut again.
+-- UNVERIFIED: the controller names differ per car; the log lists the door controllers the car has and the one used
+world.doorVeh = [[
+gtabDoor = gtabDoor or {}
+function gtabDoor.find(left)
+  if gtabDoor.c ~= nil then return gtabDoor.c end
+  local names, pick, rank = {}, false, 99
+  local all = {}
+  pcall(function() all = controller.getAllControllers() or {} end)
+  for k, c in pairs(all) do
+    local n = type(k) == 'string' and k or (type(c) == 'table' and tostring(c.name)) or ''
+    local l = n:lower()
+    if l:find('door') then
+      names[#names + 1] = n
+      local r = 99
+      if left then
+        if l:find('fl') then r = 1 elseif l:find('door_?l_?c') then r = 2 end
+      else
+        if l:find('fr') then r = 1 elseif l:find('door_?r_?c') then r = 2 end
+      end
+      if r < 99 and l:find('coupler') then r = r - 0.5 end
+      if r < rank then rank, pick = r, n end
+    end
+  end
+  gtabDoor.c = pick
+  obj:queueGameEngineLua(string.format('if gtaBridge and gtaBridge.doorInfo then gtaBridge.doorInfo(%q, %q) end', tostring(pick), table.concat(names, ',')))
+  return pick
+end
+function gtabDoor.set(open, left)
+  local n = gtabDoor.find(left)
+  if not n or gtabDoor.open == open then return end
+  gtabDoor.open = open
+  local c = controller.getControllerSafe(n)
+  if c and c.toggleGroup then c.toggleGroup() end
+end
+]]
+handlers.door = function(m)
+  local d = drive
+  if not (d and d.veh) then return end
+  local open = tonumber(m.o) == 1
+  pcall(function() d.veh:queueLuaCommand(world.doorVeh .. string.format('\ngtabDoor.set(%s, %s)', open and 'true' or 'false', d.driverLeft == false and 'false' or 'true')) end)
+  logI('door: GTA ' .. (open and 'opened' or 'shut') .. ' its driver door: BeamNG\'s ' .. (open and 'opens' or 'closes'))
+end
+function M.eyeFromCar(e, how)
+  local d = drive
+  if not d then return end
+  if type(e) == 'table' then
+    d.driverLeft = not (tonumber(e[1]) and e[1] > 0)
+    logI(string.format('drive: driver\'s eye %.2f %.2f %.2f m (right, forward, up of the car): %s', e[1], e[2], e[3], tostring(how)))
+    pcall(function() udp:sendto(string.format('{"t":"eye","e":[%.3f,%.3f,%.3f]}', e[1], e[2], e[3]), d.ip, d.port) end)
+  else
+    logI('drive: no driver seat from BeamNG (' .. tostring(how) .. '): GTA keeps its own (Ctrl+Shift+F10 in GTA sets it by hand)')
+  end
+end
+function M.doorInfo(pick, names)
+  logI('door: the car\'s door controllers: ' .. (names ~= '' and names or 'none') .. '; the driver\'s: ' .. tostring(pick))
 end
 handlers.twr = function(m)
   local e = world.tw.pool[tonumber(m.k) or -1]
@@ -5816,11 +6003,15 @@ world.tw.tick = function()
   local T, d = world.tw, drive
   if not d or next(T.pool) == nil then return end
   local t = now()
-  for _, e in pairs(T.pool) do
-    if e.state == 'want' and t - T.spawnT > 0.4 then
-      T.spawnT = t
-      T.spawnOne(e)
-      break
+  -- (one at a time, only while the car stands: each spawn freezes BeamNG for 2-3 s; GTA waits for them before the start)
+  local cv = d.vel or { 0, 0, 0 }
+  if cv[1] ^ 2 + cv[2] ^ 2 + cv[3] ^ 2 < 0.25 then
+    for _, e in pairs(T.pool) do
+      if e.state == 'want' and t - T.spawnT > 0.4 then
+        T.spawnT = t
+        T.spawnOne(e)
+        break
+      end
     end
   end
   local us = {}
@@ -5840,6 +6031,19 @@ world.tw.tick = function()
     elseif e.state == 'live' then
       e.frames = e.frames + 1
       local veh = e.veh
+      if e.frames == 2 and e.tpTo and not e.tpOk then
+        local okF, fb = pcall(function() return norm(v3(veh:getDirectionVector())) end)
+        if okF and dot(fb, e.tpTo.f) > 0.95 then
+          e.tpOk, T.ci = true, e.tpTo.ci
+        elseif (e.tpTo.tries or 0) < 3 then
+          e.tpTo.tries = (e.tpTo.tries or 0) + 1
+          e.tpTo.ci = e.tpTo.ci % 4 + 1
+          logI(string.format('traffic twins: twin %d faced the wrong way (%.2f): trying rotation %d', e.k, okF and dot(fb, e.tpTo.f) or -9, e.tpTo.ci))
+          T.tpTwin(e)
+          e.frames, e.velDone = 0, false
+        end
+      end
+      if e.frames == 3 and not e.rest then pcall(T.takeRest, e) end
       if not e.velDone and e.frames >= 1 then
         e.velDone = true
         local v = e.vel
@@ -5853,7 +6057,7 @@ world.tw.tick = function()
         us[#us + 1] = string.format('%d,%.3f,%.3f,%.3f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.3f,%.3f,%.3f', e.k, p[1] + r[1] * o[1] + f[1] * o[2] + u[1] * o[3],
           p[2] + r[2] * o[1] + f[2] * o[2] + u[2] * o[3], p[3] + r[3] * o[1] + f[3] * o[2] + u[3] * o[3], f[1], f[2], f[3], u[1], u[2], u[3], vel[1], vel[2], vel[3])
         -- its dents, 5 a second: body nodes 4 cm or more from where they rest, grouped within 0.9 m (the deepest first)
-        if t - (e.dT or 0) > 0.2 and e.frames > 6 then
+        if t - (e.dT or 0) > 0.2 and e.frames > 6 and e.rest then
           e.dT = t
           local dn = {}
           for i, c in ipairs(e.cids) do
@@ -5861,7 +6065,8 @@ world.tw.tick = function()
             local a = { dot(q, r) - o[1], dot(q, f) - o[2], dot(q, u) - o[3] }
             local z = e.rest[i]
             local dd = math.sqrt((a[1] - z[1]) ^ 2 + (a[2] - z[2]) ^ 2 + (a[3] - z[3]) ^ 2)
-            if dd > 0.04 and dd < 2.0 then dn[#dn + 1] = { z, dd } end
+            -- (over 0.8 m: a part hanging off or gone, not a dent; v2.71 sent those: GTA cars crushed "by your presence")
+            if dd > 0.04 and dd < 0.8 then dn[#dn + 1] = { z, dd } end
           end
           table.sort(dn, function(x, y) return x[2] > y[2] end)
           local spots = {}
@@ -5901,7 +6106,11 @@ end
 
 handlers.tp = function(m)
   if type(m.p) ~= 'table' or type(m.f) ~= 'table' or type(m.u) ~= 'table' then logE('tp: bad message'); return end
-  if world.tp then logI('teleport: a new request replaces the running one') end
+  local old = world.tp
+  -- v2.72: GTA asking again for the same spot (no answer in 4 s) keeps the running wait: your v2.71 log, the start at a hole in
+  -- the hills: each ask restarted the 5 s wait, so it waited 21 s and then put the car on nothing
+  if old and old.m and old.m.why == m.why and math.abs(old.m.p[1] - m.p[1]) + math.abs(old.m.p[2] - m.p[2]) < 1.0 then return end
+  if old then logI('teleport: a new request replaces the running one') end
   world.tp = { m = m, t0 = now(), state = 'wait' }
   logI(string.format('teleport requested (%s): to %.2f %.2f %.2f', tostring(m.why), m.p[1], m.p[2], m.p[3]))
 end

@@ -54,6 +54,10 @@ vm.execute('''
   ESC = { getCurrentConfigData = function() return { name = ESCMODES[escI] } end,
           toggleESCMode = function() escI = escI % #ESCMODES + 1 end }
   controller.getController = function(n) if n == 'esc' then return ESC end return nil end
+  -- v2.72: the car's door latch controllers (BeamNG's clickable doors)
+  DOORS = { doorFLCoupler = { name = 'doorFLCoupler' }, doorRRCoupler = { name = 'doorRRCoupler' } }
+  controller.getAllControllers = function() return { doorFLCoupler = DOORS.doorFLCoupler, doorRRCoupler = DOORS.doorRRCoupler, esc = ESC } end
+  controller.getControllerSafe = function(n) return { toggleGroup = function() calls[#calls + 1] = 'toggle ' .. n end } end
   boom = function() error('broken action (Y must never reach BeamNG)') end
 ''')
 vg = vm.globals()
@@ -261,13 +265,18 @@ EYE_TRUE = (-0.37 + O_TRUE[0], 0.3 + O_TRUE[1], 1.0 + O_TRUE[2])
 def jbeam_of(l): return {'x': -l[0] + JB_SHIFT[0], 'y': -l[1] + JB_SHIFT[1], 'z': l[2] + JB_SHIFT[2]}
 for c in range(12 + len(BODY)):
     vdata.vdata.nodes[c] = ge.table_from({'cid': c, 'name': 'n%d' % c, 'group': 'body' if c in BODY else 'wheel', 'pos': ge.table_from(jbeam_of(node_local(c)))})
-if os.environ.get('FAKE_SEAT'):   # (only then: the other scenarios' checks take GTA's car on the drawn car's footprint)
+if os.environ.get('FAKE_SEAT') == '1':   # (only then: the other scenarios' checks take GTA's car on the drawn car's footprint)
     _cam = jbeam_of(EYE_TRUE); _cam['type'] = 'driver'
     vdata.vdata.camerasInternal = ge.table_from({'driver': ge.table_from(_cam)})
 # v2.5 (dents): the car's own Lua sees the same nodes (v.data), positions relative to the car (world axes), its frame
 vm.execute('v = { data = { nodes = {}, wheels = {}, refNodes = {} } }')
 for c in range(12 + len(BODY)):
-    vm.execute('v.data.nodes[%d] = { cid = %d, name = "n%d", group = "%s" }' % (c, c, c, 'body' if c in BODY else 'wheel'))
+    _j = jbeam_of(node_local(c))
+    vm.execute('v.data.nodes[%d] = { cid = %d, name = "n%d", group = "%s", pos = { x = %.4f, y = %.4f, z = %.4f } }' % (c, c, c, 'body' if c in BODY else 'wheel', _j['x'], _j['y'], _j['z']))
+# v2.72: FAKE_SEAT=2: the driver camera only in the car's own Lua (BeamNG's game-engine data had none in his v2.71 log)
+if os.environ.get('FAKE_SEAT') == '2':
+    _cam = jbeam_of(EYE_TRUE)
+    vm.execute('v.data.camerasInternal = { { type = "driver", x = %.4f, y = %.4f, z = %.4f } }' % (_cam['x'], _cam['y'], _cam['z']))
 for i, w in enumerate(wheels):
     vm.execute('v.data.wheels[%d] = { name = "%s", node1 = %d, node2 = %d, radius = 0.33, treadNodes = { %d } }' % (i, w['name'], w['node1'], w['node2'], w['treadNodes'][0]))
 _ref = [c for c, p in BODY.items() if p == (0.0, 0.0, 0.4)][0]

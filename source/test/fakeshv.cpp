@@ -73,6 +73,7 @@ static bool g_nadeDone = false;
 // (GTA would return 0), the second one starts.
 static bool   g_footOut = false, g_footDone = false;
 static bool   g_playerVis = true;  // v2.71
+static double g_doorT = -100;     // v2.72: the driver's door is open for 1 s from then (getting out or in)
 static int    g_playerAlpha = 255;
 static double g_fT0 = -1;
 static int    g_fxNext = 6000;
@@ -239,6 +240,8 @@ struct FakeProp { int h; double x, y, yaw; unsigned model; bool frag, attached, 
                   int src = 0; bool hidden = false; };  // v2.71: a script's copy of map prop src (map props don't move for a script, copies do); hidden by a model hide
 static int Shown(const FakeProp* fp) { return fp->src ? fp->src : fp->h; }  // (the prints name the map prop a copy stands for)
 static int g_copyNext = 9500;
+struct FakeDent { int veh; double x, y, z, depth; };
+static std::vector<FakeDent> g_dents;   // v2.72: what SET_VEHICLE_DAMAGE did (GET_VEHICLE_DEFORMATION_AT_POS reads it)
 static std::vector<FakeProp> g_props;
 static bool g_propsInit = false;
 static const unsigned kMLamp = 0xA1110001u, kMBin = 0xA1110002u, kMCont = 0xA1110003u, kMCan = 0xA1110004u;
@@ -471,6 +474,15 @@ int worldGetAllVehicles(int* arr, int arrSize)
 		g_tc[2] = FakeGround(g_tc[0], g_tc[1], &gh, &m) + 0.6;
 		g_tcYaw = g_yawDeg + 90.0;
 		printf("FAKE: traffic car 9001 parked at %.1f %.1f %.1f\n", g_tc[0], g_tc[1], g_tc[2]); fflush(stdout);
+		if (Env("FAKE_PED")) {   // v2.72: a person standing 12 m ahead, in the car's way (never shoots)
+			FakePed p{};
+			p.h = 9002;
+			for (int i = 0; i < 3; ++i) p.head[i] = g_pos[i] + g_rot[i][1] * 12.0 + g_rot[i][0] * 0.3;
+			p.head[2] = FakeGround(p.head[0], p.head[1], &gh, &m) + 1.7;
+			p.t0 = 1e9; p.until = 0;
+			g_peds.push_back(p);
+			printf("FAKE: traffic person 9002 stands at %.1f %.1f %.1f\n", p.head[0], p.head[1], p.head[2]); fflush(stdout);
+		}
 	}
 	if (n < arrSize) arr[n++] = 9001;
 	return n;
@@ -503,6 +515,7 @@ static void FootSchedule()
 	}
 	if (now >= g_fT0 && !g_footOut && now < g_fT0 + 7.0) {
 		g_footOut = true;
+		g_doorT = now;  // v2.72
 		FakePed p{};
 		p.h = 1;
 		CarPt(-4.0, 0.0, 1.0, p.head);
@@ -529,6 +542,7 @@ static void FootSchedule()
 	}
 	if (now >= g_fT0 + 7.0 && g_footOut) {
 		g_footOut = false;
+		g_doorT = now;  // v2.72
 		g_peds.erase(std::remove_if(g_peds.begin(), g_peds.end(), [](const FakePed& q) { return q.h == 1; }), g_peds.end());
 		printf("FAKE: you get back in\n"); fflush(stdout);
 	}
@@ -653,6 +667,7 @@ PUINT64 nativeCall()
 			startSet = true;
 			char e[32];
 			if (GetEnvironmentVariableA("FAKE_STARTX", e, sizeof e)) g_pos[0] = atof(e);
+			if (GetEnvironmentVariableA("FAKE_STARTY", e, sizeof e)) g_pos[1] = atof(e);   // v2.72: e.g. in FAKE_HOLE's strip (a start over a hole)
 		}
 	}
 	(void)carZ;
@@ -716,6 +731,7 @@ PUINT64 nativeCall()
 	case 0x539E0AE3E6634B9F: {                                                         // DELETE_OBJECT
 		int* h = reinterpret_cast<int*>(g_args[0]);
 		for (size_t i = 0; i < g_props.size(); ++i) if (g_props[i].h == *h && g_props[i].src) { printf("FAKE: copy %d deleted\n", *h); fflush(stdout); g_props.erase(g_props.begin() + i); break; }
+		for (auto& q : g_props) if (q.h == *h && !q.src) { q.hidden = true; printf("FAKE: map prop %d deleted\n", *h); fflush(stdout); }   // v2.72
 		*h = 0;
 		break; }
 	case 0x3A52AE588830BF7F: case 0xD9E3006FB3CBD765: {                                // CREATE_MODEL_HIDE_EXCLUDING_SCRIPT_OBJECTS, REMOVE_MODEL_HIDE
@@ -771,14 +787,43 @@ PUINT64 nativeCall()
 		break;
 	}
 	case 0x1C99BB7B6E96D16F:  // SET_ENTITY_VELOCITY (v2.7: the traffic car's printed)
+		if (FakeProp* fp = PropOf(int(g_args[0]))) {   // v2.72: a prop's copy flies off (moved 100 m away); a map prop doesn't move
+			if (!fp->src) { printf("FAKE: map prop %d velocity set: GTA doesn't move it\n", fp->h); fflush(stdout); break; }
+			printf("FAKE: prop %d pushed (velocity %.1f %.1f %.1f) (its copy)\n", Shown(fp), F(1), F(2), F(3)); fflush(stdout);
+			if (!fp->pushed) fp->x += 100.0;
+			fp->pushed = true;
+			break;
+		}
+		if (int(g_args[0]) == 9002) { printf("FAKE: person 9002 velocity %.2f %.2f %.2f\n", F(1), F(2), F(3)); fflush(stdout); break; }   // v2.72
 		if (int(g_args[0]) == 9001) {
 			g_tcV[0] = F(1); g_tcV[1] = F(2); g_tcV[2] = F(3);
 			printf("FAKE: traffic car velocity set %.2f %.2f %.2f\n", g_tcV[0], g_tcV[1], g_tcV[2]); fflush(stdout);
 			break;
 		}
 		g_vel[0] = F(1); g_vel[1] = F(2); g_vel[2] = F(3); g_velSet = true; break;
-	case 0x4805D2B1D8CF94A9: if (int(g_args[0]) == 9001) RetV(float(g_tcV[0]), float(g_tcV[1]), float(g_tcV[2])); break;   // GET_ENTITY_VELOCITY (v2.7: the traffic car)
-	case 0xA1DD317EA8FD4F29: printf("FAKE: vehicle %d damaged at %.2f %.2f %.2f by %.0f\n", int(g_args[0]), F(1), F(2), F(3), F(4)); fflush(stdout); break;   // SET_VEHICLE_DAMAGE (v2.7)
+	case 0x4805D2B1D8CF94A9:   // GET_ENTITY_VELOCITY (v2.7: the traffic car; v2.72: a pushed prop's copy)
+		if (int(g_args[0]) == 9001) RetV(float(g_tcV[0]), float(g_tcV[1]), float(g_tcV[2]));
+		else if (FakeProp* fp = PropOf(int(g_args[0]))) RetV(0.0f, 0.0f, fp->pushed ? 5.0f : 0.0f);
+		break;
+	case 0x8339643499D1222E: if (FakeProp* fp = PropOf(int(g_args[0]))) { printf("FAKE: prop %d turning %.1f %.1f %.1f\n", Shown(fp), F(1), F(2), F(3)); fflush(stdout); } break;   // SET_ENTITY_ANGULAR_VELOCITY (v2.72)
+	case 0xE143FA2249364369: {   // GET_CLOSEST_OBJECT_OF_TYPE (v2.72: map props only when isMission)
+		int best = 0;
+		for (auto& q : g_props) if (!q.src && !q.hidden && q.model == unsigned(g_args[4]) && (q.x - F(0)) * (q.x - F(0)) + (q.y - F(1)) * (q.y - F(1)) <= F(3) * F(3)) best = q.h;
+		RetI(best); break; }
+	case 0x4EC6CFBC7B2E9536: {   // GET_VEHICLE_DEFORMATION_AT_POS (v2.72: the dents SET_VEHICLE_DAMAGE made near there)
+		double dz = 0;
+		for (const auto& d : g_dents) if (d.veh == int(g_args[0]) && (d.x - F(1)) * (d.x - F(1)) + (d.y - F(2)) * (d.y - F(2)) + (d.z - F(3)) * (d.z - F(3)) < 0.5) dz = std::max(dz, d.depth);
+		RetV(0.0f, float(-dz), 0.0f); break; }
+	case 0xA1DD317EA8FD4F29: {   // SET_VEHICLE_DAMAGE (v2.7; v2.72: a dent 1 mm per 2 of damage where it is, if the radius is big enough)
+		printf("FAKE: vehicle %d damaged at %.2f %.2f %.2f by %.0f radius %.0f\n", int(g_args[0]), F(1), F(2), F(3), F(4), F(5)); fflush(stdout);
+		bool found = false;
+		for (auto& d : g_dents)
+			if (d.veh == int(g_args[0]) && (d.x - F(1) / 1.1) * (d.x - F(1) / 1.1) + (d.y - F(2) / 1.1) * (d.y - F(2) / 1.1) + (d.z - F(3)) * (d.z - F(3)) < 0.5) {
+				if (F(5) > 20) d.depth += F(4) / 2000.0;
+				found = true;
+			}
+		if (!found && F(5) > 20) g_dents.push_back({ int(g_args[0]), F(1) / 1.1, F(2) / 1.1, F(3), F(4) / 2000.0 });
+		break; }
 	case 0x1A9205C1B9EE827F: g_collision = g_args[1] != 0; printf("FAKE: collision %d\n", int(g_collision)); fflush(stdout); break;
 	case 0x4A4722448F18EEF5: g_gravity = g_args[1] != 0; printf("FAKE: gravity %d\n", int(g_gravity)); fflush(stdout); break;
 	case 0x428CA6DBD1094446:                                  // FREEZE_ENTITY_POSITION (v2.52: props too)
@@ -861,6 +906,7 @@ PUINT64 nativeCall()
 	case 0x9EB6522EA68F22FE: RetI(1); break;                  // IS_RADAR_PREFERENCE_SWITCHED_ON
 	case 0xAF754F20EB5CD51A: RetI(1); break;                  // IS_MINIMAP_RENDERING
 	case 0xBB40DD2270B65366: RetI(int(g_args[0]) == 9001 || g_footOut ? 0 : 1); break;  // GET_PED_IN_VEHICLE_SEAT -> the player (v2.61: not while out; v2.71: the parked car: nobody)
+	case 0xFE3F9C29F7B32BD5: RetF(int(g_args[0]) == 100 && NowS() - g_doorT < 1.0 ? 0.8f : 0.0f); break;   // GET_VEHICLE_DOOR_ANGLE_RATIO (v2.72)
 	case 0x629BFA74418D6239: printf("FAKE: vehicle %d no longer needed\n", *reinterpret_cast<int*>(g_args[0])); fflush(stdout); break;   // SET_VEHICLE_AS_NO_LONGER_NEEDED (v2.71)
 	case 0xEC3C9B8D5327B563: {                                // GET_CONTROL_NORMAL
 		const int c = int(g_args[1]);
