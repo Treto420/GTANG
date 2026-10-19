@@ -3116,7 +3116,9 @@ namespace
 					AcquireSRWLockExclusive(&g_dnet.lock);
 					g_dnet.rep = s;
 					++g_dnet.repCount;
+					ReleaseSRWLockExclusive(&g_dnet.lock);
 				} else if (ty == "eye") {
+					AcquireSRWLockExclusive(&g_dnet.lock);
 					g_dnet.eye = s;
 					++g_dnet.eyeCount;
 					ReleaseSRWLockExclusive(&g_dnet.lock);

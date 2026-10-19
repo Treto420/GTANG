@@ -602,8 +602,12 @@ static void WeaponsSchedule()
 
 void presentCallbackRegister(void (*cb)(void*)) { for (auto& p : g_present) if (!p) { p = cb; break; } }
 void presentCallbackUnregister(void (*cb)(void*)) { for (auto& p : g_present) if (p == cb) p = nullptr; }
+static volatile double g_waitT = 0;      // v2.72: a stuck script tick is reported (the last native it called)
+static volatile UINT64 g_lastNat = 0;
+static volatile unsigned g_natsSinceWait = 0;
 void scriptWait(DWORD)
 {
+	g_waitT = NowS(); g_natsSinceWait = 0;
 	TickEnd();
 	WeaponsSchedule();   // v2.6
 	++g_tickN;
@@ -653,6 +657,7 @@ static bool KnownNative(UINT64 h)
 
 PUINT64 nativeCall()
 {
+	g_lastNat = g_hash; ++g_natsSinceWait;
 	if (!KnownNative(g_hash)) {
 		printf("FATAL: Can't find native 0x%016llX\n", (unsigned long long)g_hash);
 		fflush(stdout);
@@ -1178,8 +1183,17 @@ PUINT64 nativeCall()
 }
 
 // test hooks for the host
-EXP void FakeCallPresent(void* sc) { for (auto p : g_present) if (p) p(sc); }
-static DWORD WINAPI ScriptThread(LPVOID) { if (g_script) g_script(); return 0; }
+EXP void FakeCallPresent(void* sc)
+{
+	static bool told = false;
+	if (!told && g_waitT > 0 && NowS() - g_waitT > 3.0) {
+		told = true;
+		printf("FAKE: the script tick is stuck for 3 s: the last native it called 0x%016llX, %u since its last wait\n", (unsigned long long)g_lastNat, g_natsSinceWait);
+		fflush(stdout);
+	}
+	for (auto p : g_present) if (p) p(sc);
+}
+static DWORD WINAPI ScriptThread(LPVOID) { if (g_script) g_script(); printf("FAKE: the script returned\n"); fflush(stdout); return 0; }
 EXP void FakeStartScript() { CreateThread(nullptr, 0, ScriptThread, nullptr, 0, nullptr); }
 EXP void FakeSetBurnout(int on) { Advance(); g_burnout = on; }
 EXP void FakeSetSpeed(float v) { Advance(); g_speed = v; }

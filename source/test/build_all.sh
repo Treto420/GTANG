@@ -11,6 +11,8 @@ python3 check_natives.py $W/src/GtaBeamD1.cpp || exit 1
 # v2.63: the built-in weapons file (written to GTA's folder when missing) must be valid JSON
 python3 -c "import json,sys; s=open(sys.argv[1]).read(); i=s.index('kWeaponsDefault = R\"JSON(')+25; json.loads(s[i:s.index(')JSON\"',i)])" $W/src/GtaBeamD1.cpp || { echo "built-in weapons JSON broken"; exit 1; }
 python3 check_json.py $W/src/GtaBeamD1.cpp || exit 1   # v2.7
+# v2.72: every lock taken is let go (a lost unlock in the receiver froze GTA's script on the first repair)
+python3 -c "import re,sys,collections as C; s=open(sys.argv[1]).read(); a=C.Counter(re.findall(r'AcquireSRWLock(\w+\(&[\w.]+\))',s)); r=C.Counter(re.findall(r'ReleaseSRWLock(\w+\(&[\w.]+\))',s)); sys.exit(0 if a==r else 'locks not paired: %s' % (a-r or r-a))" $W/src/GtaBeamD1.cpp || exit 1
 cp native_hashes.txt run/ 2>/dev/null || true
 cd $W/src
 $Z -c -o carmodel.o carmodel.cpp 2>&1 | grep -E "error|warning" || true
