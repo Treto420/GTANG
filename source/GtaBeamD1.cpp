@@ -5171,12 +5171,23 @@ namespace
 	// v2.5: does this tile's own ground meet the neighbour its level came from along their shared side (the same road going
 	// on, its level carried a little wrong), or not (beside a deck: only the road far under it)? The median step between the
 	// neighbour's edge points and this tile's first measured points within 1 m of that edge, under 1 m
+	bool MeetsTile(const WTile& t, const WTile& nb);
+	// v2.73: the tile its level came from, or (your v2.72 hill holes: "nothing at the car's level, left empty") any finished
+	// tile beside it: its measured ground meets that tile's at their shared edge = the same ground, its level was carried wrong
 	bool MeetsFrom(const WTile& t)
 	{
-		if (!t.hasFrom) return false;
-		auto it = g_world.tiles.find(t.fromKey);
-		if (it == g_world.tiles.end()) return false;
-		const WTile& nb = it->second;
+		if (t.hasFrom) {
+			auto it = g_world.tiles.find(t.fromKey);
+			if (it != g_world.tiles.end() && MeetsTile(t, it->second)) return true;
+		}
+		for (const auto& d : { std::array<int, 2>{ 1, 0 }, std::array<int, 2>{ -1, 0 }, std::array<int, 2>{ 0, 1 }, std::array<int, 2>{ 0, -1 } }) {
+			auto it = g_world.tiles.find(WKey(t.i + d[0], t.j + d[1]));
+			if (it != g_world.tiles.end() && it->second.state == 2 && (!t.hasFrom || WKey(t.i + d[0], t.j + d[1]) != t.fromKey) && MeetsTile(t, it->second)) return true;
+		}
+		return false;
+	}
+	bool MeetsTile(const WTile& t, const WTile& nb)
+	{
 		const int    n = t.n, di = nb.i - t.i, dj = nb.j - t.j;
 		if (nb.n != n || int(nb.z.size()) < n * n || (di && dj) || (!di && !dj) || abs(di) > 1 || abs(dj) > 1) return false;
 		std::vector<double> d;
@@ -5404,9 +5415,9 @@ namespace
 	}
 
 	// v2.73: your v2.72 screenshots: whole tiles of a hill road empty in BeamNG (GTA's rays found no ground, or only ground away
-	// from the level they were made for: "left empty"). A point with known ground both ways along x or along y (the neighbours'
-	// shared edges count) is filled in between them, as GTA's Tarmac (BeamNG's ASPHALT). Not where GTA has water; not steeper
-	// than 60% (a drop beside a road, the edge of a deck: ground on one side only, left as it is)
+	// from the level they were made for: "left empty"). A point with no ground and known ground both ways along x or along y
+	// (in the tiles next to it too, up to 16 m) is filled in between them, as GTA's Tarmac (BeamNG's ASPHALT). Not where GTA has
+	// water; not steeper than 60%; not another level's ground left out beside a deck (a drop, a deck's edge: left as it is)
 	int FillHoles(WTile& t)
 	{
 		WorldState& w = g_world;
@@ -5420,8 +5431,7 @@ namespace
 				const int a = d[0] < 0 ? 0 : d[0] > 0 ? n - 1 : q, b = d[1] < 0 ? 0 : d[1] > 0 ? n - 1 : q;
 				const int oa = d[0] < 0 ? n - 1 : d[0] > 0 ? 0 : q, ob = d[1] < 0 ? n - 1 : d[1] > 0 ? 0 : q;
 				const int k = b * n + a, ok = ob * n + oa;
-				if (std::isfinite(t.z[k]) || !std::isfinite(o.z[ok])) continue;
-				if (t.ps[k] == 5) --t.voids;
+				if (std::isfinite(t.z[k]) || t.ps[k] == 5 || !std::isfinite(o.z[ok])) continue;
 				t.z[k] = o.z[ok];
 				t.mat[k] = o.mat[ok];
 				t.ps[k] = 2;
@@ -5446,7 +5456,7 @@ namespace
 		for (int b = 0; b < n; ++b)
 			for (int a = 0; a < n; ++a) {
 				const int k = b * n + a;
-				if (std::isfinite(t.z[k])) continue;
+				if (std::isfinite(t.z[k]) || t.ps[k] == 5) continue;  // (5: another level's ground left out on purpose: beside a deck)
 				const int ga = t.i * S + a, gb = t.j * S + b;
 				double    sum = 0;
 				int       c = 0;
@@ -5476,7 +5486,6 @@ namespace
 					continue;
 				}
 				nz[k] = z;
-				if (t.ps[k] == 5) --t.voids;
 				t.mat[k] = 0x10DD5498u;  // Tarmac
 				t.ps[k] = 2;
 				t.src[k] = 2;
@@ -5603,14 +5612,12 @@ namespace
 		}
 		if (t.lvE != lvMeasured) w.underPts += uint32_t(UnderOverhead(t));  // v2.62: again on the level it was moved to
 		w.pitPts += FillPits(t, w.spikePts);  // v2.55
-		// v2.73: holes filled: a tile with nothing at its level (its ground was measured: GTA has it loaded) at once; points with no
-		// ground when the car is close (further out GTA may not have loaded its collision yet: measured again first)
-		if (g_cfg.worldFill && !t.pre && (t.noLevel || (ChainCost(key) <= 2.0 * w.urgentM && NowSeconds() - w.placedT > 3.0))) {
+		// v2.73: holes filled when the car is close (further out GTA may not have loaded its collision yet: measured again first)
+		if (g_cfg.worldFill && !t.pre && ChainCost(key) <= 2.0 * w.urgentM && NowSeconds() - w.placedT > 3.0) {
 			const int f = FillHoles(t);
 			if (f) {
 				w.fbPts += uint32_t(f);
 				++w.fbTiles;
-				if (t.noLevel && AnyCell(t)) t.noLevel = false;
 			}
 		}
 		for (int b = 0; b < t.n - 1; ++b)

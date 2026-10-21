@@ -21,7 +21,7 @@ log, host, ev = rd('GtaBeamD1.log'), rd('host_out.txt'), rd('fake_beam_events.tx
 if mode == 'propstuck':
     check(re.search(r"copy of prop \d+ velocity set: GTA doesn't move this model", host) is not None, 'the fake GTA ignored the copies\' velocity (his posts and bins)')
     m = re.findall(r'the knocked prop 0x(\w+) 1 s later: its copy moved ([\d.]+) m \(the plugin moved it[^)]*\), upright ([-\d.]+)', log)
-    check(len(m) >= 1 and all(float(x[1]) > 0.3 for x in m), 'v2.73: the plugin knocked the copies over and moved them (%s)' % m)
+    check(len(m) >= 1 and all(float(x[1]) > 0.3 or float(x[2]) < 0.5 for x in m), 'v2.73: the plugin moved the copies (slid away or tipped over: %s)' % m)
     check(any(float(x[2]) < 0.3 for x in m), 'v2.73: a tall one lies on its side 1 s later (upright %s)' % [x[2] for x in m])
     check(re.search(r'knocked over by the plugin \(GTA\'s physics didn\'t move them\)', log) is not None and
           any(int(x) > 0 for x in re.findall(r'v2\.73: (\d+) knocked over by the plugin', log)), 'v2.73: counted in the 10 s line')

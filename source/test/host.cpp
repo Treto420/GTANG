@@ -244,7 +244,12 @@ int main(int argc, char** argv)
 			else if (!strcmp(c.what, "quit")) quit = true;
 		}
 		sc->Present(0, 0);
-		Sleep(16);
+		{
+			// v2.73: HOST_FRAME_MS: a slower frame (the scenarios' timings expect ~15 fps; a faster sandbox ran them in a third of the time)
+			static int fm = -1;
+			if (fm < 0) { char e[16]; fm = GetEnvironmentVariableA("HOST_FRAME_MS", e, sizeof e) ? atoi(e) : 16; }
+			Sleep(fm);
+		}
 		if (quit) break;
 		if (holding) --frame;  // (the script's frame count stands still while it waits)
 	}
