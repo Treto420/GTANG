@@ -13,8 +13,9 @@ GTA x Beam is a "passthrough" bridge. GTA V runs the world, walking and gunplay;
 - **Real damage.** BeamNG's dents, broken glass, lost bumpers and wheels show on the car in GTA. Crashes hurt you.
 - **GTA's weapons.** Bullets dent the car, leave holes, pop tyres and break windows. Explosions push it and set it on fire. A car that blows up becomes a charred wreck.
 - **Traffic crashes in BeamNG.** A GTA car about to hit yours gets a BeamNG "twin": the crash happens in BeamNG, soft body against soft body. The GTA car copies its twin's movement and takes GTA damage where the twin is dented. Pedestrians are knocked down; riders come off their bikes.
-- **Breakable props.** Lamp posts, signs and hydrants fall the way you hit them. Breaking one can set off a GTA particle effect, such as sparks or a hydrant's water (set in `GtaBeamD1_props.json`).
-- **Your driver's seat.** In drive mode you sit where the BeamNG car's driver camera is, so first person looks out of the BeamNG car. Ctrl+Shift+F10 lets you move yourself in the seat with the arrow keys; it's saved per car. The driver's door opens in BeamNG when you get in or out.
+- **Tyre smoke.** Burnouts, locked wheels and slides make GTA's own tyre smoke at the BeamNG car's wheels; the screech is BeamNG's tyre sound.
+- **Breakable props.** Lamp posts, signs, bins and hydrants fall the way you hit them. Breaking one can set off a GTA particle effect, such as sparks or a hydrant's water (set in `GtaBeamD1_props.json`).
+- **Your driver's seat.** In drive mode you sit where the BeamNG car's driver camera is, so first person looks out of the BeamNG car. Ctrl+Shift+F10 lets you move yourself in the seat with the arrow keys; it's saved per car. The drawn car's front doors open with GTA's when you get in or out.
 - **On foot.** Get out, walk around the car and shoot it. The BeamNG gauge and drive mode stay on.
 - **Pause sync, sound and radio.** Pausing one game pauses the other. BeamNG's engine sound plays while GTA has focus, and GTA's radio plays as the phone radio.
 
@@ -52,7 +53,9 @@ Everything is in `GtaBeamD1.ini`, with comments. Common ones:
 - `DriverSeatForwardM`, `DriverSeatUpM`, `DriverSeatRightM` move you in the seat for every car (Ctrl+Shift+F10 does it per car, saved in `GtaBeamD1_seats.json`).
 - `Weapons=0` turns off weapon damage on the car.
 - `DriveGravity` sets how heavy the car feels (1.1 by default).
-- `World=0` uses BeamNG's own map instead of GTA's ground (for testing).
+- `World=0` uses BeamNG's own map instead of GTA's ground (for testing). `WorldFill=0` leaves holes in GTA's ground empty instead of filling them with asphalt.
+- `TireSmoke=0` turns the tyre smoke off; `TireSmokeSlipMs` sets how much a tyre must slip to smoke.
+- `DoorOpenDeg` sets how far the drawn front doors open.
 
 Game content lives in JSON next to the ini:
 - `GtaBeamD1_surfaces.json`: GTA ground material to BeamNG ground model (grip).
@@ -71,7 +74,8 @@ Please attach both logs to any bug report:
 - The first F10 of a BeamNG session loads the twins (about 10 s; BeamNG freezes for a moment per car). Later F10s reuse them.
 - GTA drivers may not react to your car before a hit.
 - The first drive through an area measures it. A saved map (`GtaBeamD1_map\`) makes later drives instant there. Delete that folder to measure again.
-- Some hillsides and bridge decks can appear a few seconds late. They fill in as you approach.
+- Some hillsides and bridge decks can appear a few seconds late. They fill in as you approach. A hole GTA's rays can't measure, with ground on two sides of it, is filled with flat asphalt between them (it may not match a bumpy surface exactly).
+- Only parts named "door" in the car file open (front doors). They turn about their front edge; the door glass and inner panel go with them if their names say door.
 
 ## Building from source
 The source is in `source\`.

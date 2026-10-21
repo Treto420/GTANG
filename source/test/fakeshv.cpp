@@ -94,7 +94,7 @@ static int Radio()
 static double FakeGround(double x, double y, bool* hit, unsigned* mat)
 {
 	*hit = true;
-	if (Env("FAKE_HOLE") && y > 70 && y < 80) { *hit = false; *mat = 0; return 0; }
+	if ((Env("FAKE_HOLE") || Env("FAKE_GAP")) && y > 70 && y < 80) { *hit = false; *mat = 0; return 0; }   // v2.73: FAKE_GAP: the same strip, no water (missing collision)
 	double z = 0.03 * x + 1.5 * sin(y / 25.0);
 	// v2.7: FAKE_DROP=1: right of the car's line (heading 110 deg), from 8.5 m off it, the ground is 16 m lower (a ridge road's drop:
 	// out of the rays' normal reach, 12 m down)
@@ -794,6 +794,7 @@ PUINT64 nativeCall()
 	case 0x1C99BB7B6E96D16F:  // SET_ENTITY_VELOCITY (v2.7: the traffic car's printed)
 		if (FakeProp* fp = PropOf(int(g_args[0]))) {   // v2.72: a prop's copy flies off (moved 100 m away); a map prop doesn't move
 			if (!fp->src) { printf("FAKE: map prop %d velocity set: GTA doesn't move it\n", fp->h); fflush(stdout); break; }
+			if (Env("FAKE_PROPSTUCK")) { printf("FAKE: copy of prop %d velocity set: GTA doesn't move this model\n", Shown(fp)); fflush(stdout); break; }   // v2.73 (his v2.72 log)
 			printf("FAKE: prop %d pushed (velocity %.1f %.1f %.1f) (its copy)\n", Shown(fp), F(1), F(2), F(3)); fflush(stdout);
 			if (!fp->pushed) fp->x += 100.0;
 			fp->pushed = true;
@@ -811,6 +812,14 @@ PUINT64 nativeCall()
 		else if (FakeProp* fp = PropOf(int(g_args[0]))) RetV(0.0f, 0.0f, fp->pushed ? 5.0f : 0.0f);
 		break;
 	case 0x8339643499D1222E: if (FakeProp* fp = PropOf(int(g_args[0]))) { printf("FAKE: prop %d turning %.1f %.1f %.1f\n", Shown(fp), F(1), F(2), F(3)); fflush(stdout); } break;   // SET_ENTITY_ANGULAR_VELOCITY (v2.72)
+	case 0x95EED5A694951F9F: { FakeProp* fp = PropOf(int(g_args[0])); RetF(fp && fp->posed ? float(fp->R[2][2]) : 1.0f); break; }   // GET_ENTITY_UPRIGHT_VALUE (v2.73)
+	case 0xF6829842C06AE524: {   // GET_WATER_HEIGHT (v2.73): FAKE_HOLE's strip is water 20 cm under the road at its edge
+		bool gh; unsigned m;
+		const bool w = Env("FAKE_HOLE") && F(1) > 70 && F(1) < 80;
+		if (w) *reinterpret_cast<float*>(g_args[3]) = float(FakeGround(F(0), 69.9, &gh, &m) - 0.2);
+		RetI(w ? 1 : 0); break; }
+	case 0x2595DD4236549CE3: printf("FAKE: ped %d no longer needed\n", *reinterpret_cast<int*>(g_args[0])); fflush(stdout); break;   // SET_PED_AS_NO_LONGER_NEEDED (v2.73)
+	case 0xF7DDEBEC43483C43: { static int n = 0; if (n++ % 30 == 0) { printf("FAKE: particle fx %d moved to %.2f %.2f %.2f\n", int(g_args[0]), F(1), F(2), F(3)); fflush(stdout); } break; }   // SET_PARTICLE_FX_LOOPED_OFFSETS (v2.73)
 	case 0xE143FA2249364369: {   // GET_CLOSEST_OBJECT_OF_TYPE (v2.72: map props only when isMission)
 		int best = 0;
 		for (auto& q : g_props) if (!q.src && !q.hidden && q.model == unsigned(g_args[4]) && (q.x - F(0)) * (q.x - F(0)) + (q.y - F(1)) * (q.y - F(1)) <= F(3) * F(3)) best = q.h;

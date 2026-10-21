@@ -1577,9 +1577,54 @@ namespace car
 		std::vector<size_t> order(prims.size());
 		for (size_t i = 0; i < order.size(); ++i) order[i] = i;
 		std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return prims[a].translucent < prims[b].translucent; });
+		// ---- v2.73: the front doors (your v2.72 test: "the door doesn't open at all during the get in animation"): a part whose node
+		// name has "door" and no rear / tailgate / trunk / hatch / sliding word after it, on the left or right of the car (its middle
+		// 30 cm or more off the centre line). Each side's hinge: the outer front edge of its parts (GTA turns them about it)
+		std::vector<int> primDoor(prims.size(), -1);
+		{
+			float lo[2] = { 1e9f, 1e9f }, hiY[2] = { -1e9f, -1e9f }, out2[2] = { 0, 0 };
+			int   cnt[2] = {};
+			std::string names[2];
+			for (size_t pi = 0; pi < prims.size(); ++pi) {
+				const PrimRec& p = prims[pi];
+				if (primWheel[pi] >= 0 || p.node < 0 || p.node >= int(data->nodes_count) || !data->nodes[p.node].name) continue;
+				const std::string nm = Lower(data->nodes[p.node].name);
+				const size_t      at = nm.find("door");
+				if (at == std::string::npos) continue;
+				const std::string rest = nm.substr(at + 4);
+				bool rear = false;
+				for (const char* w : { "rl", "rr", "rear", "back", "slid" }) rear = rear || rest.find(w) != std::string::npos;
+				for (const char* w : { "tailgate", "trunk", "hatch", "boot", "cargo", "barn", "fuel", "glovebox" }) rear = rear || nm.find(w) != std::string::npos;
+				if (rear || !p.count) continue;
+				double sx = 0;
+				for (uint32_t q = p.start; q < p.start + p.count; ++q) sx += cpos[out.indices[q]].x;
+				sx /= p.count;
+				if (fabs(sx) < 0.3) continue;
+				const int side = sx < 0 ? 0 : 1;
+				primDoor[pi] = side;
+				++cnt[side];
+				if (names[side].size() < 200) names[side] += (names[side].empty() ? "" : ", ") + std::string(data->nodes[p.node].name);
+				for (uint32_t q = p.start; q < p.start + p.count; ++q) {
+					const V3& P = cpos[out.indices[q]];
+					hiY[side] = std::max(hiY[side], float(P.y));
+					lo[side] = std::min(lo[side], float(P.y));
+					out2[side] = side ? std::max(out2[side], float(P.x)) : std::min(out2[side], float(P.x));
+				}
+			}
+			for (int sd = 0; sd < 2; ++sd) {
+				out.doorOk[sd] = cnt[sd] > 0 && hiY[sd] - lo[sd] > 0.4f;
+				out.doorHinge[sd][0] = out2[sd];
+				out.doorHinge[sd][1] = hiY[sd];
+				if (!out.doorOk[sd]) continue;
+				Logf(log, "car doors (v2.73): %s front door: %d part(s) (%s), %.2f m long, hinge at %.2f %.2f m", sd ? "right" : "left", cnt[sd], names[sd].c_str(), hiY[sd] - lo[sd],
+					out2[sd], hiY[sd]);
+			}
+			if (!out.doorOk[0] && !out.doorOk[1]) Logf(log, "car doors (v2.73): no part named as a front door: the drawn doors don't open");
+		}
 		for (size_t i : order) {
 			const PrimRec& p = prims[i];
 			Draw           d;
+			d.door = primDoor[i] >= 0 && out.doorOk[primDoor[i]] ? primDoor[i] : -1;
 			d.start = p.start;
 			d.count = p.count;
 			d.mat = p.mat;

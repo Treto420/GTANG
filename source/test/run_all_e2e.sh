@@ -1,5 +1,5 @@
 #!/bin/sh
-# v2.43/2.5/2.51/2.6/2.62/2.63/2.7/2.71/2.72: every end-to-end scenario, one after another (about 60 minutes). Run from test/: sh run_all_e2e.sh
+# v2.43/2.5/2.51/2.6/2.62/2.63/2.7/2.71/2.72/2.73: every end-to-end scenario, one after another (about 60 minutes). Run from test/: sh run_all_e2e.sh
 W=${W:-/home/claude/w}
 cd $W/test/run
 cp ../script_*.txt . 2>/dev/null
@@ -51,7 +51,7 @@ cp GtaBeamD1.ini ini_saved.txt
 sed -i 's/^CarFile=.*/CarFile=car_glass\\car.gltf/' GtaBeamD1.ini
 r script_weapons.txt 150 FAKE_WEAPONS=1 "FAKE_CAM=-4.5 5.5 3.5 -21.5 -140.7"; python3 ../check_v26.py weapons | tail -1
 r script_foot.txt 120 FAKE_FOOT=1 "FAKE_CAM=-4.5 5.5 3.5 -21.5 -140.7"; python3 ../check_v26.py foot | tail -1   # v2.61: out of the car, drive mode on
-python3 ../check_v27.py door | tail -1   # v2.72: the driver's door opens and shuts in BeamNG
+python3 ../check_v27.py door | tail -1   # v2.73: GTA's door ratio turns the drawn front doors
 # v2.63: your rocket on the car: it blows up at once; 5 shots into a headlight: cracked, then shattered out after 3 more
 r script_foot.txt 120 FAKE_FOOT=1 FAKE_RPG=1 "FAKE_CAM=-4.5 5.5 3.5 -21.5 -140.7"; python3 ../check_v26.py rpg | tail -1
 r script_foot.txt 120 FAKE_FOOT=1 FAKE_SHATTER=1 "FAKE_CAM=-4.5 5.5 3.5 -21.5 -140.7"; python3 ../check_v26.py shatter | tail -1
@@ -60,9 +60,9 @@ cp ini_saved.txt GtaBeamD1.ini; rm -f GtaBeamD1_weapons.json
 # near the standing car measured again, the second time with the tall window, kept); the crash-hurt rule
 cp GtaBeamD1.ini ini_saved.txt
 sed -i 's/^TrafficTwins=.*/TrafficTwins=0/' GtaBeamD1.ini; grep -q '^TrafficTwins=' GtaBeamD1.ini || echo 'TrafficTwins=0' >> GtaBeamD1.ini
-r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1 FAKE_PED=1; python3 ../check_v27.py traffic | tail -1   # (v2.7's push: TrafficTwins=0)
+r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1 FAKE_PED=1; python3 ../check_v27.py traffic | tail -1; python3 ../check_v273.py ped | tail -1   # (v2.7's push: TrafficTwins=0)
 cp ini_saved.txt GtaBeamD1.ini
-r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1; python3 ../check_v27.py twins | tail -1     # v2.71: BeamNG twins
+r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1; python3 ../check_v27.py twins | tail -1; python3 ../check_v273.py dents | tail -1     # v2.71: BeamNG twins (v2.73: dents capped)
 r script_ring.txt 120 FAKE_RAYCAP=12 FAKE_DROP=1;    python3 ../check_v27.py drop | tail -1
 python3 ../check_v27.py crash | tail -1
 # v2.71: a hillside rising past the window beside the road (found from above, kept); a roof beside it (dropped)
@@ -74,3 +74,8 @@ r script_seat.txt 80 FAKE_RAYCAP=12; python3 ../check_v27.py seatadj | tail -1
 rm -f GtaBeamD1_seats.json
 # v2.72: F10 over a hole (his v2.71 loop): a pad under the start spot
 r script_world.txt 90 FAKE_RAYCAP=12 FAKE_HOLE=1 FAKE_STARTY=75; python3 ../check_v27.py startpad | tail -1
+# v2.73: knocked copies GTA's physics don't move (the plugin knocks them over; the map's own never deleted: the crash); a hole with no
+# water filled as asphalt; tyre smoke at spinning wheels
+r script_props_fixed.txt 150 FAKE_RAYCAP=12 FAKE_PROPS=1 FAKE_PROPSTUCK=1; python3 ../check_v273.py propstuck | tail -1
+r script_hole.txt 90 FAKE_RAYCAP=12 FAKE_GAP=1; python3 ../check_v273.py gap | tail -1
+r script_world.txt 90 FAKE_RAYCAP=12 FAKE_BURNOUT=1; python3 ../check_v273.py burnout | tail -1

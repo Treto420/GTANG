@@ -153,4 +153,7 @@ check('car glass/lights (v2.61): 3 breakable groups on 3 parts' in r.stderr and 
 # v2.6: a palette map with no paint flag (your Z06's paint) is painted; the normal paint layer still is
 check(MT.get(('paintx', 1)) == 1 and MT.get(('body', 1)) == 1 and MT.get(('glass', 0)) == 0, 'v2.6: palette layer without the flag painted (%s)' % MT)
 check("material 'paintx' layer 2 has a colour palette map but no paint flag: painted" in r.stderr, 'v2.6: and logged')
+# v2.73: the front doors: a part named "door" on one side (the test car's right door glass) turns about its front outer edge
+m = re.search(r'car doors \(v2.73\): right front door: 1 part\(s\) \(glass_door\), ([\d.]+) m long, hinge at ([-\d.]+) ([-\d.]+) m', r.stderr)
+check(m and abs(float(m.group(1)) - 1.2) < 0.01 and float(m.group(2)) > 0.8 and 'left front door' not in r.stderr, 'v2.73: the right front door found, 1.2 m long, hinge on the outer edge (%s)' % (m.group(0) if m else r.stderr[-200:]))
 print('ALL PASS' if not fails else 'FAILED: %d' % len(fails))

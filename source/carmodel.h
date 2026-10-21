@@ -100,6 +100,7 @@ namespace car
 		int      wheel = -1;            // index into Model::wheels, -1 = body
 		int      wheelMode = 0;         // 1 spins + steers, 2 steers only (brake caliper)
 		int      dg = -1;               // v2.6: index into Model::dgNames (glass, lights: hidden or frosted when BeamNG breaks them), -1 none
+		int      door = -1;             // v2.73: 0 the front left door, 1 the front right one (turns when GTA's does), -1 none
 	};
 
 	struct Wheel
@@ -162,6 +163,9 @@ namespace car
 		// broken material is invisible (side windows: hidden when broken) or not (a windshield cracks: drawn frosted)
 		std::vector<std::string>           dgNames;
 		std::vector<uint8_t>               dgHide;
+		// v2.73: the front doors (parts named "door", not a rear one): their hinge line (car space x, y: the outer front edge)
+		bool                               doorOk[2] = { false, false };
+		float                              doorHinge[2][2] = {};
 	};
 
 	struct Options

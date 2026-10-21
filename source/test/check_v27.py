@@ -10,7 +10,7 @@
             from above and kept (it meets the road), nothing fell through.
   startpad: FAKE_HOLE=1 FAKE_STARTY=75 (v2.72): F10 over a hole: a pad there, placed once, no loop.
   seatadj : script_seat.txt (v2.72): Ctrl+Shift+F10 seat adjust, saved per car.
-  door    : (after the foot run) v2.72: the driver's door opens and shuts in BeamNG.
+  door    : (after the foot run) v2.73: GTA's door ratio turns the drawn front doors.
   seat    : (after any drive run) v2.71: the driver's seat from BeamNG's driver camera; you visible in drive mode.
   crash   : the 2.63 log's lethal crash (a glance off a wall: 32 km/h lost, the velocity turned by 77 km/h) costs a little
             health now (unit check of the rule, no run)."""
@@ -107,10 +107,12 @@ elif mode == 'seatadj':
     check(m is not None and ('"%s"' % m.group(1)) in js, 'v2.72: GtaBeamD1_seats.json has it')
     check('fell through' not in log, 'nothing fell through')
 elif mode == 'door':
-    # v2.72 (after the foot run): getting out and back in opens and shuts BeamNG's driver door (the fake car's doorFLCoupler)
-    check('door (v2.72): GTA opened its car\'s driver door' in log and 'door (v2.72): GTA shut its car\'s driver door' in log, 'v2.72: GTA saw its door open and shut')
-    check('the driver\'s: doorFLCoupler' in mlog, 'v2.72: the BeamNG mod found the driver\'s door controller (%s)' % re.findall(r'door: the car.s door controllers: [^\n]*', mlog)[:1])
-    check(ev.count('toggle doorFLCoupler') >= 2, 'v2.72: opened and shut (%d toggles)' % ev.count('toggle doorFLCoupler'))
+    # v2.73 (after the foot run, the car file with a right door: car_glass): getting out and back in: GTA's door ratio turns the
+    # drawn front doors (no BeamNG door latch any more)
+    check(re.search(r"door \(v2\.73\): GTA's (left|right) front door opens", log) is not None and re.search(r"door \(v2\.73\): GTA's (left|right) front door shut", log) is not None,
+          'v2.73: GTA\'s doors seen open and shut (%s)' % re.findall(r'door \(v2\.73\)[^\n]*', log)[:4])
+    check("right front door opens (0.80): the drawn car's opens with it" in log, 'v2.73: the drawn right door (the car file\'s glass_door) turns with it')
+    check('toggle door' not in ev, 'v2.73: no BeamNG door latch toggled')
 elif mode == 'drop':
     again = re.findall(r'ground: tile (-?\d+),(-?\d+) (?:is empty|has empty cells) near the car: measured again \(try (\d)(, tall window)?\)', log)
     kept = re.findall(r'ground: tile (-?\d+),(-?\d+): found with the tall window \(below the level', log)

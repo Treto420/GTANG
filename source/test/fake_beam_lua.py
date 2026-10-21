@@ -858,7 +858,7 @@ while time.perf_counter() < end:
     f = basis()[1]
     car['x'] += f[0] * car['v'] * dt
     car['y'] += f[1] * car['v'] * dt
-    car['spin'] -= car['v'] * dt / 0.33
+    car['spin'] -= (car['v'] + (8.0 if os.environ.get('FAKE_BURNOUT') and thr > 0.1 else 0.0)) * dt / 0.33   # v2.73: FAKE_BURNOUT: the wheels spin 8 m/s faster than the car goes
     # v2.52: against a physics prop: it tips over and is pushed 1 m along
     pv = phys_hit()
     if pv:

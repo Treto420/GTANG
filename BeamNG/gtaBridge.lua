@@ -77,7 +77,7 @@
 --   gtaBridge.soundSession(false) -- v2.4: switch the sound "session" mode off (the GTA plugin's BeamNGSoundWake=session sets it)
 
 local M = {}
-M.version = '2.72'
+M.version = '2.73'
 local logTag = 'gtaBridge'
 
 -- ---------------------------------------------------------------- config
@@ -3204,7 +3204,6 @@ handlers.drive_start = function(m)
                   plist = B and tostring(B.padDev or '') or '' }
   do  -- v2.71: the driver's seat for GTA's player
     local okE, eye, eyeHow = pcall(driverEye, veh)
-    drive.driverLeft = not (okE and eye and eye[1] > 0)   -- v2.72: the driver's door side (right = +)
     if okE and eye then
       drive.okMsg.eye = { tonumber(string.format('%.3f', eye[1])), tonumber(string.format('%.3f', eye[2])), tonumber(string.format('%.3f', eye[3])) }
       logI(string.format('drive: driver\'s eye %.2f %.2f %.2f m (right, forward, up of the car): %s', eye[1], eye[2], eye[3], tostring(eyeHow)))
@@ -5934,63 +5933,16 @@ world.tw.tpTwin = function(e)
   if not c then return false, 'no rotation' end
   return pcall(function() e.veh:setPositionRotation(to.P[1], to.P[2], to.P[3], c[2].x, c[2].y, c[2].z, c[2].w) end)
 end
--- ---- v2.72: the driver's door opens when GTA's does (you get in or out): the car's own door latch controller (BeamNG's
--- clickable doors: an advancedCouplerControl named like doorFLCoupler / door_FL_coupler), toggled open, toggled shut again.
--- UNVERIFIED: the controller names differ per car; the log lists the door controllers the car has and the one used
-world.doorVeh = [[
-gtabDoor = gtabDoor or {}
-function gtabDoor.find(left)
-  if gtabDoor.c ~= nil then return gtabDoor.c end
-  local names, pick, rank = {}, false, 99
-  local all = {}
-  pcall(function() all = controller.getAllControllers() or {} end)
-  for k, c in pairs(all) do
-    local n = type(k) == 'string' and k or (type(c) == 'table' and tostring(c.name)) or ''
-    local l = n:lower()
-    if l:find('door') then
-      names[#names + 1] = n
-      local r = 99
-      if left then
-        if l:find('fl') then r = 1 elseif l:find('door_?l_?c') then r = 2 end
-      else
-        if l:find('fr') then r = 1 elseif l:find('door_?r_?c') then r = 2 end
-      end
-      if r < 99 and l:find('coupler') then r = r - 0.5 end
-      if r < rank then rank, pick = r, n end
-    end
-  end
-  gtabDoor.c = pick
-  obj:queueGameEngineLua(string.format('if gtaBridge and gtaBridge.doorInfo then gtaBridge.doorInfo(%q, %q) end', tostring(pick), table.concat(names, ',')))
-  return pick
-end
-function gtabDoor.set(open, left)
-  local n = gtabDoor.find(left)
-  if not n or gtabDoor.open == open then return end
-  gtabDoor.open = open
-  local c = controller.getControllerSafe(n)
-  if c and c.toggleGroup then c.toggleGroup() end
-end
-]]
-handlers.door = function(m)
-  local d = drive
-  if not (d and d.veh) then return end
-  local open = tonumber(m.o) == 1
-  pcall(function() d.veh:queueLuaCommand(world.doorVeh .. string.format('\ngtabDoor.set(%s, %s)', open and 'true' or 'false', d.driverLeft == false and 'false' or 'true')) end)
-  logI('door: GTA ' .. (open and 'opened' or 'shut') .. ' its driver door: BeamNG\'s ' .. (open and 'opens' or 'closes'))
-end
+-- (v2.73: the v2.72 door latch toggle is gone: GTA turns the drawn car's doors itself, as far as GTA's are open)
 function M.eyeFromCar(e, how)
   local d = drive
   if not d then return end
   if type(e) == 'table' then
-    d.driverLeft = not (tonumber(e[1]) and e[1] > 0)
     logI(string.format('drive: driver\'s eye %.2f %.2f %.2f m (right, forward, up of the car): %s', e[1], e[2], e[3], tostring(how)))
     pcall(function() udp:sendto(string.format('{"t":"eye","e":[%.3f,%.3f,%.3f]}', e[1], e[2], e[3]), d.ip, d.port) end)
   else
     logI('drive: no driver seat from BeamNG (' .. tostring(how) .. '): GTA keeps its own (Ctrl+Shift+F10 in GTA sets it by hand)')
   end
-end
-function M.doorInfo(pick, names)
-  logI('door: the car\'s door controllers: ' .. (names ~= '' and names or 'none') .. '; the driver\'s: ' .. tostring(pick))
 end
 handlers.twr = function(m)
   local e = world.tw.pool[tonumber(m.k) or -1]
