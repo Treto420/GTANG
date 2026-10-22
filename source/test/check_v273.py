@@ -34,10 +34,10 @@ elif mode == 'gap':
     check(sum(a for a, b in f) > 100, 'v2.73: the strip\'s points filled in (%s)' % f)
     check("BeamNG's car is on GTA's ground (fell)" not in log and 'fell through' not in log, 'v2.73: the car drove over it, nothing fell through')
 elif mode == 'burnout':
-    st = re.findall(r'tyre smoke \(v2\.73\): wheel (\d+) slips ([\d.]+) m/s: GTA\'s core/wheel_burnout started', log)
+    st = re.findall(r'tyre smoke \(v2\.7[34]\): wheel (\d+) slips ([\d.]+) m/s: GTA\'s \S+ started', log)
     check(len(st) >= 2, 'v2.73: smoke started at the spinning wheels (%s)' % st[:4])
-    check(re.search(r'particle fx wheel_burnout on entity 100 at [-\d.]+ [-\d.]+ [-\d.]+ scale [\d.]+: started', host) is not None, 'v2.73: on the hidden GTA car')
-    off = re.findall(r'particle fx wheel_burnout on entity 100 at ([-\d.]+) ([-\d.]+) ([-\d.]+)', host)
+    check(re.search(r'particle fx \S*wheel_burnout on entity 100 at [-\d.]+ [-\d.]+ [-\d.]+ scale [\d.]+: started', host) is not None, 'v2.73: on the hidden GTA car')
+    off = re.findall(r'particle fx \S*wheel_burnout on entity 100 at ([-\d.]+) ([-\d.]+) ([-\d.]+)', host)
     check(off and all(float(z) < 0.6 for x, y, z in off), 'v2.73: at the tyres\' feet (%s)' % off[:4])
     check(len(re.findall(r'particle fx \d+ stopped', host)) >= len(st), 'v2.73: stopped again (%d stops, %d starts)' % (len(re.findall(r'particle fx \d+ stopped', host)), len(st)))
 elif mode == 'ped':

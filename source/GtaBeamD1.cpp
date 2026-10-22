@@ -116,7 +116,7 @@
 #include "carmodel.h"
 #include "shv.h"
 
-#define D1_VERSION "2.73"
+#define D1_VERSION "2.74"
 
 namespace
 {
@@ -273,6 +273,12 @@ namespace
 		constexpr UINT64 REMOVE_MODEL_HIDE = 0xD9E3006FB3CBD765;             // x y z, radius, model, p5 (false)
 		// v2.71: the driver's seat and visibility
 		constexpr UINT64 GET_ENTITY_ALPHA = 0x5A47B3B5E63E94C6;
+		constexpr UINT64 DELETE_VEHICLE = 0xEA386986E786A54F;                   // Vehicle* (v2.74: TrafficMode=despawn)
+		constexpr UINT64 DELETE_PED = 0x9614299DCB53E54B;                       // Ped* (v2.74: its driver and passengers)
+		constexpr UINT64 IS_PED_A_PLAYER = 0x12534C348C6CB68B;                  // v2.74
+		constexpr UINT64 SET_PED_CONFIG_FLAG = 0x1913FE4CBF41C463;              // ped, flag, value (v2.74: 32 = through the windscreen)
+		constexpr UINT64 IS_PED_GETTING_INTO_A_VEHICLE = 0xBB062B2B5722478E;    // v2.74
+		constexpr UINT64 GET_IS_TASK_ACTIVE = 0xB0760331C7AA4155;               // ped, task (v2.74: 2 = getting out of a vehicle)
 		constexpr UINT64 SET_PED_AS_NO_LONGER_NEEDED = 0x2595DD4236549CE3;      // Ped* (v2.73: a knocked person back to GTA)
 		constexpr UINT64 IS_ENTITY_A_MISSION_ENTITY = 0x0A7B270912999B3C;       // v2.73
 		constexpr UINT64 GET_ENTITY_HEIGHT_ABOVE_GROUND = 0x1DD55701034110E5;   // v2.73 (the hit log)
@@ -562,11 +568,15 @@ namespace
 		int         propPhysicsMax = 10;      // PropPhysicsMax: v2.52: that many at once (each one may hitch BeamNG for a moment when it comes)
 		bool        trafficCollision = true;  // TrafficCollision: v2.7: GTA's cars and people and BeamNG's car push each other
 		int         trafficTwins = 4;         // TrafficTwins: v2.71: BeamNG cars that take GTA's cars' place for a crash (0: v2.7's push only)
+		int         trafficMode = 0;          // TrafficMode: v2.74: 0 twins, 1 gta (GTA's own crash), 2 despawn (touched cars vanish)
+		float       twinMaxLen = 7.5f;        // TwinMaxLengthM: v2.74: longer GTA vehicles get GTA's own crash in twins mode (semis, buses)
+		int         showCarsMax = 4;          // ShowCarsMax: v2.74: show cars at once (each keeps its textures in video memory)
 		bool        worldDeep = true;         // WorldDeep: v2.71: no ground in a point's window: looked for below it, then above it
 		bool        worldFill = true;
 		float       doorOpenDeg = 65.0f;      // DoorOpenDeg: v2.73: the drawn front door's angle when GTA's is fully open
 		bool        tireSmoke = true;         // TireSmoke: v2.73: GTA's tyre smoke at BeamNG's wheels that spin or slide
-		char        tireFx[2][48] = { "core", "wheel_burnout" };  // TireSmokeFx: v2.73: asset, effect
+		char        tireFx[2][48] = { "scr_recartheft", "scr_wheel_burnout" };  // TireSmokeFx: v2.73: asset, effect (v2.74: script burnout smoke)
+		float       tireSmokeScale = 1.0f;    // TireSmokeScale: v2.74: its size
 		float       tireSmokeMs = 3.0f;       // TireSmokeSlipMs: v2.73: how fast a tyre must slip (m/s) to smoke         // WorldFill: v2.73: holes with ground on two sides filled in between (Tarmac / ASPHALT)
 		bool        weapons = true;           // Weapons: v2.6: GTA's bullets and explosions hit BeamNG's car; fire; the driver gets hurt
 		int         carExplosion = 0;         // CarExplosion: v2.6: how the burning car blows up: 0 gta (GTA's explosion pushes BeamNG's car), 1 beamng (+ BeamNG's own)
@@ -995,14 +1005,23 @@ namespace
 			c.weapons = GetPrivateProfileIntA(kSec, "Weapons", 1, path) != 0;
 			c.trafficCollision = GetPrivateProfileIntA(kSec, "TrafficCollision", 1, path) != 0;
 			c.trafficTwins = std::clamp(int(GetPrivateProfileIntA(kSec, "TrafficTwins", 4, path)), 0, 8);
+			{
+				char tm[32] = "";
+				GetPrivateProfileStringA(kSec, "TrafficMode", "twins", tm, sizeof(tm), path);
+				c.trafficMode = !_stricmp(tm, "gta") ? 1 : !_stricmp(tm, "despawn") ? 2 : 0;
+				if (c.trafficMode == 0 && c.trafficTwins == 0) c.trafficMode = 1;  // (TrafficTwins=0 before 2.74: no twins)
+				c.twinMaxLen = std::clamp(IniFloat(path, "TwinMaxLengthM", 7.5f), 3.0f, 30.0f);
+				c.showCarsMax = std::clamp(int(GetPrivateProfileIntA(kSec, "ShowCarsMax", 4, path)), 0, 8);
+			}
 			c.worldDeep = GetPrivateProfileIntA(kSec, "WorldDeep", 1, path) != 0;
 			c.worldFill = GetPrivateProfileIntA(kSec, "WorldFill", 1, path) != 0;
 			c.doorOpenDeg = std::clamp(IniFloat(path, "DoorOpenDeg", 65.0f), 0.0f, 120.0f);
 			c.tireSmoke = GetPrivateProfileIntA(kSec, "TireSmoke", 1, path) != 0;
 			c.tireSmokeMs = std::clamp(IniFloat(path, "TireSmokeSlipMs", 3.0f), 0.5f, 30.0f);
+			c.tireSmokeScale = std::clamp(IniFloat(path, "TireSmokeScale", 1.0f), 0.1f, 5.0f);
 			{
 				char fx[100] = "";
-				GetPrivateProfileStringA(kSec, "TireSmokeFx", "core,wheel_burnout", fx, sizeof(fx), path);
+				GetPrivateProfileStringA(kSec, "TireSmokeFx", "scr_recartheft,scr_wheel_burnout", fx, sizeof(fx), path);
 				const char* cm = strchr(fx, ',');
 				if (cm && cm > fx && cm[1]) {
 					snprintf(c.tireFx[0], sizeof(c.tireFx[0]), "%.*s", int(cm - fx), fx);
@@ -1132,6 +1151,14 @@ namespace
 		// HUD
 		bool   hudOn;
 		float  hud[4];                   // minimap rectangle in screen 0..1: x0 y0 x1 y1
+		// v2.74: show cars (parked BeamNG cars on their GTA cars), sampled with the camera
+		int    nShows;
+		struct ShowPose
+		{
+			int    id;
+			double ox, oy, oz;
+			float  R[3], F[3], U[3];
+		} shows[8];
 	};
 
 	struct RayCheck
@@ -1369,6 +1396,8 @@ namespace
 		NVec3 dmin{}, dmax{};
 		char  name[32] = "";
 	} g_tgt;
+	std::set<int> g_showVeh;  // v2.74: GTA cars a show car (a parked BeamNG car) is drawn on (script thread)
+	std::atomic<int> g_showParkReq{ 0 }, g_showDropReq{ 0 };  // v2.74: show car to park / take away (script -> render thread)
 
 	// Hide or show the GTA car. "transparent" (alpha 0) keeps GTA's own shadow of it (VERIFIED v1.7);
 	// "invisible" removes it, but then GTA stops turning its wheels (VERIFIED v1.9.1: 0.0 rad);
@@ -1652,6 +1681,10 @@ namespace
 			Notify("D1: no car found. Get in a car or stand next to one (15 m).");
 			return;
 		}
+		if (g_showVeh.count(veh)) {
+			Notify("D1: that GTA car has a show car on it (Ctrl+Shift+F11 next to it takes it away).");  // v2.74
+			return;
+		}
 		const unsigned model = Call<unsigned>(N::GET_ENTITY_MODEL, veh);
 		NVec3          mn{}, mx{};
 		CallVoid(N::GET_MODEL_DIMENSIONS, model, &mn, &mx);
@@ -1851,6 +1884,8 @@ namespace
 		bool     spin = false;                // ang[] is the wheel's turn angle
 		float    w[kDrvWheels][6] = {};       // hub centre (vehicle frame from P), axle (pointing right)
 		double   ang[kDrvWheels] = {};        // turn angle about the axle (rad, counted on: not wrapped)
+		float    sl[kDrvWheels] = {};         // v2.74: how fast each tyre's tread slips over the ground (m/s, BeamNG's frame)
+		bool     hasSl = false;
 	};
 
 	// receiver thread <-> script thread
@@ -2080,6 +2115,103 @@ namespace
 	} g_drv;
 	float g_drvLearnedSign = 0.0f;  // a steering sign learned earlier in this game session (0 = not yet)
 	std::atomic<int> g_exclusiveFs{ -1 };  // v2.3: GTA in exclusive fullscreen (1), windowed/borderless (0), unknown (-1)
+
+	// ---------------------------------------------------------------------------------------
+	// v2.74: show cars (your v2.73 note: "keep the shell on multiple cars, like my own car show"). Ctrl+Shift+F11 with the BeamNG
+	// car on a GTA car (F11): it stays there as a show car (drawn on that GTA car, which stays hidden and kept by GTA), and the
+	// plugin has no car until the next Shift+F11 brings the next one from BeamNG. Ctrl+Shift+F11 with no car on: the nearest show
+	// car within 10 m goes (its GTA car shows again). Up to ShowCarsMax. A show car keeps its dents and broken glass as they were;
+	// its wheels and doors don't move; BeamNG doesn't have it (in drive mode your car passes through it there; GTA pushes it).
+	// ---------------------------------------------------------------------------------------
+	struct ShowCar
+	{
+		int   id, veh;
+		NVec3 dmin, dmax;
+		char  name[32];
+	};
+	std::vector<ShowCar> g_shows;
+	int                  g_showNext = 1;
+	void ShowKey()
+	{
+		if (g_drv.state != 0) {
+			Notify("Show cars: stop drive mode first (F10).");
+			return;
+		}
+		if (g_tgt.mode && g_haveModel.load()) {
+			if (int(g_shows.size()) >= g_cfg.showCarsMax) {
+				Notify("Show cars: %d already (ShowCarsMax in the ini). Ctrl+Shift+F11 next to one takes it away.", int(g_shows.size()));
+				return;
+			}
+			ShowCar sc{ g_showNext++, g_tgt.veh, g_tgt.dmin, g_tgt.dmax, "" };
+			memcpy(sc.name, g_tgt.name, sizeof(sc.name));
+			CallVoid(N::SET_ENTITY_AS_MISSION_ENTITY, sc.veh, 1, 1);  // (GTA keeps it)
+			SetVisible(sc.veh, false);
+			g_shows.push_back(sc);
+			g_showVeh.insert(sc.veh);
+			g_showParkReq.store(sc.id);
+			UpdateDriver(0, false);
+			g_tgt = Target{};
+			Log("show cars (v2.74): the BeamNG car parked on GTA car %d (%s) as show car %d (%zu now)", sc.veh, sc.name, sc.id, g_shows.size());
+			Notify("Show car %d parked on %s. Shift+F11 gets the next car from BeamNG; Ctrl+Shift+F11 next to it takes it away.", sc.id, sc.name);
+			return;
+		}
+		const NVec3 me = Call<NVec3>(N::GET_ENTITY_COORDS, Call<int>(N::PLAYER_PED_ID), 0);
+		int         best = -1;
+		double      bd = 10.0;
+		for (size_t i = 0; i < g_shows.size(); ++i) {
+			const NVec3  p = Call<NVec3>(N::GET_ENTITY_COORDS, g_shows[i].veh, 0);
+			const double dd = sqrt((p.x - me.x) * (p.x - me.x) + (p.y - me.y) * (p.y - me.y) + (p.z - me.z) * (p.z - me.z));
+			if (dd < bd) bd = dd, best = int(i);
+		}
+		if (best < 0) {
+			Notify(g_shows.empty() ? "Show cars: F11 puts the BeamNG car on a GTA car first, then Ctrl+Shift+F11 parks it there."
+			                       : "Show cars: no show car within 10 m to take away.");
+			return;
+		}
+		ShowCar sc = g_shows[best];
+		g_shows.erase(g_shows.begin() + best);
+		g_showVeh.erase(sc.veh);
+		g_showDropReq.store(sc.id);
+		if (Call<int>(N::DOES_ENTITY_EXIST, sc.veh)) {
+			SetVisible(sc.veh, true);
+			int h = sc.veh;
+			CallVoid(N::SET_VEHICLE_AS_NO_LONGER_NEEDED, &h);
+		}
+		Log("show cars (v2.74): show car %d taken away from GTA car %d (%zu left)", sc.id, sc.veh, g_shows.size());
+		Notify("Show car %d taken away.", sc.id);
+	}
+	// each tick with the camera: where the show cars are (their GTA cars' footprint centre at its lowest point, as F11 puts the car)
+	void SampleShows(CamSample& c)
+	{
+		c.nShows = 0;
+		for (size_t i = 0; i < g_shows.size();) {
+			const ShowCar& sc = g_shows[i];
+			if (!Call<int>(N::DOES_ENTITY_EXIST, sc.veh)) {
+				Log("show cars (v2.74): show car %d's GTA car is gone: the show car too", sc.id);
+				g_showDropReq.store(sc.id);
+				g_showVeh.erase(sc.veh);
+				g_shows.erase(g_shows.begin() + i);
+				continue;
+			}
+			if (c.nShows < 8) {
+				const NVec3 p = Call<NVec3>(N::GET_ENTITY_COORDS, sc.veh, 0);
+				const NVec3 px = Call<NVec3>(N::GET_OFFSET_FROM_ENTITY_IN_WORLD_COORDS, sc.veh, 10.0f, 0.0f, 0.0f);
+				const NVec3 py = Call<NVec3>(N::GET_OFFSET_FROM_ENTITY_IN_WORLD_COORDS, sc.veh, 0.0f, 10.0f, 0.0f);
+				const NVec3 pz = Call<NVec3>(N::GET_OFFSET_FROM_ENTITY_IN_WORLD_COORDS, sc.veh, 0.0f, 0.0f, 10.0f);
+				const double R[3] = { (px.x - p.x) * 0.1, (px.y - p.y) * 0.1, (px.z - p.z) * 0.1 };
+				const double F[3] = { (py.x - p.x) * 0.1, (py.y - p.y) * 0.1, (py.z - p.z) * 0.1 };
+				const double U[3] = { (pz.x - p.x) * 0.1, (pz.y - p.y) * 0.1, (pz.z - p.z) * 0.1 };
+				const double lx = (sc.dmin.x + sc.dmax.x) * 0.5 + g_cfg.offX, ly = (sc.dmin.y + sc.dmax.y) * 0.5 + g_cfg.offY, lz = sc.dmin.z + g_cfg.offZ;
+				auto&        sp = c.shows[c.nShows++];
+				sp.id = sc.id;
+				sp.ox = p.x + R[0] * lx + F[0] * ly + U[0] * lz;
+				sp.oy = p.y + R[1] * lx + F[1] * ly + U[1] * lz;
+				sp.oz = p.z + R[2] * lx + F[2] * ly + U[2] * lz;
+				for (int k = 0; k < 3; ++k) sp.R[k] = float(R[k]), sp.F[k] = float(F[k]), sp.U[k] = float(U[k]);
+			}
+			++i;
+		}
+	}
 
 	// Fill the car part of a camera sample from the target GTA car.
 	void SampleCar(CamSample& c)
@@ -3043,6 +3175,10 @@ namespace
 			Norm3(a);
 			for (int k = 0; k < 3; ++k) p.w[i][3 + k] = float(a[k]);
 		}
+		double    sl[kDrvWheels];
+		const int ns = JsonNums(js, "sl", sl, kDrvWheels);  // v2.74
+		p.hasSl = ns > 0 && ns == p.nw;
+		for (int i = 0; i < ns && i < kDrvWheels; ++i) p.sl[i] = float(sl[i]);
 		if (Dot3(p.f, p.f) < 0.25 || Dot3(p.u, p.u) < 0.25) return false;
 		Orthonormal(p.f, p.u);
 		return true;
@@ -3721,6 +3857,7 @@ namespace
 		double   corrSum = 0, corrMax = 0;  // v2.3: how far each tick's placement is from GTA's own step (metres)
 		uint32_t corrN = 0;
 	} g_dset;
+	bool g_pulseDraw = false;  // v2.74: GTA's own crash: the hidden car is solid now (drawn where we put it, not where GTA's physics pushed it)
 
 	// before DriveTick: compare GTA's read-back with what we set; DriveDrawPose=set draws the set pose instead
 	void DrvDrawCheck(CamSample& c)
@@ -3742,7 +3879,7 @@ namespace
 			g_dset.driftMax = std::max(g_dset.driftMax, dr);
 			++g_dset.driftN;
 		}
-		if (g_cfg.driveDrawPose == 1) {
+		if (g_cfg.driveDrawPose == 1 || g_pulseDraw) {
 			c.ox = E[0];
 			c.oy = E[1];
 			c.oz = E[2];
@@ -4195,7 +4332,7 @@ namespace
 		// v2.54: tiles swapped for the car's level stay in BeamNG until their new measurement replaces them (key -> by when;
 		// 2.53 took them out at once: a hole the car could reach first), and when each spot was swapped last
 		std::unordered_map<int64_t, double> stale, swapT;
-		uint32_t swapHeld = 0, staleGone = 0;
+		uint32_t swapHeld = 0, staleGone = 0, swapKept = 0;  // swapKept: v2.74
 		int      pitPts = 0, spikePts = 0;  // (v2.55: points lifted out of pits, lowered from spikes)
 		std::vector<std::pair<double, double>> spdHist;  // v2.54: (time, speed) over the last 0.3 s: hard hits are logged
 		double   hitLogT = 0;
@@ -4509,9 +4646,20 @@ namespace
 		return m;
 	}
 
+	// v2.74: a tile (at most a tenth of it empty) whose edge meets the tile its level came from (within 50 cm on average, 3+ points) is
+	// that tile's ground going on: it fits whatever the expected level says (your v2.73 hill log: "tile 0,67 is on another level
+	// (174.4 m) than the car's (174.8 m): swapped", 400 swaps in 10 s: each one a hole while it was measured again)
+	bool MeetsFromEdge(const WTile& t, const WTile* from)
+	{
+		if (!from || from->state != 2 || VoidCount(t) * 10 > t.n * t.n) return false;
+		int          cnt = 0;
+		const double d = EdgeDiff(t, *from, cnt);
+		return cnt >= 3 && d < 0.5;
+	}
 	bool LevelFits(const WTile& cand, const WPlane& p, const WTile* from)
 	{
 		const double E = PlaneZ(p, (cand.i + 0.5) * WTileM(), (cand.j + 0.5) * WTileM());
+		if (fabs(cand.lv - E) < 12.0 && MeetsFromEdge(cand, from)) return true;
 		if (fabs(cand.lv - E) >= g_cfg.worldLevelM) return false;
 		// measured for another level (its rays looked from somewhere else: a ramp measured from the road beside it misses
 		// the ramp's high end)
@@ -6780,9 +6928,10 @@ namespace
 		    "the car's level (left empty), %u levels moved onto their own ground; v2.54: %u swaps held (that spot was swapped under 5 s ago), %u swapped tiles "
 		    "taken out after 2 s without a new one, %zu waiting for their new one; v2.55: %d points lifted out of narrow pits, %d lowered from narrow spikes; "
 		    "v2.62: %u points under an overpass (the road under it, not its deck), %u points across gaps in a deck (joints) joined; v2.63: %u tiles near the car "
-		    "sent at once with their empty cells left out",
+		    "sent at once with their empty cells left out; v2.74: %u checks kept a tile because it meets the tile towards the car",
 			w.swaps, w.levelMiss, w.voidPts, w.voidTiles, w.keptRm, g_cfg.worldKeepTris, w.idleSent, w.noLevelTiles, w.levelMoved, w.swapHeld, w.staleGone, w.stale.size(), w.pitPts, w.spikePts,
-			w.underPts, w.jointPts, w.soonPartial);
+			w.underPts, w.jointPts, w.soonPartial, w.swapKept);
+		w.swapKept = 0;
 		w.swaps = w.levelMiss = w.voidPts = w.voidTiles = w.keptRm = w.idleSent = w.noLevelTiles = w.levelMoved = w.swapHeld = w.staleGone = 0;
 		w.pitPts = w.spikePts = 0;
 		w.underPts = w.jointPts = w.soonPartial = 0;
@@ -7506,6 +7655,10 @@ namespace
 					if (!anchored) continue;
 					const double off = RefOff(t, pl);
 					if (off >= 0 ? off <= 1.5 : fabs(t.lvE - E) < 1.0) continue;  // measured for this level
+					if (t.state == 2 && MeetsFromEdge(t, from)) {
+						++w.swapKept;  // v2.74: it goes on from the tile towards the car: the same ground
+						continue;
+					}
 					bool wrong = fabs(t.lv - E) > tol && fabs(t.lvE - E) > tol;
 					// measured for another level and something doesn't fit (a ramp measured from the road beside it...).
 					// v2.54: not again within 5 s of its last swap (your 2.53 log: 1371 swaps in 10 minutes, the same spots
@@ -8644,11 +8797,13 @@ namespace
 		g.t0 = NowSeconds();
 		const bool tall = m.kind == kPropBreak && L.he[2] > 0.8;
 		if (tall) {
-			const double v = std::min(spd * 0.35, 6.0) * k;
+			// v2.74: snapped at bumper height it goes over faster the faster the car (v2.73 tipped from 1 rad/s whatever the speed: the
+			// car was through before it fell); slid a bit further
+			const double v = std::min(spd * 0.5, 8.0) * k;
 			g.v[0] = float(vx * v), g.v[1] = float(vy * v), g.v[2] = 0.5f;
 			g.w[0] = float(-vy * 2.5 * k), g.w[1] = float(vx * 2.5 * k), g.w[2] = 0;
 			g.sv = v;
-			g.om = 1.0 * k;
+			g.om = std::clamp(spd / (1.2 * std::max(0.5, L.he[2])), 1.0, 6.0) * k;
 		} else {
 			const double v = std::min(spd * 0.7, 12.0) * k;
 			g.v[0] = float(vx * v), g.v[1] = float(vy * v), g.v[2] = float(std::min(3.0, 0.25 * v));
@@ -9215,7 +9370,9 @@ namespace
 				auto      mi = P.models.find(L.model);
 				if (mi == P.models.end()) continue;  // (not classified yet: GtaBeamD1_props.json was just read again)
 				PropModel& m = mi->second;
-				if (m.kind != kPropSoft || L.broken || L.phys) continue;  // (v2.52: a physics prop is BeamNG's)
+				// (v2.52: a physics prop is BeamNG's; v2.74: a knocked post's copy, lying on the road, is soft now: your v2.73 test, "I still
+				// went through the prop afterwards")
+				if ((m.kind != kPropSoft && !(L.isCopy && m.kind == kPropBreak)) || L.broken || L.phys) continue;
 				if (L.isCopy) {  // v2.71: the copy of a physics prop BeamNG still moves: BeamNG's too
 					auto ci = P.copies.find(L.ent);
 					auto oi = ci == P.copies.end() ? P.live.end() : P.live.find(ci->second.orig);
@@ -10219,6 +10376,13 @@ namespace
 			double      V[3] = {};
 			uint32_t    poses = 0;
 			std::map<int, double> applied;  // its dents given to GTA's car (by 0.5 m cell)
+			// v2.74: its poses (GTA's world) on BeamNG's clock: drawn at the same moment as your car (your v2.73 test: twinned cars
+			// "get the old camera lag glitch": each pose was set as it came in, then GTA moved the car on, then the next one snapped it back)
+			struct Pose
+			{
+				double st, P[3], F[3], U[3], V[3];
+			};
+			std::deque<Pose> hist;
 		};
 		std::vector<Twin>       twins;
 		bool                    twAsked = false;
@@ -10254,7 +10418,20 @@ namespace
 		uint32_t                watchLogs = 0;
 		uint32_t                dentLogs = 0;
 		std::map<int, double>   twDone;  // GTA cars a twin just left (not twinned again, not pushed the 2.7 way for 2 s)
-		uint32_t                twActs = 0, twRel = 0, twDents = 0, twFails = 0, twPoses = 0;
+		uint32_t                twActs = 0, twRel = 0, twDents = 0, twFails = 0, twPoses = 0, twThrown = 0;
+		// v2.74: GTA's own crash (TrafficMode=gta; semis and buses in twins mode): the hidden GTA car is solid for a moment when a GTA
+		// vehicle is about to touch yours, so GTA's physics pushes and dents it the way GTA does
+		double                  pulseUntil = 0;
+		bool                    pulseOn = false;
+		struct PulseCheck
+		{
+			int    ent;
+			double v0[3], dv[3], t, vn;
+			int    cls;
+			double P[3];
+		};
+		std::vector<PulseCheck> pulseChecks;
+		uint32_t                pulses = 0, pulseGta = 0, pulseFallback = 0, pulseLogs = 0, despawned = 0, despawnLogs = 0;
 	};
 	TrafficState g_traffic;
 	double       g_twLoadT = -100;  // v2.72: the start waited for the twins then (BeamNG freezes while it spawns one)
@@ -10342,6 +10519,7 @@ namespace
 		tw.state = 1;
 		tw.ent = 0;
 		tw.posed = false;
+		tw.hist.clear();
 		tw.applied.clear();
 		tw.dmax = tw.tStill = 0;
 		tw.poses = 0;
@@ -10358,7 +10536,7 @@ namespace
 	// between drives: only the first F10 of a BeamNG session waits.
 	void TwinsAsk(TrafficState& T)
 	{
-		if (T.twAsked || !g_cfg.trafficCollision || g_cfg.trafficTwins <= 0) return;
+		if (T.twAsked || !g_cfg.trafficCollision || g_cfg.trafficTwins <= 0 || g_cfg.trafficMode != 0) return;
 		if (!T.cfgLoaded) LoadTraffic();
 		if (T.twPoolN <= 0) return;
 		T.twAsked = true;
@@ -10503,6 +10681,9 @@ namespace
 			std::string ty;
 			JsonStr(s, "t", ty);
 			if (ty == "twu") {
+				double tst = 0, tss = 0;
+				const bool hasT = JsonNumC(s.c_str(), "st", tst);
+				if (JsonNumC(s.c_str(), "ss", tss) && g_cfg.drivePoseClock == 1) tst = tss;  // (the car's poses' clock)
 				const size_t a = s.find('[');
 				if (a == std::string::npos) continue;
 				const char* p = s.c_str() + a + 1;
@@ -10518,7 +10699,34 @@ namespace
 					}
 					if (n < 13) break;
 					const int k = int(v[0]) - 1;
-					if (k >= 0 && k < int(T.twins.size())) last[k] = v, have[k] = true;
+					if (k < 0 || k >= int(T.twins.size())) continue;
+					last[k] = v, have[k] = true;
+					TrafficState::Twin& tw = T.twins[k];
+					if (tw.state != 2) continue;
+					TrafficState::Twin::Pose q{};
+					const double Pb[3] = { v[1], v[2], v[3] }, Fb[3] = { v[4], v[5], v[6] }, Ub[3] = { v[7], v[8], v[9] }, Vb[3] = { v[10], v[11], v[12] };
+					DrvMapPoint(Pb, q.P);
+					DrvMapDir(Fb, q.F);
+					DrvMapDir(Ub, q.U);
+					DrvMapDir(Vb, q.V);
+					Orthonormal(q.F, q.U);
+					q.st = hasT ? tst : g_dset.beamSt;
+					// v2.74: thrown (BeamNG tore it loose, your v2.73 test: cars "disappear when I hit them from the side or touch them too long"):
+					// not copied, back to GTA where it is
+					if (!tw.hist.empty()) {
+						const auto&  b = tw.hist.back();
+						const double sp0 = sqrt(Dot3(b.V, b.V)), sp1 = sqrt(Dot3(q.V, q.V));
+						const double jump = sqrt((q.P[0] - b.P[0]) * (q.P[0] - b.P[0]) + (q.P[1] - b.P[1]) * (q.P[1] - b.P[1]) + (q.P[2] - b.P[2]) * (q.P[2] - b.P[2]));
+						if (sp1 > std::max(40.0, sp0 * 1.5 + 15.0) || jump > 8.0) {
+							++T.twThrown;
+							TwinRelease(T, k, "its twin was thrown in BeamNG: not copied");
+							continue;
+						}
+					}
+					if (!tw.hist.empty() && q.st <= tw.hist.back().st) tw.hist.clear();  // (BeamNG's clock went back: a reset)
+					tw.hist.push_back(q);
+					while (tw.hist.size() > 40) tw.hist.pop_front();
+					tw.tPose = now;
 				}
 				continue;
 			}
@@ -10568,17 +10776,31 @@ namespace
 				}
 			}
 		}
-		// GTA's car where its twin is (its model's footprint middle, bottom = the twin's)
+		// GTA's car where its twin is (its model's footprint middle, bottom = the twin's), every tick: at BeamNG's time your car is
+		// drawn at (between its two poses around it, or on from the newest for at most 0.15 s)
+		const double tB = g_dset.beamSt;
 		for (size_t k = 0; k < T.twins.size(); ++k) {
 			TrafficState::Twin& tw = T.twins[k];
-			if (!have[k] || tw.state != 2 || !tw.ent || !Call<int>(N::DOES_ENTITY_EXIST, tw.ent)) continue;
-			const auto&  v = last[k];
-			const double Pb[3] = { v[1], v[2], v[3] }, Fb[3] = { v[4], v[5], v[6] }, Ub[3] = { v[7], v[8], v[9] }, Vb[3] = { v[10], v[11], v[12] };
-			double       P[3], F[3], U[3], V[3], R[3];
-			DrvMapPoint(Pb, P);
-			DrvMapDir(Fb, F);
-			DrvMapDir(Ub, U);
-			DrvMapDir(Vb, V);
+			if (tw.state != 2 || tw.hist.empty() || !tw.ent || !Call<int>(N::DOES_ENTITY_EXIST, tw.ent)) continue;
+			const auto& h = tw.hist;
+			double      P[3], F[3], U[3], V[3], R[3];
+			size_t      i1 = 0;
+			while (i1 < h.size() && h[i1].st < tB) ++i1;
+			if (tB <= 0 || i1 == 0 || i1 >= h.size()) {
+				const auto&  q = i1 == 0 ? h.front() : h.back();
+				const double ex = (tB > 0 && i1 >= h.size()) ? std::clamp(tB - q.st, 0.0, 0.15) : 0.0;
+				for (int i = 0; i < 3; ++i) P[i] = q.P[i] + q.V[i] * ex, F[i] = q.F[i], U[i] = q.U[i], V[i] = q.V[i];
+			} else {
+				const auto&  a = h[i1 - 1];
+				const auto&  b = h[i1];
+				const double f = std::clamp((tB - a.st) / std::max(1e-4, b.st - a.st), 0.0, 1.0);
+				for (int i = 0; i < 3; ++i) {
+					P[i] = a.P[i] + (b.P[i] - a.P[i]) * f;
+					F[i] = a.F[i] + (b.F[i] - a.F[i]) * f;
+					U[i] = a.U[i] + (b.U[i] - a.U[i]) * f;
+					V[i] = a.V[i] + (b.V[i] - a.V[i]) * f;
+				}
+			}
 			Orthonormal(F, U);
 			Cross3(F, U, R);
 			double O[3];
@@ -10588,15 +10810,16 @@ namespace
 			CallVoid(N::SET_ENTITY_VELOCITY, tw.ent, float(V[0]), float(V[1]), float(V[2]));
 			memcpy(tw.V, V, sizeof(tw.V));
 			tw.posed = true;
-			tw.tPose = now;
+			if (!have[k]) continue;  // (the rest once per pose from BeamNG)
 			++tw.poses;
 			++T.twPoses;
 			const double sp = sqrt(V[0] * V[0] + V[1] * V[1] + V[2] * V[2]);
 			if (sp > 0.7) tw.tStill = 0;
 			else if (tw.tStill == 0) tw.tStill = now;
 			// the twin fell through a gap in GTA's ground in BeamNG: GTA's car stays on GTA's ground, back to GTA
-			double gz = 0;
-			if (g_cfg.world && WorldGroundAt(P[0], P[1], gz) && P[2] < gz - 1.0) {  // (v2.72: 1 m, was 2.5: GTA's car went under with it and vanished)
+			const auto& nq = h.back();
+			double      gz = 0;
+			if (g_cfg.world && WorldGroundAt(nq.P[0], nq.P[1], gz) && nq.P[2] < gz - 1.0) {  // (v2.72: 1 m, was 2.5: GTA's car went under with it and vanished)
 				CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, tw.ent, float(O[0]), float(O[1]), float(gz - tw.mnz + 0.3), 0, 0, 0);
 				TwinRelease(T, int(k), "its twin fell through GTA's ground in BeamNG");
 			}
@@ -10615,6 +10838,52 @@ namespace
 			if (dist > r1 + r2) return false;
 		}
 		return true;
+	}
+
+	// v2.74: TrafficMode=despawn (your v2.73 note: "the old way: every car on the road I touch despawns, to go really fast on the
+	// highway"): a GTA car your car touches is taken away with its driver and passengers. Never a mission's car or a player's
+	void TrafficDespawn(TrafficState& T, int e, int me)
+	{
+		if (Call<int>(N::IS_ENTITY_A_MISSION_ENTITY, e)) return;
+		for (int seat = -1; seat < 8; ++seat) {
+			int p = Call<int>(N::GET_PED_IN_VEHICLE_SEAT, e, seat, 0);
+			if (!p || p == me || Call<int>(N::IS_PED_A_PLAYER, p)) continue;
+			CallVoid(N::SET_ENTITY_AS_MISSION_ENTITY, p, 0, 1);
+			CallVoid(N::DELETE_PED, &p);
+		}
+		int v = e;
+		CallVoid(N::SET_ENTITY_AS_MISSION_ENTITY, v, 0, 1);
+		CallVoid(N::DELETE_VEHICLE, &v);
+		++T.despawned;
+		if (T.despawnLogs++ < 20) Log("traffic (v2.74): TrafficMode=despawn: GTA car %d touched: taken away", e);
+	}
+	// v2.74: GTA's own crash, 0.2 s after the touch: did GTA's physics push the GTA car? If not (GTA didn't let the hidden car hit
+	// it), the 2.7 push and GTA damage instead
+	void PulseChecksTick(TrafficState& T, double now)
+	{
+		for (size_t i = 0; i < T.pulseChecks.size();) {
+			auto& q = T.pulseChecks[i];
+			if (now - q.t < 0.2) {
+				++i;
+				continue;
+			}
+			if (Call<int>(N::DOES_ENTITY_EXIST, q.ent)) {
+				const NVec3  v = Call<NVec3>(N::GET_ENTITY_VELOCITY, q.ent);
+				const double got = sqrt((v.x - q.v0[0]) * (v.x - q.v0[0]) + (v.y - q.v0[1]) * (v.y - q.v0[1]) + (v.z - q.v0[2]) * (v.z - q.v0[2]));
+				const double want = sqrt(Dot3(q.dv, q.dv));
+				const bool   gta = got >= 0.3 * want;
+				if (gta) ++T.pulseGta;
+				else {
+					++T.pulseFallback;
+					if (q.cls != 21) CallVoid(N::SET_ENTITY_VELOCITY, q.ent, float(v.x + q.dv[0]), float(v.y + q.dv[1]), float(v.z + q.dv[2]));
+					if (T.gtaDmg > 0 && q.vn > 2.0) GtaDentAdd(T, q.ent, q.P[0], q.P[1], q.P[2], std::min(0.25, 0.01 * q.vn * T.gtaDmg / 25.0));
+				}
+				if (T.pulseLogs++ < 30)
+					Log("traffic (v2.74): GTA's own crash with GTA car %d at %.0f km/h: GTA changed its speed by %.1f m/s (the 2.7 push would be %.1f)%s", q.ent, q.vn * 3.6, got, want,
+						gta ? "" : ": too little, the 2.7 push and damage instead");
+			}
+			T.pulseChecks.erase(T.pulseChecks.begin() + i);
+		}
 	}
 
 	void TrafficTick(bool paused)
@@ -10699,7 +10968,31 @@ namespace
 			double       c[3], he[3] = { (mx.x - mn.x) * 0.5, (mx.y - mn.y) * 0.5, (mx.z - mn.z) * 0.5 };
 			const double pp[3] = { ps.x, ps.y, ps.z };
 			for (int k = 0; k < 3; ++k) c[k] = pp[k] + ax[0][k] * mc[0] + ax[1][k] * mc[1] + ax[2][k] * mc[2];
-			if (!T.twins.empty()) {
+			// v2.74: your v2.73 notes: semis "clip through" (the twin was a car-size BeamNG car): no twin longer than TwinMaxLengthM, they
+			// crash GTA's way; show cars are never twinned or taken away
+			const bool big = 2.0 * he[1] > g_cfg.twinMaxLen;
+			const bool show = g_showVeh.count(e) != 0;
+			if (g_cfg.trafficMode == 2) {
+				double n[2], vn = 0;
+				NVec3  ve{};
+				if (!show && touching(e, c, ax, he, n, vn, ve)) TrafficDespawn(T, e, me);
+				continue;
+			}
+			const bool gtaWay = (g_cfg.trafficMode == 1 || big) && !show;
+			if (gtaWay && !d.foot) {
+				// within 60 cm and closing in: the hidden GTA car is solid for 0.4 s (GTA's physics meets the two)
+				PropLive Lp;
+				memcpy(Lp.c, c, sizeof(Lp.c));
+				memcpy(Lp.ax, ax, sizeof(Lp.ax));
+				for (int k = 0; k < 3; ++k) Lp.he[k] = he[k] + 0.6;
+				if (PropTouch(d, Lp, w, l, h)) {
+					const NVec3  vv = Call<NVec3>(N::GET_ENTITY_VELOCITY, e);
+					const double dx = c[0] - cc[0], dy = c[1] - cc[1], dl = sqrt(dx * dx + dy * dy);
+					const double closing = dl > 1e-3 ? ((d.carV[0] - vv.x) * dx + (d.carV[1] - vv.y) * dy) / dl : 0.0;
+					if (closing > 0.3) T.pulseUntil = now + 0.4;
+				}
+			}
+			if (!T.twins.empty() && g_cfg.trafficMode == 0 && !big && !show) {
 				// v2.71: about to meet the car (their boxes, 15 cm bigger (v2.73; was 25), at their speeds within twinLeadS) and not too high or
 				// low: a twin. v2.73: your v2.72 test, "random forces as I pass": most twins "didn't meet" (seen 1 s ahead with 25 cm to spare,
 				// the cars only passed close); for those 0.8 s GTA's car was BeamNG's coasting twin (no driver), then let go
@@ -10774,6 +11067,7 @@ namespace
 					CallVoid(N::SET_ENTITY_AS_MISSION_ENTITY, e, 0, 1);  // (GTA doesn't take it away while BeamNG has it)
 					tw.state = 2;
 					tw.ent = e;
+					tw.hist.clear();
 					tw.tA = now;
 					tw.tPose = tw.tStill = tw.dmax = 0;
 					tw.posed = false;
@@ -10804,13 +11098,26 @@ namespace
 			const double carN = d.carV[0] * n[0] + d.carV[1] * n[1], veN = ve.x * n[0] + ve.y * n[1];
 			const double dvE = light ? std::clamp(1.2 * carN + 1.0 - veN, 0.0, 2.0 * vn) : std::min(J / mE * T.pushGta, vn), dvBn = J / mB * T.pushBeam;
 			// (on foot the hidden car is solid: GTA's own physics pushes its cars; a train keeps to its rails)
-			if (!d.foot && cls != 21) CallVoid(N::SET_ENTITY_VELOCITY, e, float(ve.x + n[0] * dvE), float(ve.y + n[1] * dvE), float(ve.z + (light ? 0.5 : 0.05 * dvE)));
-			if (cls == 8 || cls == 13) TrafficWatch(T, e, "motorcycle", vn);
+			// v2.74: GTA's own crash (the hidden car is solid now): GTA pushes and dents it; checked 0.2 s later (PulseChecksTick)
+			const bool   byGta = gtaWay && T.pulseOn && !d.foot;
 			const double ex = edge(n);
 			const double P[3] = { cc[0] + n[0] * ex, cc[1] + n[1] * ex, d.carO[2] + std::min(0.6, h * 0.4) };
-			if (T.gtaDmg > 0 && vn > 2.0) {
+			const double rel[3] = { P[0] - pp[0], P[1] - pp[1], P[2] - pp[2] };
+			if (byGta) {
+				TrafficState::PulseCheck q{};
+				q.ent = e;
+				q.v0[0] = ve.x, q.v0[1] = ve.y, q.v0[2] = ve.z;
+				q.dv[0] = n[0] * dvE, q.dv[1] = n[1] * dvE, q.dv[2] = light ? 0.5 : 0.05 * dvE;
+				q.t = now;
+				q.vn = vn;
+				q.cls = cls;
+				q.P[0] = rel[0] * rt.x + rel[1] * rt.y + rel[2] * rt.z, q.P[1] = rel[0] * fw.x + rel[1] * fw.y + rel[2] * fw.z, q.P[2] = rel[0] * up.x + rel[1] * up.y + rel[2] * up.z;
+				T.pulseChecks.push_back(q);
+			} else if (!d.foot && cls != 21)
+				CallVoid(N::SET_ENTITY_VELOCITY, e, float(ve.x + n[0] * dvE), float(ve.y + n[1] * dvE), float(ve.z + (light ? 0.5 : 0.05 * dvE)));
+			if (cls == 8 || cls == 13) TrafficWatch(T, e, "motorcycle", vn);
+			if (T.gtaDmg > 0 && vn > 2.0 && !byGta) {
 				// GTA's damage at the spot (in its frame; v2.72: stepped until it shows, like the twins' dents: 1 cm per m/s, 25 cm at most)
-				const double rel[3] = { P[0] - pp[0], P[1] - pp[1], P[2] - pp[2] };
 				GtaDentAdd(T, e, rel[0] * rt.x + rel[1] * rt.y + rel[2] * rt.z, rel[0] * fw.x + rel[1] * fw.y + rel[2] * fw.z, rel[0] * up.x + rel[1] * up.y + rel[2] * up.z,
 					std::min(0.25, 0.01 * vn * T.gtaDmg / 25.0));
 			}
@@ -10831,6 +11138,20 @@ namespace
 			if (T.logs++ < 40)
 				Log("traffic: BeamNG's car and a GTA car (class %d, %.0f kg) met at %.0f km/h closing: GTA's car pushed %.1f km/h, BeamNG's %.1f km/h, dent %.0f mm", cls, mE, vn * 3.6,
 					dvE * 3.6, dvBn * 3.6, dent * 1000);
+		}
+		// v2.74: the hidden car solid or not (GTA's own crash); you can't fly through its windscreen meanwhile
+		PulseChecksTick(T, now);
+		{
+			const bool want = now < T.pulseUntil && !d.foot && d.veh;
+			if (want != T.pulseOn) {
+				CallVoid(N::SET_ENTITY_COLLISION, d.veh, want ? 1 : 0, 1);
+				if (want) {
+					++T.pulses;
+					CallVoid(N::SET_PED_CONFIG_FLAG, me, 32, 0);
+				}
+				T.pulseOn = want;
+			}
+			g_pulseDraw = T.pulseOn;
 		}
 		// v2.71: twins back to GTA
 		for (size_t k = 0; k < T.twins.size(); ++k) {
@@ -10865,21 +11186,22 @@ namespace
 			// pushed slower than your car comes on, they stayed inside the drawn car, hidden by it. Now, like a real hit: slow (under
 			// 22 km/h) they're shoved ahead and aside faster than the car; faster they go up over it (0.75 x its speed along its way,
 			// 3-7 m/s up: the car passes under them, they land behind it). pedThrow scales it; set again next tick (the ragdoll starts then)
+			// v2.74: by how hard the car meets them (the closing speed), not the car's own speed (your v2.73 test: "they fly away at the
+			// same speed no matter the speed I hit them": a person brushed at 8 km/h by a car doing 40 flew 12 m at 10 m/s)
 			{
 				const double vl = std::max(0.1, sqrt(d.carV[0] * d.carV[0] + d.carV[1] * d.carV[1]));
-				const double fx = d.carV[0] / vl, fy = d.carV[1] / vl, k = T.pedThrow;
+				const double fx = d.carV[0] / vl, fy = d.carV[1] / vl, k = T.pedThrow, sv = std::max(0.0, vn);
 				double       vx, vy, vz;
-				if (vl < 4.0) {
-					// v2.73: your v2.72 test: at ~8 km/h a person was flung ("a very noticeably modded force": 1.2 x + 1.5 m/s). Slow: pushed
-					// aside at the car's speed + 0.5 m/s, barely up
-					const double sp = vl + 0.5;
+				if (sv < 4.0) {
+					// v2.73: slow: pushed aside a little faster than the car meets them, barely up
+					const double sp = sv + 0.5;
 					vx = (fx * 0.4 + n[0] * 0.6) * sp, vy = (fy * 0.4 + n[1] * 0.6) * sp, vz = 0.3;
-				} else if (vl < 8.0) {
-					const double sp = 1.1 * vl + 0.5;
+				} else if (sv < 8.0) {
+					const double sp = 1.1 * sv + 0.5;
 					vx = (fx * 0.6 + n[0] * 0.4) * sp, vy = (fy * 0.6 + n[1] * 0.4) * sp, vz = 1.0;
 				} else {
-					const double ah = std::min(0.75 * vl, 25.0);
-					vx = fx * ah + n[0] * 2.0, vy = fy * ah + n[1] * 2.0, vz = std::clamp(0.25 * vl, 3.0, 7.0);
+					const double ah = std::min(0.75 * sv, 25.0);
+					vx = fx * ah + n[0] * 2.0, vy = fy * ah + n[1] * 2.0, vz = std::clamp(0.25 * sv, 2.0, 7.0);
 				}
 				T.pedPush.push_back({ e, float(vx * k), float(vy * k), float(vz * k), 2 });
 			}
@@ -10896,12 +11218,16 @@ namespace
 			if (T.carHits + T.pedHits > 0 || T.logT == 0)
 				Log("traffic: 10 s: %zu cars and %zu people near, %u car hits (BeamNG's car pushed %.1f km/h in all), %u people hit, %u riders knocked off", T.nearV.size(), T.nearP.size(),
 					T.carHits, T.dvSum * 3.6, T.pedHits, T.riders);
+			if (T.pulses || T.despawned || T.logT == 0)
+				Log("traffic (v2.74): mode %s: %u times the hidden car was solid for GTA's own crash (%u pushed by GTA, %u by the 2.7 push instead), %u cars taken away (despawn)",
+					g_cfg.trafficMode == 2 ? "despawn" : g_cfg.trafficMode == 1 ? "gta" : "twins (semis and buses: gta)", T.pulses, T.pulseGta, T.pulseFallback, T.despawned);
+			T.pulses = T.pulseGta = T.pulseFallback = T.despawned = 0;
 			if (T.twActs + T.twRel + T.twFails > 0) {
 				int ready = 0, on = 0;
 				for (const auto& tw : T.twins) ready += tw.state == 1, on += tw.state == 2;
-				Log("traffic twins: 10 s: %u GTA cars got a twin, %u back to GTA, %u poses copied, %u dents given to GTA's cars, %u failed; now %d ready, %d on GTA cars", T.twActs, T.twRel,
-					T.twPoses, T.twDents, T.twFails, ready, on);
-				T.twActs = T.twRel = T.twPoses = T.twDents = T.twFails = 0;
+				Log("traffic twins: 10 s: %u GTA cars got a twin, %u back to GTA (%u thrown by BeamNG: not copied), %u poses copied, %u dents given to GTA's cars, %u failed; now %d ready, %d on GTA cars",
+					T.twActs, T.twRel, T.twThrown, T.twPoses, T.twDents, T.twFails, ready, on);
+				T.twActs = T.twRel = T.twPoses = T.twDents = T.twFails = T.twThrown = 0;
 			}
 			T.logT = now;
 			T.carHits = T.pedHits = T.riders = 0;
@@ -11583,7 +11909,13 @@ namespace
 		static int   logs = 0;
 		static float was[2] = {};
 		const int    veh = g_drv.state == 2 && g_drv.veh ? g_drv.veh : g_tgt.mode ? g_tgt.veh : 0;
-		const bool   ok = veh && Call<int>(N::DOES_ENTITY_EXIST, veh);
+		bool         ok = veh && Call<int>(N::DOES_ENTITY_EXIST, veh);
+		// v2.74: only while you get in or out, or are out of it (your v2.73 test: the doors "opened on their own and were bugging
+		// around" until a reset: GTA's hidden car's doors hang loose once it's damaged). Sitting in it: shut
+		if (ok) {
+			const int me = Call<int>(N::PLAYER_PED_ID);
+			if (Call<int>(N::IS_PED_IN_VEHICLE, me, veh, 0) && !Call<int>(N::IS_PED_GETTING_INTO_A_VEHICLE, me) && !Call<int>(N::GET_IS_TASK_ACTIVE, me, 2)) ok = false;
+		}
 		for (int k = 0; k < 2; ++k) {
 			const float r = ok ? std::clamp(Call<float>(N::GET_VEHICLE_DOOR_ANGLE_RATIO, veh, k), 0.0f, 1.0f) : 0.0f;
 			g_doorAng[k].store(float(r * g_cfg.doorOpenDeg * kDeg), std::memory_order_relaxed);
@@ -11911,77 +12243,74 @@ namespace
 	}
 
 	// one script tick of drive mode (after SampleCar: c holds the GTA car as GTA has it now)
-	// v2.73: tyre smoke (your v2.72 note: "when tires spin they should screech and have smoke like in gta"). Per BeamNG wheel:
-	// how fast its tread slips over the ground: its turn (BeamNG's wheel angle, per tick) x radius against its hub's own speed along
-	// its way (a burnout, a locked wheel), and its hub's speed sideways (a slide). Over TireSmokeSlipMs: GTA's effect
-	// (TireSmokeFx, core/wheel_burnout: GTA's own burnout smoke) on the hidden GTA car at the tyre's foot, following it; it stops
-	// 0.25 s after the slip ends. In the air: none. The screech is BeamNG's own tyre sound (it plays from the background).
+	// v2.73: tyre smoke (your v2.72 note: "when tires spin they should screech and have smoke like in gta"). v2.74: how fast each
+	// tyre slips comes from BeamNG ("sl" in its poses: tread speed against the hub's speed along its way, and sideways, on BeamNG's
+	// own frame clock; v2.73 guessed it from the drawn poses: 60 m/s in plain driving, smoke on and off all the time). Over
+	// TireSmokeSlipMs: GTA's effect (TireSmokeFx, else the first of a few GTA has: your v2.73 test showed none of core/wheel_burnout,
+	// an effect GTA's own wheels drive) on the hidden GTA car at the tyre's foot, following it; it stops 0.25 s after the slip ends.
+	// In the air: none. The screech is BeamNG's own tyre sound (it plays from the background).
 	struct TireFxState
 	{
 		int    fx[kDrvWheels] = {};
-		double prevAng[kDrvWheels] = {}, prevP[kDrvWheels][3] = {}, slip[kDrvWheels] = {}, lowT[kDrvWheels] = {};
-		bool   have[kDrvWheels] = {};
-		int    veh = 0, starts = 0, fails = 0, logs = 0;
+		double slip[kDrvWheels] = {}, lowT[kDrvWheels] = {};
+		int    veh = 0, starts = 0, fails = 0, logs = 0, pick = 0;
 		double maxSlip = 0, logT = 0;
+		uint32_t seenSeq = 0;
 	} g_tfx;
+	// (asset, effect): the ini's first, then script burnout smoke GTA's missions use, then GTA's own wheel effect
+	const char* const kTireFx[][2] = { { "scr_recartheft", "scr_wheel_burnout" }, { "scr_carsteal4", "scr_carsteal4_wheel_burnout" }, { "core", "wheel_burnout" } };
 	void TireFxStop(TireFxState& T)
 	{
 		for (int j = 0; j < kDrvWheels; ++j) {
 			if (T.fx[j]) CallVoid(N::STOP_PARTICLE_FX_LOOPED, T.fx[j], 0);
 			T.fx[j] = 0;
-			T.have[j] = false;
+			T.slip[j] = 0;
 		}
 	}
 	void TireFxStopAll() { TireFxStop(g_tfx); }
-	void TireFxTick(const double O[3], const double R[3], const double F[3], const double U[3], bool spin, double dt)
+	void TireFxTick(const double O[3], const double R[3], const double F[3], const double U[3], double dt)
 	{
 		TireFxState& T = g_tfx;
 		DriveState&  d = g_drv;
-		if (!g_cfg.tireSmoke || !spin || d.state != 2 || d.foot || !d.veh || T.veh != d.veh) {
+		const bool   have = !d.poses.empty() && d.poses.back().hasSl;
+		if (!g_cfg.tireSmoke || !have || d.state != 2 || d.foot || !d.veh || T.veh != d.veh) {
 			TireFxStop(T);
 			T.veh = d.veh;
 			return;
 		}
 		if (dt <= 1e-4) return;
-		const double now = NowSeconds();
-		for (int j = 0; j < kDrvWheels; ++j) {
-			if (!d.wOk[j]) continue;
-			const double r = std::max(0.1, d.m.radius[j]);
-			double       P[3], A[3];
-			for (int k = 0; k < 3; ++k) {
-				P[k] = O[k] + R[k] * d.wC[j][0] + F[k] * d.wC[j][1] + U[k] * (d.wC[j][2] - r);  // the tyre's foot
-				A[k] = R[k] * d.wA[j][0] + F[k] * d.wA[j][1] + U[k] * d.wA[j][2];
-			}
-			Norm3(A);
-			double sl = 0;
-			if (T.have[j]) {
-				const double da = d.wAngU[j] - T.prevAng[j];
-				const double v[3] = { (P[0] - T.prevP[j][0]) / dt, (P[1] - T.prevP[j][1]) / dt, (P[2] - T.prevP[j][2]) / dt };
-				double fw[3];
-				Cross3(U, A, fw);  // along its way (up x the axle; the sign doesn't matter below)
-				Norm3(fw);
-				const double along = fabs(Dot3(v, fw)), side = fabs(Dot3(v, A)), tread = fabs(da / dt) * r;
-				sl = std::max(fabs(tread - along), 1.3 * side);  // (a slide smokes a little sooner)
-				sl = std::min(sl, 60.0);
-			}
-			T.have[j] = true;
-			T.prevAng[j] = d.wAngU[j];
-			memcpy(T.prevP[j], P, sizeof(P));
-			T.slip[j] += (sl - T.slip[j]) * std::min(1.0, dt * (sl > T.slip[j] ? 20.0 : 6.0));  // (smoothed: pose noise doesn't smoke)
+		const double   now = NowSeconds();
+		const DrvPose& pz = d.poses.back();
+		const int      nFx = 1 + int(sizeof(kTireFx) / sizeof(kTireFx[0]));
+		for (int w = 0; w < pz.nw && w < d.nwB; ++w) {
+			const int j = d.map[w];
+			if (j < 0 || j >= kDrvWheels || !d.wOk[j]) continue;
+			const double sl = pz.sl[w];
+			T.slip[j] += (sl - T.slip[j]) * std::min(1.0, dt * (sl > T.slip[j] ? 25.0 : 8.0));
 			T.maxSlip = std::max(T.maxSlip, T.slip[j]);
 			const bool want = T.slip[j] > g_cfg.tireSmokeMs && g_world.grounded;
 			if (want) T.lowT[j] = now;
-			if (want && !T.fx[j] && T.fails < 3) {
-				CallVoid(N::REQUEST_NAMED_PTFX_ASSET, g_cfg.tireFx[0]);
-				if (!Call<int>(N::HAS_NAMED_PTFX_ASSET_LOADED, g_cfg.tireFx[0])) continue;
+			// the tyre's foot (car space -> world)
+			const double r = std::max(0.1, d.m.radius[j]);
+			double       P[3];
+			for (int k = 0; k < 3; ++k) P[k] = O[k] + R[k] * d.wC[j][0] + F[k] * d.wC[j][1] + U[k] * (d.wC[j][2] - r);
+			if (want && !T.fx[j] && T.pick < nFx) {
+				const char* asset = T.pick == 0 ? g_cfg.tireFx[0] : kTireFx[T.pick - 1][0];
+				const char* name = T.pick == 0 ? g_cfg.tireFx[1] : kTireFx[T.pick - 1][1];
+				CallVoid(N::REQUEST_NAMED_PTFX_ASSET, asset);
+				if (!Call<int>(N::HAS_NAMED_PTFX_ASSET_LOADED, asset)) continue;
 				const NVec3 off = Call<NVec3>(N::GET_OFFSET_FROM_ENTITY_GIVEN_WORLD_COORDS, d.veh, float(P[0]), float(P[1]), float(P[2]));
-				CallVoid(N::USE_PARTICLE_FX_ASSET, g_cfg.tireFx[0]);
-				T.fx[j] = Call<int>(N::START_PARTICLE_FX_LOOPED_ON_ENTITY, g_cfg.tireFx[1], d.veh, off.x, off.y, off.z, 0.0f, 0.0f, 0.0f, 1.0f, 0, 0, 0);
-				if (T.fx[j]) ++T.starts;
-				else ++T.fails;
+				CallVoid(N::USE_PARTICLE_FX_ASSET, asset);
+				T.fx[j] = Call<int>(N::START_PARTICLE_FX_LOOPED_ON_ENTITY, name, d.veh, off.x, off.y, off.z, 0.0f, 0.0f, 0.0f, g_cfg.tireSmokeScale, 0, 0, 0);
+				if (T.fx[j]) {
+					++T.starts;
+					T.fails = 0;
+				} else if (++T.fails >= 2) {
+					++T.pick;  // GTA didn't start it twice: the next one
+					T.fails = 0;
+				}
 				if (T.logs++ < 12)
-					Log("tyre smoke (v2.73): wheel %d slips %.1f m/s: GTA's %s/%s %s", j, T.slip[j], g_cfg.tireFx[0], g_cfg.tireFx[1],
-						T.fx[j] ? "started" : T.fails >= 3 ? "didn't start (3 times: no more tries; TireSmokeFx in the ini)" : "didn't start");
+					Log("tyre smoke (v2.74): wheel %d slips %.1f m/s: GTA's %s/%s %s", j, T.slip[j], asset, name, T.fx[j] ? "started" : "didn't start");
 			} else if (T.fx[j] && now - T.lowT[j] > 0.25) {
 				CallVoid(N::STOP_PARTICLE_FX_LOOPED, T.fx[j], 0);
 				T.fx[j] = 0;
@@ -11991,7 +12320,8 @@ namespace
 			}
 		}
 		if (now - T.logT > 10.0) {
-			if (T.starts || T.maxSlip > 1.0) Log("tyre smoke (v2.73): 10 s: the most a tyre slipped %.1f m/s (smoke from %.1f), smoke started %d times", T.maxSlip, g_cfg.tireSmokeMs, T.starts);
+			if (T.starts || T.maxSlip > 1.0)
+				Log("tyre smoke (v2.74): 10 s: the most a tyre slipped %.1f m/s (BeamNG's; smoke from %.1f), smoke started %d times", T.maxSlip, g_cfg.tireSmokeMs, T.starts);
 			T.logT = now;
 			T.maxSlip = 0;
 			T.starts = 0;
@@ -12790,7 +13120,7 @@ namespace
 			any = true;
 		}
 		d.wHave = any;
-		TireFxTick(O, R, F, U, p.spin, dtT);  // v2.73
+		TireFxTick(O, R, F, U, dtT);  // v2.73
 
 		// ---- stats
 		++d.ticks;
@@ -13007,6 +13337,8 @@ namespace
 			}
 			TrecStart();
 		} else if (ctrl && shift) {
+			ShowKey();  // v2.74 (the view modes moved to Ctrl+Shift+F12)
+		} else if (false) {
 			const int m = (g_viewMode.load() + 1) % kViewModes;
 			g_viewMode.store(m);
 			char status[128];
@@ -13446,6 +13778,7 @@ namespace
 		UpdateDriver(g_tgt.mode ? g_tgt.veh : 0, g_tgt.mode == 1);
 		const bool paused = Call<int>(N::IS_PAUSE_MENU_ACTIVE) != 0;
 		SampleCar(c);
+		SampleShows(c);        // v2.74
 		DrvDrawCheck(c);       // v2.2: drift check / DriveDrawPose=set (before DriveTick moves the car again)
 		DriveTick(c, paused);  // v2.0: after reading the GTA car back, before pairing (moves it for the next tick)
 		g_holdOn.store(g_drv.state != 0 ? 1 : 0);
@@ -13494,6 +13827,19 @@ namespace
 			OnKey();
 		}
 		keyWas = keyNow;
+		// v2.74: Ctrl+Shift+F12 = the view modes (normal, car always on top, depth view, part picker; Ctrl+Shift+F11 is the show cars now)
+		static bool viewKeyWas = false;
+		const bool  viewKeyNow = (GetAsyncKeyState(VK_F12) & 0x8000) && (GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_SHIFT) & 0x8000);
+		if (viewKeyNow && !viewKeyWas && GtaFocused()) {
+			const int m = (g_viewMode.load() + 1) % kViewModes;
+			g_viewMode.store(m);
+			char status[128];
+			AcquireSRWLockShared(&g_shared);
+			memcpy(status, g_status, sizeof(status));
+			ReleaseSRWLockShared(&g_shared);
+			Notify("D1 view: %s | %s", ViewModeName(m), status);
+		}
+		viewKeyWas = viewKeyNow;
 		// v2.0: drive mode key (no modifiers)
 		static bool driveKeyWas = false;
 		const bool  driveKeyNow = (GetAsyncKeyState(g_cfg.driveKey) & 0x8000) != 0;
@@ -15721,6 +16067,29 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		uint64_t  ticksUsAtStat = 0;
 	} g_r;
 
+	// v2.74: a show car's own copy of what the car is on the GPU (moved there from the drawn car when it was parked)
+	struct ShowGpu
+	{
+		int                       id = 0;
+		GpuCar                    car;
+		ID3D11Texture2D*          contactTex = nullptr;
+		ID3D11RenderTargetView*   contactRtv = nullptr;
+		ID3D11ShaderResourceView* contactSrv = nullptr;
+		bool                      contactDirty = true, aoDirty = true;
+		DepthMaps                 aoMaps;
+		uint64_t                  dg[4] = {}, shatter[4] = {};
+		void Release()
+		{
+			car.Release();
+			SafeRelease(contactSrv);
+			SafeRelease(contactRtv);
+			SafeRelease(contactTex);
+			aoMaps.Release();
+		}
+	};
+	std::vector<ShowGpu> g_showGpu;         // render thread
+	const ShowGpu*       g_drawShow = nullptr;  // the show car being drawn now (render thread)
+
 	// how many new pose samples arrived since the last drawn frame (0 = the car would repeat its last
 	// pose while GTA's picture moved on: a skip)
 	void NoteSampleUse(uint32_t seq)
@@ -16517,6 +16886,55 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 	// Choosing and reading GTA's depth buffer (unchanged from D0)
 	// ---------------------------------------------------------------------------------------
 
+	// v2.74: show cars: the drawn car parked (its GPU data moved into a show car; the plugin has no car until the next Shift+F11),
+	// or a show car taken away. Render thread, before a new car is uploaded
+	void ShowRequests()
+	{
+		Renderer& r = g_r;
+		if (const int id = g_showParkReq.exchange(0)) {
+			if (r.car.vb) {
+				g_showGpu.emplace_back();
+				ShowGpu& sg = g_showGpu.back();
+				sg.id = id;
+				std::swap(sg.car, r.car);
+				D3D11_TEXTURE2D_DESC td{};
+				td.Width = td.Height = 512;
+				td.MipLevels = 0;
+				td.ArraySize = 1;
+				td.Format = DXGI_FORMAT_R8_UNORM;
+				td.SampleDesc.Count = 1;
+				td.Usage = D3D11_USAGE_DEFAULT;
+				td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+				td.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+				if (SUCCEEDED(r.dev->CreateTexture2D(&td, nullptr, &sg.contactTex)) && sg.contactTex) {
+					r.dev->CreateRenderTargetView(sg.contactTex, nullptr, &sg.contactRtv);
+					r.dev->CreateShaderResourceView(sg.contactTex, nullptr, &sg.contactSrv);
+				}
+				for (int k = 0; k < 4; ++k) {
+					sg.dg[k] = g_dgBroken[k].load();
+					sg.shatter[k] = g_dgShatter[k].load();
+				}
+				g_haveModel.store(false);
+				r.contactDirty = r.aoDirty = true;
+				uint64_t all = 0;
+				for (const auto& x : g_showGpu) all += x.car.bytes;
+				Log("show cars (v2.74): show car %d parked (%.0f MB of video memory kept for it; %zu show cars, %.0f MB in all)", id, sg.car.bytes / 1048576.0, g_showGpu.size(),
+					all / 1048576.0);
+			} else {
+				Log("show cars (v2.74): show car %d: no car on the GPU to park", id);
+			}
+		}
+		if (const int id = g_showDropReq.exchange(0)) {
+			for (auto it = g_showGpu.begin(); it != g_showGpu.end(); ++it) {
+				if (it->id != id) continue;
+				it->Release();
+				g_showGpu.erase(it);
+				Log("show cars (v2.74): show car %d taken away (%zu left)", id, g_showGpu.size());
+				break;
+			}
+		}
+	}
+
 	void ReleaseDepth()
 	{
 		DepthSource& d = g_r.depth;
@@ -17300,11 +17718,14 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 				continue;
 			}
 			// v2.6: glass and lights BeamNG broke: gone (its broken material is invisible) or frosted
-			const bool broken = d.dg >= 0 && d.dg < 256 && (g_dgBroken[d.dg >> 6].load(std::memory_order_relaxed) >> (d.dg & 63) & 1);
+			// (v2.74: a show car keeps what was broken when it was parked)
+			const uint64_t dgB = d.dg >= 0 && d.dg < 256 ? (g_drawShow ? g_drawShow->dg[d.dg >> 6] : g_dgBroken[d.dg >> 6].load(std::memory_order_relaxed)) : 0;
+			const uint64_t dgS = d.dg >= 0 && d.dg < 256 ? (g_drawShow ? g_drawShow->shatter[d.dg >> 6] : g_dgShatter[d.dg >> 6].load(std::memory_order_relaxed)) : 0;
+			const bool     broken = d.dg >= 0 && d.dg < 256 && (dgB >> (d.dg & 63) & 1);
 			if (broken && d.dg < int(c.dgHide.size()) && c.dgHide[d.dg]) continue;
-			if (broken && (g_dgShatter[d.dg >> 6].load(std::memory_order_relaxed) >> (d.dg & 63) & 1)) continue;  // v2.63: shattered out
+			if (broken && (dgS >> (d.dg & 63) & 1)) continue;  // v2.63: shattered out
 			// v2.73: a front door turns about its hinge as far as GTA's door is open (DoorTick)
-			const float doorA = d.door >= 0 ? g_doorAng[d.door & 1].load(std::memory_order_relaxed) : 0.0f;
+			const float doorA = d.door >= 0 && !g_drawShow ? g_doorAng[d.door & 1].load(std::memory_order_relaxed) : 0.0f;
 			const int   part = doorA > 0.005f ? 1000 + d.door
 			                   : (moving && g_cfg.wheels && d.wheel >= 0 && d.wheel < int(c.wheels.size())) ? d.wheel * 4 + d.wheelMode : -1;
 			if (part != lastPart) {
@@ -17967,7 +18388,8 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 
 	// Draws the car (maps, environment, the car layer) and puts it on target: GTA's back buffer at
 	// Present, or GTA's HDR scene picture inside its frame (hdr = true, v1.9.3).
-	bool DrawCar(ID3D11RenderTargetView* bbRtv, UINT w, UINT h, ID3D11ShaderResourceView* depthSrv, const CamSample& cam, bool occlusion, bool picking, bool hdr = false)
+	bool DrawCar(ID3D11RenderTargetView* bbRtv, UINT w, UINT h, ID3D11ShaderResourceView* depthSrv, const CamSample& cam, bool occlusion, bool picking, bool hdr = false,
+	             bool show = false)
 	{
 		Renderer& r = g_r;
 		GpuCar&   c = r.car;
@@ -17977,11 +18399,11 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		if (g_cfg.selfShadows) {
 			EnsureDepthMaps(r.sunDepth, UINT(g_cfg.selfShadowSize), 1, "sun self-shadow");
 		}
-		if (fabsf(cam.sunVis - r.lastSunVis) > 0.45f) {
+		if (!show && fabsf(cam.sunVis - r.lastSunVis) > 0.45f) {
 			Log("lighting: the sun is %s by GTA's world (raycasts, visibility %.2f)", cam.sunVis < r.lastSunVis ? "blocked" : "no longer blocked", cam.sunVis);
 			r.lastSunVis = cam.sunVis;
 		}
-		DpPrepare(hdr);  // v1.9.7
+		if (!show) DpPrepare(hdr);  // v1.9.7 (v2.74: once a frame, with the drawn car)
 		FrameCB fc{};
 		FillFrameCB(fc, cam, w, h, occlusion && depthSrv, hdr);
 		const float zero[4] = {};
@@ -17990,8 +18412,9 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		r.ctx->IASetInputLayout(r.layout);
 		r.ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		r.ctx->IASetVertexBuffers(0, 1, &c.vb, &stride, &offset);
-		// v2.5 (dents): each vertex's triangle of nodes (slot 1) and where they are now (t35; none: drawn as it is)
-		DentsUpload(c);
+		// v2.5 (dents): each vertex's triangle of nodes (slot 1) and where they are now (t35; none: drawn as it is). v2.74: a show car
+		// keeps its dents as they were when it was parked
+		if (!show) DentsUpload(c);
 		const UINT skinOffset = 0;
 		r.ctx->IASetVertexBuffers(1, 1, &c.skinVb, &c.skinStride, &skinOffset);
 		r.ctx->VSSetShaderResources(35, 1, &c.nodeSrv);
@@ -18019,7 +18442,9 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			const double L[3] = { fc.sl0[0], fc.sl0[1], fc.sl0[2] };
 			RenderDepthDir(fc, L, r.sunDepth.dsv[0], r.sunDepth.size, true, cam);
 		}
-		if (g_cfg.environment == 1 || hdr) {
+		if (show && (g_cfg.environment == 1 || hdr)) {
+			fc.envP[0] = r.llReady ? 1.0f : 0.0f;  // v2.74: the surroundings learned around the drawn car (not learned again per show car)
+		} else if (g_cfg.environment == 1 || hdr) {
 			const int stage = hdr ? 1 : 0;
 			if (r.lastStage != stage) {
 				// v1.9.5: LDR and HDR brightness differ, so each has its own learned surroundings and a switch
@@ -18091,7 +18516,12 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		r.ctx->PSSetShader(r.psCar, nullptr, 0);
 		r.ctx->OMSetBlendState(r.opaque, zero, 0xFFFFFFFF);
 		r.ctx->OMSetDepthStencilState(r.depthWrite, 0);
-		if (r.holeCb && g_holeGen.load() != r.holeGenUp) {
+		if (r.holeCb && show) {
+			// v2.74: a show car: no bullet holes, not charred (the drawn car's go back in on its next frame)
+			HoleCB hc{};
+			Upload(r.holeCb, hc);
+			r.holeGenUp = ~0u;
+		} else if (r.holeCb && g_holeGen.load() != r.holeGenUp) {
 			// v2.62: the bullet holes, when they changed
 			HoleCB hc{};
 			{
@@ -18117,7 +18547,7 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		r.ctx->Draw(3, 0);
 		UnbindPsSrvs();
 
-		if (picking) {
+		if (picking && !show) {
 			// crosshair at the screen centre, then (every 10th frame) the picker pass
 			r.ctx->OMSetBlendState(r.opaque, zero, 0xFFFFFFFF);
 			r.ctx->PSSetShader(r.psCross, nullptr, 0);
@@ -18132,6 +18562,45 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		}
 		UnbindPsSrvs();
 		return true;
+	}
+
+	// v2.74: the show cars, each drawn like the car with its own GPU data swapped in for the moment (static: wheels, doors, dents as
+	// they were)
+	bool DrawShows(ID3D11RenderTargetView* rtv, UINT w, UINT h, ID3D11ShaderResourceView* depthSrv, const CamSample& cam, bool occlusion, bool hdr)
+	{
+		Renderer& r = g_r;
+		bool      drawn = false;
+		for (int i = 0; i < cam.nShows && i < 8; ++i) {
+			ShowGpu* sg = nullptr;
+			for (auto& x : g_showGpu)
+				if (x.id == cam.shows[i].id) sg = &x;
+			if (!sg || !sg->car.vb) continue;
+			CamSample sc = cam;
+			const auto& sp = cam.shows[i];
+			sc.carOn = true;
+			sc.ox = sp.ox, sc.oy = sp.oy, sc.oz = sp.oz;
+			memcpy(sc.R, sp.R, sizeof(sc.R));
+			memcpy(sc.F, sp.F, sizeof(sc.F));
+			memcpy(sc.U, sp.U, sizeof(sc.U));
+			sc.gtaWheels = sc.bngWheels = false;
+			sc.distFront = sc.distRear = 0;
+			sc.steerDeg = 0;
+			auto swapIn = [&] {
+				std::swap(r.car, sg->car);
+				std::swap(r.contactTex, sg->contactTex);
+				std::swap(r.contactRtv, sg->contactRtv);
+				std::swap(r.contactSrv, sg->contactSrv);
+				std::swap(r.contactDirty, sg->contactDirty);
+				std::swap(r.aoMaps, sg->aoMaps);
+				std::swap(r.aoDirty, sg->aoDirty);
+			};
+			swapIn();
+			g_drawShow = sg;
+			drawn = DrawCar(rtv, w, h, depthSrv, sc, occlusion, false, hdr, true) || drawn;
+			g_drawShow = nullptr;
+			swapIn();
+		}
+		return drawn;
 	}
 
 	void DrawDepthView(ID3D11RenderTargetView* rtv, UINT w, UINT h, ID3D11ShaderResourceView* depthSrv, const CamSample& cam)
@@ -18728,7 +19197,7 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			return false;
 		}
 		CamSample cam{};
-		if (!FrameCam(cam, g_frame.load() + 1) || !cam.carOn) return false;  // the frame being drawn now (Present comes later)
+		if (!FrameCam(cam, g_frame.load() + 1) || (!cam.carOn && cam.nShows == 0)) return false;  // the frame being drawn now (Present comes later)
 		if (g_trec.state.load() == 1) TrecAdd("draw,%.3f,%u,%llu,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,%u,%s", TrecMs(), cam.seq, (unsigned long long)(g_frame.load() + 1), g_camSeq, "inside");
 		bool paused = false;
 		AcquireSRWLockShared(&g_shared);
@@ -18747,7 +19216,8 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		bool                      drawn = false;
 		if (UpdateScreenCopyHdr(view->srv, view->w, view->h)) {
 			r.probeHdrSrv = view->srv;
-			drawn = DrawCar(view->rtv, view->w, view->h, depthSrv, cam, mode != 1, mode == 3, true);
+			if (cam.carOn && g_haveModel.load()) drawn = DrawCar(view->rtv, view->w, view->h, depthSrv, cam, mode != 1, mode == 3, true);
+			drawn = DrawShows(view->rtv, view->w, view->h, depthSrv, cam, mode != 1, true) || drawn;  // v2.74
 			r.probeHdrSrv = nullptr;
 		}
 		s.drawnInto = view->tex;
@@ -19009,6 +19479,7 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 		}
 		r.bbFmt = bbd.Format;
 
+		ShowRequests();  // v2.74
 		// a newly loaded car goes to video memory here
 		if (canDraw) {
 			std::unique_ptr<car::Model> pending;
@@ -19053,11 +19524,12 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			}
 			if (injected) {
 				drawn = true;  // already drawn inside GTA's frame (D3)
-			} else if (cam.carOn && g_haveModel.load()) {
+			} else if ((cam.carOn && g_haveModel.load()) || cam.nShows > 0) {
 				if (g_cfg.environment == 1 && mode != 2) {
 					UpdateScreenCopy(bb, bbd);  // GTA's picture, before our car is on it
 				}
-				drawn = DrawCar(rtv, bbd.Width, bbd.Height, depthSrv, cam, mode != 1, mode == 3);
+				if (cam.carOn && g_haveModel.load()) drawn = DrawCar(rtv, bbd.Width, bbd.Height, depthSrv, cam, mode != 1, mode == 3);
+				drawn = DrawShows(rtv, bbd.Width, bbd.Height, depthSrv, cam, mode != 1, false) || drawn;  // v2.74
 				if (drawn) {
 					NoteSampleUse(cam.seq);
 					++g_stage.statFallback;

@@ -17,6 +17,7 @@ rough = os.environ.get('FAKE_ROUGH') == '1'
 def ground(x, y):
     if hole and 70 < y < 80: return None
     z = 0.03 * x + 1.5 * math.sin(y / 25.0)
+    if os.environ.get('FAKE_ROLL') == '1': z += 4.0 * math.sin(y / 18.0) + 0.15 * x   # v2.74: rolling hills
     if 3.5 < x < 4.0: z += 0.15
     if rough:
         ax = abs(x)
@@ -102,7 +103,8 @@ if dz:
     a = sorted(abs(v) for v in dz)
     p95 = a[int(len(a) * 0.95) - 1]
     print('   drawn tyres vs GTA ground: median %+.3f m, p95 |dz| %.3f m, max %.3f m' % (statistics.median(dz), p95, a[-1]))
-    check(p95 < 0.08, 'the drawn car\'s tyres follow GTA\'s ground (p95 %.1f cm)' % (p95 * 100))
+    lim = 0.25 if os.environ.get('FAKE_ROLL') == '1' else 0.08   # the fake BeamNG car never pitches: on FAKE_ROLL hills it sits up to ~20 cm off
+    check(p95 < lim, 'the drawn car\'s tyres follow GTA\'s ground (p95 %.1f cm)' % (p95 * 100))
 if hole:
     dmax = max(deep) if deep else 0
     check(dmax < 45.0, 'the hole: the drawn car fell at most for WorldFallWaitS (2.5 s, about 35 m) before being put back (%.1f m)' % dmax)

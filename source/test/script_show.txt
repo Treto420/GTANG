@@ -1,0 +1,7 @@
+5 pad 0,0,0,0,0,0,0
+40 key f11
+80 key ctrlshiftf11
+150 shot show_parked.ppm
+160 key ctrlshiftf11
+230 shot show_gone.ppm
+240 quit

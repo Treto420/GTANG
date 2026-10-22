@@ -105,6 +105,7 @@ static double FakeGround(double x, double y, bool* hit, unsigned* mat)
 		const double off = -(0.93969 * x + 0.34202 * y) - 8.0;
 		if (off > 0) z += std::min(18.0, off * 1.2);
 	}
+	if (Env("FAKE_ROLL")) z += 4.0 * sin(y / 18.0) + 0.15 * x;   // v2.74: rolling hills along the road, a side slope (the hill tile swaps)
 	if (x > 3.5 && x < 4.0) z += 0.15;  // a curb
 	// v2.54: FAKE_CREST=1: the road goes over a crest at 70 m along the car's line (a ramp meeting a bridge deck: 1.2 m up
 	// and down within a few metres) with a 0.2 m joint across the road at its top (a low face, not a wall)
@@ -457,7 +458,7 @@ int worldGetAllObjects(int* arr, int arrSize)
 
 // v2.7: FAKE_TRAFFIC=1: a parked GTA car (9001) put 25 m ahead of the car, across its way, the first time drive mode asks for
 // GTA's cars; what the plugin does to it (velocity, damage) is printed
-static bool   g_tcPlaced = false;
+static bool   g_tcPlaced = false, g_tcGone = false;  // g_tcGone: v2.74 (TrafficMode=despawn deleted it)
 static double g_tc[3] = {}, g_tcYaw = 0, g_tcV[3] = {};
 static double FakeGround(double x, double y, bool* hit, unsigned* mat);
 EXP int worldGetAllVehicles(int* arr, int arrSize) __asm__("?worldGetAllVehicles@@YAHPEAHH@Z");   // v2.7
@@ -484,7 +485,7 @@ int worldGetAllVehicles(int* arr, int arrSize)
 			printf("FAKE: traffic person 9002 stands at %.1f %.1f %.1f\n", p.head[0], p.head[1], p.head[2]); fflush(stdout);
 		}
 	}
-	if (n < arrSize) arr[n++] = 9001;
+	if (n < arrSize && !g_tcGone) arr[n++] = 9001;
 	return n;
 }
 EXP int worldGetAllPeds(int* arr, int arrSize) __asm__("?worldGetAllPeds@@YAHPEAHH@Z");   // v2.6
@@ -681,8 +682,8 @@ PUINT64 nativeCall()
 	case 0x9A9112A0FE9A4713: RetI(100); break;                // GET_VEHICLE_PED_IS_IN
 	case 0xB6997A7EB3F5C8C0: RetI(100); break;                // GET_PLAYERS_LAST_VEHICLE
 	case 0xF73EB622C4F1689B: RetI(100); break;                // GET_CLOSEST_VEHICLE
-	case 0x7239B21A38F536BA: RetI(1); break;                  // DOES_ENTITY_EXIST
-	case 0x9F47B058362C84B5: { FakeProp* fp = PropOf(int(g_args[0])); RetI(fp ? int(fp->model) : 0x1234); break; }  // GET_ENTITY_MODEL
+	case 0x7239B21A38F536BA: RetI(int(g_args[0]) == 9001 && g_tcGone ? 0 : 1); break;   // DOES_ENTITY_EXIST (v2.74: a deleted traffic car)
+	case 0x9F47B058362C84B5: { FakeProp* fp = PropOf(int(g_args[0])); RetI(fp ? int(fp->model) : (int(g_args[0]) == 9001 && Env("FAKE_TRAFFIC_LONG")) ? 0x5E41 : 0x1234); break; }  // GET_ENTITY_MODEL (v2.74: FAKE_TRAFFIC_LONG: the parked car is a semi)
 	case 0x3FEF770D40960D5A: {                                // GET_ENTITY_COORDS (v2.5: props too)
 		if (FakePed* fp = PedOf(int(g_args[0]))) { RetV(float(fp->head[0]), float(fp->head[1]), float(fp->head[2] - 0.6)); break; }   // v2.6
 		if (int(g_args[0]) == 9001) { RetV(float(g_tc[0]), float(g_tc[1]), float(g_tc[2])); break; }   // v2.7
@@ -819,6 +820,13 @@ PUINT64 nativeCall()
 		if (w) *reinterpret_cast<float*>(g_args[3]) = float(FakeGround(F(0), 69.9, &gh, &m) - 0.2);
 		RetI(w ? 1 : 0); break; }
 	case 0x2595DD4236549CE3: printf("FAKE: ped %d no longer needed\n", *reinterpret_cast<int*>(g_args[0])); fflush(stdout); break;   // SET_PED_AS_NO_LONGER_NEEDED (v2.73)
+	case 0xEA386986E786A54F: {   // DELETE_VEHICLE (v2.74)
+		int* h = reinterpret_cast<int*>(g_args[0]);
+		printf("FAKE: vehicle %d deleted\n", *h); fflush(stdout);
+		if (*h == 9001) g_tcGone = true;
+		*h = 0;
+		break; }
+	case 0x9614299DCB53E54B: { int* h = reinterpret_cast<int*>(g_args[0]); printf("FAKE: ped %d deleted\n", *h); fflush(stdout); *h = 0; break; }   // DELETE_PED (v2.74)
 	case 0xF7DDEBEC43483C43: { static int n = 0; if (n++ % 30 == 0) { printf("FAKE: particle fx %d moved to %.2f %.2f %.2f\n", int(g_args[0]), F(1), F(2), F(3)); fflush(stdout); } break; }   // SET_PARTICLE_FX_LOOPED_OFFSETS (v2.73)
 	case 0xE143FA2249364369: {   // GET_CLOSEST_OBJECT_OF_TYPE (v2.72: map props only when isMission)
 		int best = 0;
@@ -867,6 +875,7 @@ PUINT64 nativeCall()
 		if (md == kMCont) { *mn = NV{ -1.2f, -3.0f, 0.0f }; *mx = NV{ 1.2f, 3.0f, 2.6f }; break; }
 		if (md == kMCan) { *mn = NV{ -0.04f, -0.04f, 0.0f }; *mx = NV{ 0.04f, 0.04f, 0.12f }; break; }
 		if (md == kMTraf) { *mn = NV{ -8.3f, -0.3f, 0.0f }; *mx = NV{ 0.3f, 0.3f, 9.5f }; break; }
+		if (md == 0x5E41) { *mn = NV{ -1.3f, -6.4f, -0.6f }; *mx = NV{ 1.3f, 6.4f, 3.4f }; break; }   // v2.74: a semi
 		*mn = NV{ -1.0f, -2.5f, -0.6f };
 		*mx = NV{ 1.0f, 2.5f, 0.8f };
 		break;

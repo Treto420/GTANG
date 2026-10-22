@@ -77,7 +77,7 @@
 --   gtaBridge.soundSession(false) -- v2.4: switch the sound "session" mode off (the GTA plugin's BeamNGSoundWake=session sets it)
 
 local M = {}
-M.version = '2.73'
+M.version = '2.74'
 local logTag = 'gtaBridge'
 
 -- ---------------------------------------------------------------- config
@@ -2004,7 +2004,7 @@ local function drivePose(veh, dt)
     d.vel = vel
   end
   d.prevP = p
-  local parts = {}
+  local parts, slips = {}, {}
   local spinAll = #d.wheels > 0
   for _, w in ipairs(d.wheels) do
     local p1, p2 = v3(veh:getNodePosition(w.a)), v3(veh:getNodePosition(w.b))
@@ -2060,13 +2060,26 @@ local function drivePose(veh, dt)
     else
       spinAll = false
     end
+    -- v2.74: how fast its tread slips over the ground (GTA's tyre smoke; your v2.73 test: GTA's own guess from the drawn poses saw
+    -- 60 m/s in plain driving): the tread's speed (its turn rate x radius) against its hub's speed along its way, and the hub's speed
+    -- sideways (a slide), on this frame's own clock
+    local sl = 0
+    if w.prevC and dt > 0.002 and w.rate then
+      local hv = { vel[1] + (c[1] - w.prevC[1]) / dt, vel[2] + (c[2] - w.prevC[2]) / dt, vel[3] + (c[3] - w.prevC[3]) / dt }
+      local fw = cross(u, ax)
+      -- (sideways counts 0.8: a tyre in a hard, clean corner slides a few degrees without smoking; a drift is far more)
+      sl = math.max(math.abs(math.abs(w.rate) * math.max(0.1, w.r or 0.33) - math.abs(dot(hv, fw))), 0.8 * math.abs(dot(hv, ax)))
+      if sl ~= sl then sl = 0 end
+    end
+    w.prevC = c
+    slips[#slips + 1] = string.format('%.1f', math.min(99, sl))
     parts[#parts + 1] = string.format('%.4f,%.4f,%.4f,%.5f,%.5f,%.5f,%.4f', dot(c, r), dot(c, f), dot(c, u), dot(ax, r), dot(ax, f), dot(ax, u), ang)
   end
   d.seq = d.seq + 1
   -- v2.4: "ss" = BeamNG's simulation clock (sum of dtSim, the time its physics was advanced), next to "st" (its frame
   -- clock). The GTA plugin measures which one BeamNG's positions fit better (P1, measurement only).
-  local s = string.format('{"t":"pose","q":%d,"st":%.5f,"ss":%.5f,"p":[%.4f,%.4f,%.4f],"f":[%.6f,%.6f,%.6f],"u":[%.6f,%.6f,%.6f],"v":[%.4f,%.4f,%.4f],"sp":%d,"w":[%s]}',
-    d.seq, d.st, d.ss or d.st, p[1], p[2], p[3], f[1], f[2], f[3], u[1], u[2], u[3], vel[1], vel[2], vel[3], spinAll and 1 or 0, table.concat(parts, ','))
+  local s = string.format('{"t":"pose","q":%d,"st":%.5f,"ss":%.5f,"p":[%.4f,%.4f,%.4f],"f":[%.6f,%.6f,%.6f],"u":[%.6f,%.6f,%.6f],"v":[%.4f,%.4f,%.4f],"sp":%d,"w":[%s],"sl":[%s]}',
+    d.seq, d.st, d.ss or d.st, p[1], p[2], p[3], f[1], f[2], f[3], u[1], u[2], u[3], vel[1], vel[2], vel[3], spinAll and 1 or 0, table.concat(parts, ','), table.concat(slips, ','))
   udp:sendto(s, d.ip, d.port)
   d.poses = d.poses + 1
   stats.tx = stats.tx + 1
@@ -6045,7 +6058,8 @@ world.tw.tick = function()
   end
   if #us > 0 then
     T.poses = T.poses + #us
-    pcall(function() udp:sendto('{"t":"twu","s":[' .. table.concat(us, ',') .. ']}', d.ip, d.port) end)
+    -- (v2.74: with BeamNG's clocks, as the car's poses: GTA draws the twins at the same moment as your car, not as they come in)
+    pcall(function() udp:sendto(string.format('{"t":"twu","st":%.5f,"ss":%.5f,"s":[', d.st or 0, d.ss or d.st or 0) .. table.concat(us, ',') .. ']}', d.ip, d.port) end)
   end
   if t - T.logT > 10 then
     T.logT = t
