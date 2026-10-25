@@ -77,6 +77,7 @@ Please attach both logs to any bug report:
 - GTA's cars crumple only in BeamNG. In GTA they show GTA's own damage at the dented spots. The twins are vanilla BeamNG cars matched by size, not GTA's models.
 - Up to 4 GTA cars at once get a twin (`TrafficTwins`). Others, and bikes, get the simpler push. Trucks over `TwinMaxLengthM` get GTA's own crash.
 - `TrafficMode=gta` is new and rougher: your hidden GTA car is made solid only for the moment of contact. If GTA doesn't react, the simpler push takes over.
+- Other mods that put their own objects on the car in BeamNG (like DARS / Driver Arms' driver) aren't exported. The car comes to GTA without them.
 - Show cars stand still: their wheels and doors don't move, they aren't in BeamNG, and they are gone when GTA restarts. In drive mode hitting one is the simple push (no BeamNG crash).
 - The first F10 of a BeamNG session loads the twins (about 10 s; BeamNG freezes for a moment per car). Later F10s reuse them.
 - GTA drivers may not react to your car before a hit.

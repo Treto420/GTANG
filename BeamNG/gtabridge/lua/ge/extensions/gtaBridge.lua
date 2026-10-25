@@ -77,7 +77,7 @@
 --   gtaBridge.soundSession(false) -- v2.4: switch the sound "session" mode off (the GTA plugin's BeamNGSoundWake=session sets it)
 
 local M = {}
-M.version = '2.74'
+M.version = '2.74.1'
 local logTag = 'gtaBridge'
 
 -- ---------------------------------------------------------------- config
@@ -1031,6 +1031,34 @@ local function readWheels(veh)
   return out, drivenText
 end
 
+-- v2.74.1: mesh nodes outside the glTF scene aren't the car. BeamNG's exporter also picks up other mods' objects that way
+-- (DARS / Driver Arms: its driver's pieces, some parked 100 m away: the car came out 100 m long and GTA couldn't place it).
+-- Their mesh is left out (the node stays, so no index changes). Not done if it would leave out most of the car.
+local function dropStrays(root)
+  local sc = root.scenes and root.scenes[(tonumber(root.scene) or 0) + 1]
+  if not (sc and sc.nodes and #sc.nodes > 0 and root.nodes) then return 0, {} end
+  local keep = {}
+  local function walk(i)
+    if keep[i] then return end
+    keep[i] = true
+    for _, c in ipairs((root.nodes[i + 1] or {}).children or {}) do walk(c) end
+  end
+  for _, i in ipairs(sc.nodes) do walk(i) end
+  local cut, total, names = {}, 0, {}
+  for i, n in ipairs(root.nodes) do
+    if n.mesh ~= nil then
+      total = total + 1
+      if not keep[i - 1] then cut[#cut + 1] = n end
+    end
+  end
+  if #cut * 2 > total then return 0, { 'none: ' .. #cut .. ' of ' .. total .. ' meshes are outside the scene' } end
+  for _, n in ipairs(cut) do
+    n.mesh = nil
+    if #names < 3 then names[#names + 1] = tostring(n.name) end
+  end
+  return #cut, names
+end
+
 -- glTF arrays must not be empty; cgltf refuses "primitives":{} etc.
 local function sanitizeGltf(root)
   for _, m in ipairs(root.meshes or {}) do
@@ -1107,6 +1135,10 @@ local function onExported(root)
       end
     end
     pcall(writeFile, exportCfg.matDump, table.concat(lines, '\n') .. '\n')
+    local nStray, strays = dropStrays(root)
+    if nStray > 0 or #strays > 0 then
+      logI(string.format('export: %d meshes outside the car left out (another mod\'s objects): %s', nStray, table.concat(strays, ', ')))
+    end
     sanitizeGltf(root)
     root.extras = root.extras or {}
     local vp
