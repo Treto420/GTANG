@@ -1,5 +1,5 @@
 #!/bin/sh
-# v2.43/2.5/2.51/2.6/2.62/2.63/2.7/2.71/2.72/2.73/2.74: every end-to-end scenario, one after another (about 70 minutes). Run from test/: sh run_all_e2e.sh
+# v2.43/2.5/2.51/2.6/2.62/2.63/2.7/2.71/2.72/2.73/2.74/2.75: every end-to-end scenario, one after another (about 70 minutes). Run from test/: sh run_all_e2e.sh
 # HOST_FRAME_MS=55 (v2.74): the fake game at ~15 fps like the scenarios were timed for (a fast sandbox ran them at 45 fps)
 W=${W:-/home/claude/w}
 cd $W/test/run
@@ -79,17 +79,26 @@ r script_world.txt 90 FAKE_RAYCAP=12 FAKE_HOLE=1 FAKE_STARTY=75; python3 ../chec
 # water filled as asphalt; tyre smoke at spinning wheels
 r script_props_fixed.txt 150 FAKE_RAYCAP=12 FAKE_PROPS=1 FAKE_PROPSTUCK=1; python3 ../check_v273.py propstuck | tail -1
 r script_hole.txt 90 FAKE_RAYCAP=12 FAKE_GAP=1; python3 ../check_v273.py gap | tail -1
+cp GtaBeamD1.ini ini_smoke.txt; sed -i 's/^TireSmoke=.*/TireSmoke=1/' GtaBeamD1.ini   # (v2.75: off by default)
 r script_world.txt 90 FAKE_RAYCAP=12 FAKE_BURNOUT=1; python3 ../check_v273.py burnout | tail -1
+cp ini_smoke.txt GtaBeamD1.ini
 # v2.74: show cars (Ctrl+Shift+F11); tyre smoke from BeamNG's slip (and none in plain driving); semis get GTA's own crash; the three
 # traffic modes; rolling hills (tiles that meet the tile towards the car kept, not swapped)
 r script_show.txt 60; python3 ../check_v274.py show | tail -1
+cp GtaBeamD1.ini ini_smoke.txt; sed -i 's/^TireSmoke=.*/TireSmoke=1/' GtaBeamD1.ini   # (v2.75: off by default)
 r script_world.txt 90 FAKE_RAYCAP=12 FAKE_BURNOUT=1; python3 ../check_v274.py smoke | tail -1
+cp ini_smoke.txt GtaBeamD1.ini
 r script_world.txt 90 FAKE_RAYCAP=12; python3 ../check_v274.py calm | tail -1
 r script_world.txt 90 FAKE_RAYCAP=12 FAKE_ROLL=1; python3 ../check_v274.py roll | tail -1; FAKE_ROLL=1 python3 ../check_world.py | tail -1
 r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1 FAKE_TRAFFIC_LONG=1; python3 ../check_v274.py semi | tail -1
 cp GtaBeamD1.ini ini_saved.txt
-sed -i 's/^TrafficMode=.*/TrafficMode=gta/' GtaBeamD1.ini
-r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1 FAKE_PED=1; python3 ../check_v274.py gta | tail -1
+sed -i 's/^TrafficMode=.*/TrafficMode=push/' GtaBeamD1.ini
+r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1 FAKE_PED=1; python3 ../check_v275.py push | tail -1; python3 ../check_v27.py traffic | tail -1   # v2.75: "gta" gone, push
 sed -i 's/^TrafficMode=.*/TrafficMode=despawn/' GtaBeamD1.ini
 r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1; python3 ../check_v274.py despawn | tail -1
 cp ini_saved.txt GtaBeamD1.ini
+# v2.75: stale twin poses after the teleport skipped; a person inside the standing car moved out; a copy whose speed reads back but
+# doesn't move knocked over by the plugin
+r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1 FAKE_TWIN_STALE=3; python3 ../check_v275.py twinstale | tail -1; python3 ../check_v27.py twins | tail -1
+r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1 FAKE_PED=1 FAKE_PEDNEAR=1; python3 ../check_v275.py pedout | tail -1
+r script_props_fixed.txt 150 FAKE_RAYCAP=12 FAKE_PROPS=1 FAKE_PROPSTUCK=1 FAKE_PROPREAD=1; python3 ../check_v275.py propread | tail -1

@@ -13,12 +13,12 @@ GTA x Beam is a "passthrough" bridge. GTA V runs the world, walking and gunplay;
 - **Real damage.** BeamNG's dents, broken glass, lost bumpers and wheels show on the car in GTA. Crashes hurt you.
 - **GTA's weapons.** Bullets dent the car, leave holes, pop tyres and break windows. Explosions push it and set it on fire. A car that blows up becomes a charred wreck.
 - **Traffic crashes, three ways** (`TrafficMode` in the ini):
-  - `twins` (default): a GTA car about to hit yours gets a BeamNG "twin", so the crash happens in BeamNG, soft body against soft body. The GTA car copies its twin's movement and takes GTA damage where the twin is dented. Trucks and buses longer than 7.5 m get GTA's own crash instead.
-  - `gta`: GTA's own crash for every car. Your car is the only soft body.
+  - `twins` (default): a GTA car about to hit yours gets a BeamNG "twin", so the crash happens in BeamNG, soft body against soft body. The GTA car copies its twin's movement and takes GTA damage where the twin is dented. Trucks and buses longer than 7.5 m get the push instead.
+  - `push`: every GTA car you hit is pushed and dented in GTA; your car is pushed and dented in BeamNG.
   - `despawn`: any car you touch vanishes, for flat-out highway runs.
-  Pedestrians are knocked down harder the faster you hit them; riders come off their bikes.
+  Pedestrians are knocked down harder the faster you hit them; riders come off their bikes. People you creep into slide aside instead of ending up inside the car.
 - **Show cars.** Park a BeamNG car on a GTA car with Ctrl+Shift+F11 and it stays there, drawn with its paint and dents. Then bring the next car from BeamNG. Up to 4 at once.
-- **Tyre smoke.** Burnouts, locked wheels and slides make GTA's own tyre smoke at the BeamNG car's wheels; the screech is BeamNG's tyre sound.
+- **Tyre smoke** (off by default, `TireSmoke=1` in the ini; still being tuned). Burnouts, locked wheels and slides make GTA's own tyre smoke at the BeamNG car's wheels; the screech is BeamNG's tyre sound.
 - **Breakable props.** Lamp posts, signs, bins and hydrants fall the way you hit them. Breaking one can set off a GTA particle effect, such as sparks or a hydrant's water (set in `GtaBeamD1_props.json`).
 - **Your driver's seat.** In drive mode you sit where the BeamNG car's driver camera is, so first person looks out of the BeamNG car. Ctrl+Shift+F10 lets you move yourself in the seat with the arrow keys; it's saved per car. The drawn car's front doors open with GTA's when you get in or out.
 - **On foot.** Get out, walk around the car and shoot it. The BeamNG gauge and drive mode stay on.
@@ -53,7 +53,7 @@ GTA x Beam is a "passthrough" bridge. GTA V runs the world, walking and gunplay;
 ## Settings
 Everything is in `GtaBeamD1.ini`, with comments. Common ones:
 - `TrafficCollision=0` turns off contact with GTA's traffic and people (they pass through your car).
-- `TrafficMode=twins|gta|despawn` picks how traffic crashes work (see Features). `TrafficTwins` sets how many BeamNG twins wait for GTA's cars (4 by default); `TwinMaxLengthM` (7.5) is the longest GTA vehicle that gets a twin.
+- `TrafficMode=twins|push|despawn` picks how traffic crashes work (see Features). `TrafficTwins` sets how many BeamNG twins wait for GTA's cars (4 by default); `TwinMaxLengthM` (7.5) is the longest GTA vehicle that gets a twin.
 - `ShowCarsMax` (4) is how many show cars you can park. Each one keeps its model in video memory.
 - `DriverSeatForwardM`, `DriverSeatUpM`, `DriverSeatRightM` move you in the seat for every car (Ctrl+Shift+F10 does it per car, saved in `GtaBeamD1_seats.json`).
 - `Weapons=0` turns off weapon damage on the car.

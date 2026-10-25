@@ -478,7 +478,8 @@ int worldGetAllVehicles(int* arr, int arrSize)
 		if (Env("FAKE_PED")) {   // v2.72: a person standing 12 m ahead, in the car's way (never shoots)
 			FakePed p{};
 			p.h = 9002;
-			for (int i = 0; i < 3; ++i) p.head[i] = g_pos[i] + g_rot[i][1] * 12.0 + g_rot[i][0] * 0.3;
+			const double ahead = Env("FAKE_PEDNEAR") ? 1.0 : 12.0;   // v2.75: FAKE_PEDNEAR=1: inside the standing car (pushed out)
+			for (int i = 0; i < 3; ++i) p.head[i] = g_pos[i] + g_rot[i][1] * ahead + g_rot[i][0] * 0.3;
 			p.head[2] = FakeGround(p.head[0], p.head[1], &gh, &m) + 1.7;
 			p.t0 = 1e9; p.until = 0;
 			g_peds.push_back(p);
@@ -766,6 +767,11 @@ PUINT64 nativeCall()
 			if (n++ % 20 == 0) { printf("FAKE: traffic car posed %.2f %.2f %.2f (%d)\n", g_tc[0], g_tc[1], g_tc[2], n); fflush(stdout); }
 			break;
 		}
+		if (FakePed* pd = PedOf(int(g_args[0]))) {   // v2.75: a person moved out of the drawn car (GET_ENTITY_COORDS: head - 0.6)
+			pd->head[0] = F(1); pd->head[1] = F(2); pd->head[2] = F(3) + 0.6;
+			printf("FAKE: person %d moved to %.2f %.2f %.2f\n", pd->h, F(1), F(2), F(3)); fflush(stdout);
+			break;
+		}
 		if (FakeProp* fp = PropOf(int(g_args[0]))) {
 			if (!fp->posed) { const double a = fp->yaw * 3.14159265358979 / 180.0; const double R[3][3] = { { cos(a), -sin(a), 0 }, { sin(a), cos(a), 0 }, { 0, 0, 1 } }; memcpy(fp->R, R, sizeof(R)); }
 			fp->posed = true; fp->x = F(1); fp->y = F(2); fp->z = F(3); ++fp->poses;
@@ -795,7 +801,11 @@ PUINT64 nativeCall()
 	case 0x1C99BB7B6E96D16F:  // SET_ENTITY_VELOCITY (v2.7: the traffic car's printed)
 		if (FakeProp* fp = PropOf(int(g_args[0]))) {   // v2.72: a prop's copy flies off (moved 100 m away); a map prop doesn't move
 			if (!fp->src) { printf("FAKE: map prop %d velocity set: GTA doesn't move it\n", fp->h); fflush(stdout); break; }
-			if (Env("FAKE_PROPSTUCK")) { printf("FAKE: copy of prop %d velocity set: GTA doesn't move this model\n", Shown(fp)); fflush(stdout); break; }   // v2.73 (his v2.72 log)
+			if (Env("FAKE_PROPSTUCK")) {   // v2.73 (his v2.72 log); v2.75 FAKE_PROPREAD: the speed reads back, it still doesn't move (his v2.74 log)
+				printf("FAKE: copy of prop %d velocity set: GTA doesn't move this model\n", Shown(fp)); fflush(stdout);
+				if (Env("FAKE_PROPREAD")) fp->pushed = true;
+				break;
+			}
 			printf("FAKE: prop %d pushed (velocity %.1f %.1f %.1f) (its copy)\n", Shown(fp), F(1), F(2), F(3)); fflush(stdout);
 			if (!fp->pushed) fp->x += 100.0;
 			fp->pushed = true;

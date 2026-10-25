@@ -431,7 +431,10 @@ ge.execute('''
   TV.__index = TV
   local function trot(t, l) local f, r = t.f, { x = t.f.y, y = -t.f.x, z = 0 } return { x = r.x * l[1] + f.x * l[2], y = r.y * l[1] + f.y * l[2], z = l[3] } end
   function TV:getID() return self.id end
-  function TV:getPosition() return { x = self.pos.x, y = self.pos.y, z = self.pos.z } end
+  function TV:getPosition()   -- v2.75: FAKE_TWIN_STALE=n: for n frames after a teleport it still says the old spot (his v2.74 log)
+    local q = (self.staleN or 0) > 0 and self.oldpos or self.pos
+    return { x = q.x, y = q.y, z = q.z }
+  end
   function TV:getDirectionVector() return { x = self.f.x, y = self.f.y, z = 0 } end
   function TV:getDirectionVectorUp() return { x = 0, y = 0, z = 1 } end
   function TV:getVelocity() return { x = self.vel.x, y = self.vel.y, z = self.vel.z } end
@@ -442,6 +445,7 @@ ge.execute('''
     local f = QROT({ x = qx, y = qy, z = qz, w = qw }, { x = 0, y = -1, z = 0 })
     local l = math.sqrt(f.x * f.x + f.y * f.y)
     self.f = { x = f.x / l, y = f.y / l, z = 0 }
+    if TWIN_STALE > 0 then self.oldpos, self.staleN = self.pos, TWIN_STALE end
     self.pos = { x = x, y = y, z = z }
     self.vel = { x = 0, y = 0, z = 0 }
     self.dent = {}
@@ -471,6 +475,7 @@ ge.execute('''
     local out = 0
     for _, t in ipairs(TWINS) do
       if t.alive and t.active then
+        t.staleN = math.max(0, (t.staleN or 0) - 1)
         t.pos = { x = t.pos.x + t.vel.x * dt, y = t.pos.y + t.vel.y * dt, z = t.pos.z }
         local sp = math.sqrt(t.vel.x ^ 2 + t.vel.y ^ 2)
         local k = sp > 0 and math.max(0, sp - 2.0 * dt) / sp or 0
@@ -553,6 +558,7 @@ ge.execute('''
 def twinlog(m):
     ev.write('%.3f TWIN %s\n' % (st, m)); ev.flush()
 g.TWINLOG = twinlog
+g.TWIN_STALE = int(os.environ.get('FAKE_TWIN_STALE', '0'))
 def proplog(name, anch, gx, gy, gz, gm):
     ev.write('%.3f PROPSPAWN %s anchored %s %.2f x %.2f x %.2f m %.0f kg\n' % (st, name, anch, gx, gy, gz, gm)); ev.flush()
 g.PROPLOG = proplog
