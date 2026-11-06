@@ -2,93 +2,83 @@
 
 **Drive BeamNG.drive's soft-body cars in GTA V's world.**
 
-GTA x Beam is a "passthrough" bridge. GTA V runs the world, walking and gunplay; BeamNG.drive runs the car physics. Both games run at the same time and talk over a local UDP connection. In GTA you see your BeamNG car, with its real crumple, on GTA's streets.
+GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both games run at the same time and talk to each other on your PC. In GTA you see and drive your BeamNG car, with its real crumple, on GTA's streets, and GTA's traffic, people and lamp posts react to it like they would to a normal GTA car.
 
-> Single-player only. Script Hook V closes GTA V in GTA Online. Personal, non-commercial fan project; not affiliated with Rockstar Games or BeamNG GmbH.
+> Single-player only (story mode). Script Hook V closes GTA V in GTA Online. Free, non-commercial fan project; not affiliated with Rockstar Games or BeamNG GmbH.
 
-## Features
-- **Your BeamNG car in GTA.** Export any BeamNG car (Shift+F11). It is drawn in GTA with its paint, materials, glass and lights, lit by GTA's sun, shadows and reflections.
-- **Drive mode (F10).** BeamNG's physics drive the car. GTA's streets, hills, bridges, walls and props are measured and built in BeamNG as you go, with GTA's ground surfaces (asphalt, dirt, grass...).
-- **Your BeamNG controls.** Pad and keyboard go through your own BeamNG bindings: manual gears, clutch, drive modes. One button swaps the pad between GTA and BeamNG.
-- **Real damage.** BeamNG's dents, broken glass, lost bumpers and wheels show on the car in GTA. Crashes hurt you.
-- **GTA's weapons.** Bullets dent the car, leave holes, pop tyres and break windows. Explosions push it and set it on fire. A car that blows up becomes a charred wreck.
-- **Traffic crashes, three ways** (`TrafficMode` in the ini):
-  - `twins` (default): a GTA car about to hit yours gets a BeamNG "twin", so the crash happens in BeamNG, soft body against soft body. The GTA car copies its twin's movement and takes GTA damage where the twin is dented. Trucks and buses longer than 7.5 m get the push instead.
-  - `push`: every GTA car you hit is pushed and dented in GTA; your car is pushed and dented in BeamNG.
-  - `despawn`: any car you touch vanishes, for flat-out highway runs.
-  Pedestrians are knocked down harder the faster you hit them; riders come off their bikes. People you creep into slide aside instead of ending up inside the car.
-- **Show cars.** Park a BeamNG car on a GTA car with Ctrl+Shift+F11 and it stays there, drawn with its paint and dents. Then bring the next car from BeamNG. Up to 4 at once.
-- **Tyre smoke** (off by default, `TireSmoke=1` in the ini; still being tuned). Burnouts, locked wheels and slides make GTA's own tyre smoke at the BeamNG car's wheels; the screech is BeamNG's tyre sound.
-- **Breakable props.** Lamp posts, signs, bins and hydrants fall the way you hit them. Breaking one can set off a GTA particle effect, such as sparks or a hydrant's water (set in `GtaBeamD1_props.json`).
-- **Your driver's seat.** In drive mode you sit where the BeamNG car's driver camera is, so first person looks out of the BeamNG car. Ctrl+Shift+F10 lets you move yourself in the seat with the arrow keys; it's saved per car. The drawn car's front doors open with GTA's when you get in or out.
-- **On foot.** Get out, walk around the car and shoot it. The BeamNG gauge and drive mode stay on.
-- **Pause sync, sound and radio.** Pausing one game pauses the other. BeamNG's engine sound plays while GTA has focus, and GTA's radio plays as the phone radio.
+## Quick start (5 minutes)
+1. **Download** this page as a ZIP (green **Code** button → **Download ZIP**) and unzip it.
+2. **GTA V files:** copy everything in the `GTA` folder into your GTA V folder (the one with `GTA5.exe`).
+3. **BeamNG mod:** copy the `BeamNG\gtabridge` folder into `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\unpacked\` (paste that path into Explorer's address bar). Say yes to replacing files.
+4. **Start BeamNG first.** Load the level **Grid, Small, Pure** and spawn your car.
+5. **Start GTA V** (story mode). Get in a GTA car about the **same size** as your BeamNG car (see Tips).
+6. In GTA press **Shift+F11** (gets your car from BeamNG; the first time takes a while), then **F11** (puts it on your GTA car), then **F10** (drive).
 
 ## Requirements
-- GTA V **Legacy** (PC, story mode) with [Script Hook V](http://www.dev-c.com/gtav/scripthookv/) and its ASI loader (`dinput8.dll`).
-- BeamNG.drive (tested on the current public release).
-- A PC that can run both games at once. A GPU with 8 GB or more VRAM is recommended.
+- GTA V **Legacy** for PC, story mode, with [Script Hook V](http://www.dev-c.com/gtav/scripthookv/) and its ASI loader (`dinput8.dll`).
+- BeamNG.drive (made on 0.40).
+- A PC that can run both games at once. 8 GB of video memory or more is recommended; video memory is what runs out first.
 
-## Install
-1. **GTA V:** copy everything in `GTA\` into your GTA V folder (next to `GTA5.exe`):
-   - `GtaBeamD1.asi`
-   - `GtaBeamD1.ini`
-   - `GtaBeamD1_surfaces.json`, `GtaBeamD1_props.json`, `GtaBeamD1_weapons.json`, `GtaBeamD1_traffic.json`
-2. **BeamNG.drive:** drag the `BeamNG\gtabridge` folder into `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\unpacked\` and say yes to replacing files. It already has the mod's layout (`lua\ge\extensions\gtaBridge.lua`, `scripts\gtabridge\modScript.lua` which loads the mod when BeamNG starts, and `vehicles\gtab_prop\`).
-3. Start BeamNG first, load the empty level **Grid, Small, Pure** and spawn your car. Then start GTA V (story mode).
-
-## How to use
+## Keys (in GTA)
 | Key | What it does |
 |---|---|
-| **Shift+F11** | Get the car from BeamNG (exports it; the first time takes a while) |
-| **F11** | Put the BeamNG car on the GTA car you're in or next to |
-| **F10** | Drive mode on/off (sit in the driver's seat, standing still) |
-| **Shift+F10** | The on-screen drive check text |
-| **Ctrl+F11** | Re-read the ini and json files |
-| **Ctrl+Shift+F11** | Show cars: park the BeamNG car (put on a GTA car with F11) there; next to a show car with no car on, take it away |
-| **Ctrl+Shift+F12** | View modes for testing (normal, car always on top, depth view, part picker) |
-| **Ctrl+Shift+F10** | Seat adjust (in drive mode): arrow keys and Page Up / Page Down move you; press again to save it for this car |
-| **D-pad down** | Swap the pad between GTA and BeamNG (in drive mode) |
+| **Shift+F11** | Get the car from BeamNG (export). Do it again after you change the car in BeamNG. |
+| **F11** | Put the BeamNG car on the GTA car you're in or next to (press again to take it off) |
+| **F10** | Drive mode on/off: BeamNG's physics drive the car |
+| **Shift+F10** | On-screen drive check (what goes to BeamNG and back) |
+| **Ctrl+Shift+F10** | Seat adjust in drive mode: arrow keys and Page Up / Page Down, press again to save |
+| **Ctrl+F10** | Timing recording (only for bug reports) |
+| **Ctrl+F11** | Re-read the ini and json files without restarting |
+| **Ctrl+Shift+F11** | Show cars: park the BeamNG car on a GTA car and keep it there (up to 4) |
+| **Ctrl+Shift+F12** | View modes (for testing) |
+| **D-pad down** | Swap the controller between GTA (aim, shoot) and BeamNG (drive) while driving |
+
+Driving uses your own BeamNG controls and bindings (gears, clutch, drive modes).
+
+## Tips
+- **Pick a GTA car the same size as your BeamNG car.** GTA's traffic, people and props hit an invisible GTA car hidden under your BeamNG car. If the GTA car is smaller, things go into your BeamNG car before they react; if it's bigger, they react before they touch it. A trainer such as Menyoo makes it easy to spawn the right one (a sedan for a sedan, a jeep for a lifted truck).
+- **Run BeamNG small and light.** Window mode at 1280x720 with the lowest graphics settings. You only see GTA's picture, so BeamNG's graphics are wasted video memory.
+- **Start BeamNG first**, on Grid, Small, Pure, with only your car spawned.
+- **The first drive in an area is slower.** GTA's ground is measured and built in BeamNG as you go. It's saved in `GtaBeamD1_map\` next to GTA, so later drives there are instant.
+- **Controller:** a PlayStation pad works through DS4Windows.
+
+## What works
+- **Your BeamNG car in GTA,** drawn with its paint, materials, glass and lights, in GTA's light, shadows and reflections.
+- **BeamNG's physics.** GTA's streets, hills, walls and ground surfaces are built in BeamNG, so the car grips, crumples and breaks the BeamNG way.
+- **GTA's world reacts the vanilla way** (`PuppetSolid=1`, new in 2.77). GTA's cars get pushed and dented, people ragdoll, lamp posts break and bins fly, and your BeamNG car takes the hit.
+- **Real damage on the car.** BeamNG's dents, broken glass, lost bumpers and wheels show in GTA.
+- **GTA's guns.** Bullets dent the car, leave holes, pop tyres and break windows. Explosions push it and set it on fire; a car that blows up becomes a charred wreck.
+- **On foot.** Get out, walk around the car, shoot it. Get back in and keep driving.
+- **Show cars** (Ctrl+Shift+F11), **pause sync** (pausing one game pauses the other), **BeamNG's engine sound** and GTA's radio on the phone.
+
+## Known issues
+- Things react to GTA's hidden car, not the exact shape of your BeamNG car (see Tips). The parts of your BeamNG car that stick out past the GTA car crumple against walls BeamNG's way; GTA's cars, people and signs push your car and dent it at the contact point.
+- With `PuppetSolid=1` you sit in the GTA car's seat in first person, not BeamNG's.
+- Some hillsides and bridge decks can have holes or show up a few seconds late.
+- The camera can lag a little at low speed.
+- Show cars stand still and can look flat-lit or show through the car you drive.
+- Door glass is missing on some cars. Tyre smoke is off (`TireSmoke=1` to try it).
+- Other mods' extra objects on the car in BeamNG (like a DARS driver) aren't brought into GTA.
 
 ## Settings
-Everything is in `GtaBeamD1.ini`, with comments. Common ones:
-- `TrafficCollision=0` turns off contact with GTA's traffic and people (they pass through your car).
-- `TrafficMode=twins|push|despawn` picks how traffic crashes work (see Features). `TrafficTwins` sets how many BeamNG twins wait for GTA's cars (4 by default); `TwinMaxLengthM` (7.5) is the longest GTA vehicle that gets a twin.
-- `ShowCarsMax` (4) is how many show cars you can park. Each one keeps its model in video memory.
-- `DriverSeatForwardM`, `DriverSeatUpM`, `DriverSeatRightM` move you in the seat for every car (Ctrl+Shift+F10 does it per car, saved in `GtaBeamD1_seats.json`).
+Everything is in `GtaBeamD1.ini`, with comments. The ones you're most likely to want:
+- `PuppetSolid=1` (default): GTA's world reacts to your car with GTA's own physics. `0` goes back to the 2.76 way (traffic you touch vanishes, set by `TrafficMode`).
 - `Weapons=0` turns off weapon damage on the car.
-- `DriveGravity` sets how heavy the car feels (1.1 by default).
-- `World=0` uses BeamNG's own map instead of GTA's ground (for testing). `WorldFill=0` leaves holes in GTA's ground empty instead of filling them with asphalt.
-- `TireSmoke=0` turns the tyre smoke off; `TireSmokeSlipMs` sets how much a tyre must slip to smoke (BeamNG's own slip, in m/s); `TireSmokeFx` and `TireSmokeScale` pick GTA's effect and its size.
-- `DoorOpenDeg` sets how far the drawn front doors open.
+- `DriveGravity` sets how heavy the car feels (1.1).
+- `ShowCarsMax` (4) is how many show cars you can park; each one uses video memory.
+- `DriverSeatForwardM`, `DriverSeatUpM`, `DriverSeatRightM` move you in the seat for every car.
 
-Game content lives in JSON next to the ini:
-- `GtaBeamD1_surfaces.json`: GTA ground material to BeamNG ground model (grip).
-- `GtaBeamD1_props.json`: which props break, stay solid or get knocked over, and their effects.
-- `GtaBeamD1_weapons.json`: damage per weapon group and explosion type.
-- `GtaBeamD1_traffic.json`: which BeamNG cars are the twins (`twinPool`), GTA damage per dent, masses and pedestrian knock-downs.
+Game content lives in JSON next to the ini: `GtaBeamD1_surfaces.json` (GTA ground → BeamNG grip), `GtaBeamD1_props.json` (props), `GtaBeamD1_weapons.json` (damage per weapon; `crashMinDv` is how hard a crash must be to hurt you), `GtaBeamD1_traffic.json` (masses).
 
-## Logs and bug reports
-Please attach both logs to any bug report:
+## Bug reports
+Please attach both logs:
 - `GtaBeamD1.log` (GTA V folder)
 - `gtabridge_log.txt` (`%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\gtabridge\`)
 
-## Known limits
-- GTA's cars crumple only in BeamNG. In GTA they show GTA's own damage at the dented spots. The twins are vanilla BeamNG cars matched by size, not GTA's models.
-- Up to 4 GTA cars at once get a twin (`TrafficTwins`). Others, and bikes, get the simpler push. Trucks over `TwinMaxLengthM` get GTA's own crash.
-- `TrafficMode=gta` is new and rougher: your hidden GTA car is made solid only for the moment of contact. If GTA doesn't react, the simpler push takes over.
-- Other mods that put their own objects on the car in BeamNG (like DARS / Driver Arms' driver) aren't exported. The car comes to GTA without them.
-- Show cars stand still: their wheels and doors don't move, they aren't in BeamNG, and they are gone when GTA restarts. In drive mode hitting one is the simple push (no BeamNG crash).
-- The first F10 of a BeamNG session loads the twins (about 10 s; BeamNG freezes for a moment per car). Later F10s reuse them.
-- GTA drivers may not react to your car before a hit.
-- The first drive through an area measures it. A saved map (`GtaBeamD1_map\`) makes later drives instant there. Delete that folder to measure again.
-- Some hillsides and bridge decks can appear a few seconds late. They fill in as you approach. A hole GTA's rays can't measure, with ground on two sides of it, is filled with flat asphalt between them (it may not match a bumpy surface exactly).
-- Only parts named "door" in the car file open (front doors). They turn about their front edge; the door glass and inner panel go with them if their names say door.
-
 ## Building from source
 The source is in `source\`.
-- Windows with Visual Studio 2022: run `build_vs2022.bat`. It needs the Script Hook V SDK's `ScriptHookV.lib`.
-- Linux/CI: build with `zig c++ -target x86_64-windows-gnu` (see `source\test\build_all.sh`). That folder also has the tests, including a fake Script Hook V and a fake BeamNG for end-to-end runs under Wine.
+- Windows with Visual Studio 2022: run `source\build_vs2022.bat` (needs the Script Hook V SDK's `ScriptHookV.lib`).
+- Linux/CI: `zig c++ -target x86_64-windows-gnu` (see `source\test\build_all.sh`). That folder also has the tests, with a fake Script Hook V and a fake BeamNG for runs under Wine. They test the code, not GTA's physics.
 
 ## Credits and licences
 - [Script Hook V](http://www.dev-c.com/gtav/scripthookv/) by Alexander Blade.
