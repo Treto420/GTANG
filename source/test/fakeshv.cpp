@@ -43,6 +43,10 @@ static double g_rot[3][3];  // columns: right, forward, up
 static bool   g_rotInit = false;
 static double g_vel[3] = {};
 static bool   g_velSet = false, g_frozen = false, g_collision = true, g_gravity = true;
+// v2.77 PuppetSolid (sandbox only, NOT GTA's physics): the car's angular velocity turns it (world frame); FAKE_PSKICK=1: the first
+// time the car comes within 4 m of the parked traffic car 9001 its speed reads back 4 m/s slower along its way (a "GTA crash")
+static double g_w[3] = {};
+static bool   g_wSet = false, g_psKicked = false;
 static double g_physT = 0;
 static double g_frameT = 0.016;  // v2.0: the real time between script ticks (like GTA's frame time)
 static double g_timeScale = 1.0; // v2.5: host "timescale <x>": GTA's slow motion (radio wheel)
@@ -627,6 +631,18 @@ void scriptWait(DWORD)
 	g_physT = t;
 	if (dt > 0) g_frameT = dt;
 	if (g_velSet && !g_frozen) for (int k = 0; k < 3; ++k) g_pos[k] += g_vel[k] * dt * g_timeScale;
+	if (g_wSet && !g_frozen && dt > 0) {   // v2.77: M = Rot(w dt) M (Rodrigues), the columns kept orthonormal
+		const double wl = sqrt(g_w[0] * g_w[0] + g_w[1] * g_w[1] + g_w[2] * g_w[2]), a = wl * dt * g_timeScale;
+		if (a > 1e-9) {
+			const double n[3] = { g_w[0] / wl, g_w[1] / wl, g_w[2] / wl }, c = cos(a), sn = sin(a), C = 1 - c;
+			const double Q[3][3] = { { c + n[0] * n[0] * C, n[0] * n[1] * C - n[2] * sn, n[0] * n[2] * C + n[1] * sn },
+			                         { n[1] * n[0] * C + n[2] * sn, c + n[1] * n[1] * C, n[1] * n[2] * C - n[0] * sn },
+			                         { n[2] * n[0] * C - n[1] * sn, n[2] * n[1] * C + n[0] * sn, c + n[2] * n[2] * C } };
+			double M[3][3];
+			for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) M[i][j] = Q[i][0] * g_rot[0][j] + Q[i][1] * g_rot[1][j] + Q[i][2] * g_rot[2][j];
+			memcpy(g_rot, M, sizeof(M));
+		}
+	}
 }
 void scriptRegister(HMODULE, void (*fn)()) { g_script = fn; }
 void scriptUnregister(HMODULE) {}
@@ -705,6 +721,9 @@ PUINT64 nativeCall()
 			bool gh; unsigned m;
 			*fw = NV{ float(-sin(a)), float(cos(a)), 0 }; *rt = NV{ float(cos(a)), float(sin(a)), 0 }; *up = NV{ 0, 0, 1 };
 			*ps = NV{ float(fp->x), float(fp->y), float(FakeGround(fp->x, fp->y, &gh, &m)) };
+		} else if (int(g_args[0]) == 100) {   // v2.77: the car itself
+			*rt = NV{ float(g_rot[0][0]), float(g_rot[1][0]), float(g_rot[2][0]) }; *fw = NV{ float(g_rot[0][1]), float(g_rot[1][1]), float(g_rot[2][1]) };
+			*up = NV{ float(g_rot[0][2]), float(g_rot[1][2]), float(g_rot[2][2]) }; *ps = NV{ float(g_pos[0]), float(g_pos[1]), float(g_pos[2]) };
 		}
 		break; }
 	case 0x0C112765300C7E1E: { FakeProp* fp = PropOf(int(g_args[0])); RetI(fp && fp->frag ? 1 : 0); break; }      // GET_IS_ENTITY_A_FRAG
@@ -821,8 +840,30 @@ PUINT64 nativeCall()
 	case 0x4805D2B1D8CF94A9:   // GET_ENTITY_VELOCITY (v2.7: the traffic car; v2.72: a pushed prop's copy)
 		if (int(g_args[0]) == 9001) RetV(float(g_tcV[0]), float(g_tcV[1]), float(g_tcV[2]));
 		else if (FakeProp* fp = PropOf(int(g_args[0]))) RetV(0.0f, 0.0f, fp->pushed ? 5.0f : 0.0f);
+		else if (int(g_args[0]) == 100 && g_velSet) {   // v2.77: the car's own speed reads back (FAKE_PSKICK: one "crash")
+			double v[3] = { g_vel[0], g_vel[1], g_vel[2] };
+			if (Env("FAKE_PSKICK") && g_tcPlaced && !g_tcGone && !g_psKicked && hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1]) < 4.0) {
+				g_psKicked = true;
+				for (int k = 0; k < 3; ++k) v[k] -= g_rot[k][1] * 4.0;
+				for (int k = 0; k < 3; ++k) g_vel[k] = v[k];
+				printf("FAKE: GTA crash: the car's speed reads back 4 m/s slower (traffic car 9001 at %.1f m)\n", hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1])); fflush(stdout);
+			}
+			RetV(float(v[0]), float(v[1]), float(v[2]));
+		}
 		break;
-	case 0x8339643499D1222E: if (FakeProp* fp = PropOf(int(g_args[0]))) { printf("FAKE: prop %d turning %.1f %.1f %.1f\n", Shown(fp), F(1), F(2), F(3)); fflush(stdout); } break;   // SET_ENTITY_ANGULAR_VELOCITY (v2.72)
+	case 0x8339643499D1222E:   // SET_ENTITY_ANGULAR_VELOCITY (v2.72; v2.77: the car turns with it, world frame)
+		if (FakeProp* fp = PropOf(int(g_args[0]))) { printf("FAKE: prop %d turning %.1f %.1f %.1f\n", Shown(fp), F(1), F(2), F(3)); fflush(stdout); }
+		else if (int(g_args[0]) == 100) {   // (FAKE_ANGLOCAL=1: taken in the car's frame instead, to test the plugin's frame check)
+			const double a[3] = { F(1), F(2), F(3) };
+			for (int k = 0; k < 3; ++k) g_w[k] = Env("FAKE_ANGLOCAL") ? g_rot[k][0] * a[0] + g_rot[k][1] * a[1] + g_rot[k][2] * a[2] : a[k];
+			g_wSet = true;
+		}
+		break;
+	case 0x17FFC1B2BA35A494:   // IS_ENTITY_TOUCHING_ENTITY (v2.77): the car and the parked traffic car within 4 m (FAKE_PSKICK)
+		RetI(Env("FAKE_PSKICK") && int(g_args[0]) == 100 && int(g_args[1]) == 9001 && g_tcPlaced && !g_tcGone && hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1]) < 4.0 ? 1 : 0);
+		break;
+	case 0xC45D23BAF168AAB8: RetF(1000.0f); break;   // GET_VEHICLE_ENGINE_HEALTH (v2.77)
+	case 0x3E8C8727991A8A0B: printf("FAKE: vehicle %d strong %d\n", int(g_args[0]), int(g_args[1])); fflush(stdout); break;   // SET_VEHICLE_STRONG (v2.77)
 	case 0x95EED5A694951F9F: { FakeProp* fp = PropOf(int(g_args[0])); RetF(fp && fp->posed ? float(fp->R[2][2]) : 1.0f); break; }   // GET_ENTITY_UPRIGHT_VALUE (v2.73)
 	case 0xF6829842C06AE524: {   // GET_WATER_HEIGHT (v2.73): FAKE_HOLE's strip is water 20 cm under the road at its edge
 		bool gh; unsigned m;

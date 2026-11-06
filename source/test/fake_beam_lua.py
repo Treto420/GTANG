@@ -206,10 +206,17 @@ g.socket.gettime = lambda: 1000.0 + time.perf_counter() - T0
 # ---------------------------------------------------------------- the car (BeamNG world: x, y, z up)
 car = dict(x=500.0, y=-300.0, z=12.0, psi=1.0, v=0.0, delta=0.0, spin=0.0)
 WH = [('FR', 0.8, 1.45, True), ('FL', -0.8, 1.45, True), ('RR', 0.8, -1.4, False), ('RL', -0.8, -1.4, False)]
+WOBBLE = os.environ.get('FAKE_WOBBLE') == '1'   # v2.77: the body rolls 10 deg and pitches 6 deg back and forth (tests PuppetSolid's turn-frame check)
 def basis():
     f = (math.cos(car['psi']), math.sin(car['psi']), 0.0)
     u = (0.0, 0.0, 1.0)
     r = (f[1], -f[0], 0.0)
+    if WOBBLE:
+        t = time.perf_counter() - T0
+        a, b = math.radians(10.0) * math.sin(2 * math.pi * t / 1.2), math.radians(6.0) * math.sin(2 * math.pi * t / 1.7)
+        ca, sa, cb, sb = math.cos(a), math.sin(a), math.cos(b), math.sin(b)
+        r, u = tuple(ca * r[i] + sa * u[i] for i in range(3)), tuple(-sa * r[i] + ca * u[i] for i in range(3))   # roll about f
+        f, u = tuple(cb * f[i] + sb * u[i] for i in range(3)), tuple(-sb * f[i] + cb * u[i] for i in range(3))   # pitch about r
     return r, f, u
 def to_world(l):
     r, f, u = basis()

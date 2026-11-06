@@ -30,7 +30,7 @@ CAR_GLASS=1 python3 make_car_plain.py run/car_glass   # v2.6: the weapons scenar
 # the ini with CarFile pointing at the test car
 # v2.5: light rendering (no GPU here: llvmpipe draws the car's shadows / ambient occlusion / learned reflections at ~3 fps on
 # 2 cores; the scenario timings expect ~15 fps)
-sed 's/^CarFile=$/CarFile=car\\car.gltf/; s/^SelfShadows=1/SelfShadows=0/; s/^AmbientOcclusion=1/AmbientOcclusion=0/; s/^WorldShadows=1/WorldShadows=0/; s/^EdgeSmoothing=1/EdgeSmoothing=0/; s/^ShadowMode=own/ShadowMode=off/; s/^Environment=world/Environment=sky/; s/^TrafficMode=.*/TrafficMode=twins/; s/^TrafficTwins=.*/TrafficTwins=4/; s/^PropsKnock=.*/PropsKnock=1/; s/^TireSmoke=.*/TireSmoke=1/' $W/src/GtaBeamD1.ini > run/GtaBeamD1.ini
+sed 's/^CarFile=$/CarFile=car\\car.gltf/; s/^SelfShadows=1/SelfShadows=0/; s/^AmbientOcclusion=1/AmbientOcclusion=0/; s/^WorldShadows=1/WorldShadows=0/; s/^EdgeSmoothing=1/EdgeSmoothing=0/; s/^ShadowMode=own/ShadowMode=off/; s/^Environment=world/Environment=sky/; s/^TrafficMode=.*/TrafficMode=twins/; s/^TrafficTwins=.*/TrafficTwins=4/; s/^PropsKnock=.*/PropsKnock=1/; s/^TireSmoke=.*/TireSmoke=1/; s/^PuppetSolid=.*/PuppetSolid=0/' $W/src/GtaBeamD1.ini > run/GtaBeamD1.ini
 # v2.74.1: compiled by LuaJIT 2.1 like BeamNG does (its 200-locals limit per function: the main chunk is close to it)
 python3 -c "import sys; from lupa.luajit21 import LuaRuntime as L; ok, e = L().eval('function(s) local f, e = loadstring(s, \"gtaBridge.lua\"); return f ~= nil, e end')(open(sys.argv[1]).read()); sys.exit(0 if ok else 'LuaJIT: %s' % e)" $W/src/gtaBridge.lua || exit 1
 python3 lua_input_test.py $W/src/gtaBridge.lua | tail -1
