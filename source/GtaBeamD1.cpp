@@ -116,7 +116,7 @@
 #include "carmodel.h"
 #include "shv.h"
 
-#define D1_VERSION "2.75"
+#define D1_VERSION "2.76"
 
 namespace
 {
@@ -559,6 +559,7 @@ namespace
 		float       propPush = 1.0f;          // PropPush: how hard a hit prop is pushed in GTA (x)
 		float       propBump = 1.0f;          // PropBump: how much speed BeamNG's car loses on a soft prop (x)
 		bool        propSolid = true;         // PropSolid: big props (and the ones GtaBeamD1_props.json calls solid) are boxes in BeamNG
+		bool        propsKnock = false;       // PropsKnock: v2.76: posts and signs knocked over (copies: buggy); 0 = solid poles that stay
 		bool        dents = true;             // Dents: BeamNG's dents and bent parts shown on the drawn car
 		float       dentHz = 20.0f;           // DentsPerSecond: how often BeamNG sends its car's shape
 		float       driveGravity = 1.1f;      // DriveGravity: BeamNG's gravity x this while GTA drives (1 = BeamNG's own; v2.62: 1.1 again, v2.51: 1.0)
@@ -988,6 +989,7 @@ namespace
 			c.propPush = std::clamp(IniFloat(path, "PropPush", 1.0f), 0.0f, 10.0f);
 			c.propBump = std::clamp(IniFloat(path, "PropBump", 1.0f), 0.0f, 10.0f);
 			c.propSolid = GetPrivateProfileIntA(kSec, "PropSolid", 1, path) != 0;
+			c.propsKnock = GetPrivateProfileIntA(kSec, "PropsKnock", 0, path) != 0;
 			c.dents = GetPrivateProfileIntA(kSec, "Dents", 1, path) != 0;
 			c.dentHz = std::clamp(IniFloat(path, "DentsPerSecond", 20.0f), 1.0f, 60.0f);
 			c.driveGravity = std::clamp(IniFloat(path, "DriveGravity", 1.1f), 0.5f, 3.0f);
@@ -1004,10 +1006,10 @@ namespace
 			Log("settings: v2.52: physics props %d (%d at once); ground heights to BeamNG in mm", int(c.propPhysics), c.propPhysicsMax);
 			c.weapons = GetPrivateProfileIntA(kSec, "Weapons", 1, path) != 0;
 			c.trafficCollision = GetPrivateProfileIntA(kSec, "TrafficCollision", 1, path) != 0;
-			c.trafficTwins = std::clamp(int(GetPrivateProfileIntA(kSec, "TrafficTwins", 4, path)), 0, 8);
+			c.trafficTwins = std::clamp(int(GetPrivateProfileIntA(kSec, "TrafficTwins", 0, path)), 0, 8);
 			{
 				char tm[32] = "";
-				GetPrivateProfileStringA(kSec, "TrafficMode", "twins", tm, sizeof(tm), path);
+				GetPrivateProfileStringA(kSec, "TrafficMode", "despawn", tm, sizeof(tm), path);
 				// v2.75: "gta" (the hidden car solid for GTA's own crash) is gone: your v2.74 test, cars vanished and you died. An old ini's
 				// "gta" is "push" (v2.7's push for every car)
 				c.trafficMode = (!_stricmp(tm, "push") || !_stricmp(tm, "gta")) ? 1 : !_stricmp(tm, "despawn") ? 2 : 0;
@@ -8589,6 +8591,9 @@ namespace
 	double PropBreakDv(const PropModel& m)
 	{
 		if (m.kind != kPropBreak) return 0.0;
+		// v2.76: your v2.75 test: knocked posts "lose any collision once they're broken" and glitch through GTA's ground (GTA's copies).
+		// PropsKnock=0 (default): they never break: a solid pole your car wraps around, like in BeamNG
+		if (!g_cfg.propsKnock) return 999.0;
 		double v = m.brk;
 		if (!(v > 0)) {
 			double t = 0;
