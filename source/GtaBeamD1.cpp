@@ -11356,7 +11356,7 @@ namespace
 			NVec3 end{}, nrm{};
 			if (Call<int>(N::GET_SHAPE_TEST_RESULT, h, &hit, &end, &nrm, &ent) == 2 && hit) gz = end.z;
 		}
-		const bool fell = gz > -1e8 && bottom < gz - 1.0;
+		const bool fell = p.z < c.z - 5.0 && v.z < -8.0 && gz > -1e8 && bottom < gz - 1.0;  // (falling, and under GTA's ground: not off a cliff)
 		if (!fell)
 			Log("PuppetNoMap (v2.81): F10 off: 1.5 s after landing the GTA car is %+.2f m from where it landed, its bottom %+.2f m from GTA's ground: GTA's map collision is "
 			    "back on it",
@@ -12834,6 +12834,8 @@ namespace
 		memcpy(S.Mprev, Mc, sizeof(S.Mprev));
 		if (hold) {
 			// GTA's crash plays out: its own physics move the car (no speed set) until BeamNG's answer reaches the drawn poses
+			// (v2.81 PuppetNoMap: no gravity, no ground under it: its height still follows BeamNG's car, or a crash's kick up floats it)
+			if (S.noMap) CallVoid(N::SET_ENTITY_VELOCITY, veh, vr.x, vr.y, float(V[2] + std::clamp(double(g_cfg.psGainZ) * ezp, -3.0, 3.0)));
 			++S.holdTicks;
 			S.haveSet = true;
 			S.lastHold = true;
