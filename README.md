@@ -7,7 +7,7 @@ GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both 
 > Single-player only (story mode). Script Hook V closes GTA V in GTA Online. Free, non-commercial fan project; not affiliated with Rockstar Games or BeamNG GmbH.
 
 ## Quick start (5 minutes)
-1. **Download** this page as a ZIP (green **Code** button → **Download ZIP**) and unzip it.
+1. **Download** `GTA_X_BEAM_v2.77.zip` from [Releases](https://github.com/Treto420/GTANG/releases/latest) (not the green **Code** button: that's the source code) and unzip it.
 2. **GTA V files:** copy everything in the `GTA` folder into your GTA V folder (the one with `GTA5.exe`).
 3. **BeamNG mod:** copy the `BeamNG\gtabridge` folder into `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\unpacked\` (paste that path into Explorer's address bar). Say yes to replacing files.
 4. **Start BeamNG first.** Load the level **Grid, Small, Pure** and spawn your car.
@@ -15,7 +15,7 @@ GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both 
 6. In GTA press **Shift+F11** (gets your car from BeamNG; the first time takes a while), then **F11** (puts it on your GTA car), then **F10** (drive).
 
 ## Requirements
-- GTA V **Legacy** for PC, story mode, with [Script Hook V](http://www.dev-c.com/gtav/scripthookv/) and its ASI loader (`dinput8.dll`).
+- GTA V **Legacy** for PC (not the Enhanced edition), story mode, with [Script Hook V](http://www.dev-c.com/gtav/scripthookv/) and its ASI loader (`dinput8.dll`).
 - BeamNG.drive (made on 0.40).
 - A PC that can run both games at once. 8 GB of video memory or more is recommended; video memory is what runs out first.
 
@@ -56,6 +56,7 @@ Driving uses your own BeamNG controls and bindings (gears, clutch, drive modes).
 - With `PuppetSolid=1` you sit in the GTA car's seat in first person, not BeamNG's.
 - Some hillsides and bridge decks can have holes or show up a few seconds late.
 - The camera can lag a little at low speed.
+- Hard crashes hurt you and can kill you. To turn that off, set `"crashMinDv": 100` in `GtaBeamD1_weapons.json` (Ctrl+F11 reloads it).
 - Show cars stand still and can look flat-lit or show through the car you drive.
 - Door glass is missing on some cars. Tyre smoke is off (`TireSmoke=1` to try it).
 - Other mods' extra objects on the car in BeamNG (like a DARS driver) aren't brought into GTA.
