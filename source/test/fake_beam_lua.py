@@ -236,6 +236,7 @@ BODY = {12 + i: p for i, p in enumerate(body_nodes())}
 DENT = {}            # cid -> (dx, dy, dz) car frame, now
 DENT_FULL = {c: ((0.25, -0.35, 0.0) if (p[0] == -0.95 and p[1] == 2.3) else (0.0, -0.15, 0.0)) for c, p in BODY.items() if p[1] == 2.3 and p[0] <= 0.0}
 DENT_AFTER = float(os.environ.get('FAKE_DENT_AFTER', '0') or 0)
+STOP_AT = float(os.environ.get('FAKE_STOP_AT', '0') or 0)   # v2.81: s seconds after the drive starts the car stops dead (a wall)
 # v2.54: FAKE_DENT_FAR=1: the dent also flings the front right top node 16 m away (a part torn off and left behind): the
 # triangles stretched between it and the car must not be drawn
 if os.environ.get('FAKE_DENT_FAR') == '1':
@@ -815,6 +816,10 @@ while time.perf_counter() < end:
                 dent_state['done'] = True
                 ev.write('%.3f DENT done: %d nodes pushed in (front left)\n' % (st, len(DENT_FULL))); ev.flush()
                 open('fake_dent_done.txt', 'w').close()
+    if STOP_AT and dent_state.get('drive_t') is not None and not dent_state.get('stopped') and st >= dent_state['drive_t'] + STOP_AT and car['v'] > 1.0:
+        dent_state['stopped'] = True
+        ev.write('%.3f STOP the car hits a wall at %.2f m/s\n' % (st, car['v'])); ev.flush()
+        car['v'] = 0.0
     if REPAIR_FILE and not rep_done and os.path.exists(REPAIR_FILE):
         REP_AT = st
     if REP_AT and not rep_done and st >= REP_AT:

@@ -47,6 +47,10 @@ static bool   g_velSet = false, g_frozen = false, g_collision = true, g_gravity 
 // time the car comes within 4 m of the parked traffic car 9001 its speed reads back 4 m/s slower along its way (a "GTA crash")
 static double g_w[3] = {};
 static bool   g_wSet = false, g_psKicked = false;
+// v2.81 (sandbox only): SET_DISABLE_MAP_COLLISION lasts one frame (as R*'s scripts use it); FAKE_PSMAP=1: GTA's "map" (a kerb every
+// 25 m from the start) takes 3 m/s off a solid car whose map collision is on that frame
+static bool   g_noMapFrame = false;
+static int    g_noMapCalls = 0, g_mapSeg = -1, g_noCollPairs = 0;
 static double g_physT = 0;
 static double g_frameT = 0.016;  // v2.0: the real time between script ticks (like GTA's frame time)
 static double g_timeScale = 1.0; // v2.5: host "timescale <x>": GTA's slow motion (radio wheel)
@@ -631,6 +635,15 @@ void scriptWait(DWORD)
 	g_physT = t;
 	if (dt > 0) g_frameT = dt;
 	if (g_velSet && !g_frozen) for (int k = 0; k < 3; ++k) g_pos[k] += g_vel[k] * dt * g_timeScale;
+	if (Env("FAKE_PSMAP") && g_velSet && !g_frozen && g_collision) {   // v2.81
+		const int seg = int(hypot(g_pos[0], g_pos[1]) / 25.0);
+		if (g_mapSeg >= 0 && seg != g_mapSeg && !g_noMapFrame) {
+			for (int k = 0; k < 2; ++k) g_vel[k] -= g_rot[k][1] * 3.0;
+			printf("FAKE: GTA's map (a kerb at %d m) takes 3 m/s off the car\n", seg * 25); fflush(stdout);
+		}
+		g_mapSeg = seg;
+	}
+	g_noMapFrame = false;
 	if (g_wSet && !g_frozen && dt > 0) {   // v2.77: M = Rot(w dt) M (Rodrigues), the columns kept orthonormal
 		const double wl = sqrt(g_w[0] * g_w[0] + g_w[1] * g_w[1] + g_w[2] * g_w[2]), a = wl * dt * g_timeScale;
 		if (a > 1e-9) {
@@ -863,6 +876,15 @@ PUINT64 nativeCall()
 		RetI(Env("FAKE_PSKICK") && int(g_args[0]) == 100 && int(g_args[1]) == 9001 && g_tcPlaced && !g_tcGone && hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1]) < 4.0 ? 1 : 0);
 		break;
 	case 0xC45D23BAF168AAB8: RetF(1000.0f); break;   // GET_VEHICLE_ENGINE_HEALTH (v2.77)
+	case 0x75627043C6AA90AD:   // SET_DISABLE_MAP_COLLISION (v2.81: this frame)
+		if (int(g_args[0]) == 100) {
+			g_noMapFrame = true;
+			if (g_noMapCalls++ % 500 == 0) { printf("FAKE: map collision off this frame (call %d)\n", g_noMapCalls); fflush(stdout); }
+		}
+		break;
+	case 0xA53ED5520C07654A:   // SET_ENTITY_NO_COLLISION_ENTITY (v2.81)
+		if (g_noCollPairs++ % 200 == 0) { printf("FAKE: no collision %d with %d (this frame %d; %d calls)\n", int(g_args[0]), int(g_args[1]), int(g_args[2]), g_noCollPairs); fflush(stdout); }
+		break;
 	case 0x3E8C8727991A8A0B: printf("FAKE: vehicle %d strong %d\n", int(g_args[0]), int(g_args[1])); fflush(stdout); break;   // SET_VEHICLE_STRONG (v2.77)
 	case 0x95EED5A694951F9F: { FakeProp* fp = PropOf(int(g_args[0])); RetF(fp && fp->posed ? float(fp->R[2][2]) : 1.0f); break; }   // GET_ENTITY_UPRIGHT_VALUE (v2.73)
 	case 0xF6829842C06AE524: {   // GET_WATER_HEIGHT (v2.73): FAKE_HOLE's strip is water 20 cm under the road at its edge

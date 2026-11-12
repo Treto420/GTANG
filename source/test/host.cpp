@@ -90,7 +90,7 @@ static void Key(HWND hwnd, const char* what)
 	if (alt) k(VK_MENU, false);
 	if (ctrl) k(VK_CONTROL, false);
 	if (shift) k(VK_SHIFT, false);
-	const WORD fk = strstr(what, "f10") ? VK_F10 : VK_F11;  // v2.0: drive key
+	const WORD fk = strstr(what, "f10") ? VK_F10 : strstr(what, "f9") ? VK_F9 : VK_F11;  // v2.0: drive key (v2.81: F9, crash damage)
 	k(fk, false);
 	SendInput(UINT(in.size()), in.data(), sizeof(INPUT));
 	Sleep(80);

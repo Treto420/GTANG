@@ -116,7 +116,7 @@
 #include "carmodel.h"
 #include "shv.h"
 
-#define D1_VERSION "2.77"
+#define D1_VERSION "2.81"
 
 namespace
 {
@@ -296,6 +296,9 @@ namespace
 		constexpr UINT64 SET_VEHICLE_STRONG = 0x3E8C8727991A8A0B;                     // veh, toggle: no crash damage
 		constexpr UINT64 GET_VEHICLE_ENGINE_HEALTH = 0xC45D23BAF168AAB8;
 		constexpr UINT64 SET_VEHICLE_ENGINE_HEALTH = 0x45F6D8EEF34ABEF1;
+		// v2.81 PuppetNoMap
+		constexpr UINT64 SET_DISABLE_MAP_COLLISION = 0x75627043C6AA90AD;      // veh: the map (world, buildings, fixed objects) stops colliding with it; entities still do (build 1180)
+		constexpr UINT64 SET_ENTITY_NO_COLLISION_ENTITY = 0xA53ED5520C07654A; // entity1, entity2, thisFrameOnly
 	}
 
 	// GTA control ids (input group 0)
@@ -597,6 +600,10 @@ namespace
 		float       psGainTurn = 8.0f;        // PuppetGainTurn: 1/s, the same for its heading / pitch / roll
 		float       psSnapM = 2.0f;           // PuppetSnapM: put there at once (a teleport) when this far off (level; never for height alone)
 		float       psHitMs = 1.0f;           // PuppetHitMs: a speed change GTA made bigger than this (m/s) is a crash
+		// v2.81 (PuppetNoMap=0, PuppetSlowMoFix=0, CrashHurt=1 = exactly v2.77)
+		bool        psNoMap = false;          // PuppetNoMap: the hidden car ignores GTA's map (walls, kerbs, ground) and BeamNG's solid posts: BeamNG alone hits them
+		bool        psSlowFix = false;        // PuppetSlowMoFix: (v2.78) GTA in slow motion: the hidden car's speed scaled so it keeps up with BeamNG's car
+		bool        crashHurt = true;         // CrashHurt: (v2.78) crashes hurt you; Ctrl+F9 switches it in game
 	} g_cfg;
 
 	const char* kSec = "D1";
@@ -1020,9 +1027,16 @@ namespace
 			c.psGainTurn = std::clamp(IniFloat(path, "PuppetGainTurn", 8.0f), 0.5f, 40.0f);
 			c.psSnapM = std::clamp(IniFloat(path, "PuppetSnapM", 2.0f), 0.5f, 20.0f);
 			c.psHitMs = std::clamp(IniFloat(path, "PuppetHitMs", 1.0f), 0.2f, 20.0f);
+			c.psNoMap = GetPrivateProfileIntA(kSec, "PuppetNoMap", 0, path) != 0;  // v2.81
+			c.psSlowFix = GetPrivateProfileIntA(kSec, "PuppetSlowMoFix", 0, path) != 0;
+			c.crashHurt = GetPrivateProfileIntA(kSec, "CrashHurt", 1, path) != 0;
 			Log("settings: v2.77: PuppetSolid %d%s (gain %.1f/s level, %.1f/s up/down, %.1f/s turn; snap past %.1f m; a crash = GTA changed its speed > %.1f m/s)", int(c.puppetSolid),
 				c.puppetSolid ? ": GTA's hidden car is solid, moved by its speed; the scripted traffic / people / prop reactions are off" : " (v2.76: the hidden car is a ghost)",
 				c.psGain, c.psGainZ, c.psGainTurn, c.psSnapM, c.psHitMs);
+			Log("settings: v2.81: PuppetNoMap %d%s; PuppetSlowMoFix %d; CrashHurt %d (crashes %s you; Ctrl+F9 switches it)", int(c.psNoMap),
+				c.psNoMap ? (c.puppetSolid ? " (the hidden car ignores GTA's map and BeamNG's solid posts: BeamNG alone hits walls, kerbs and posts)" : " (does nothing: needs PuppetSolid=1)")
+				          : " (v2.77: GTA's map stops the hidden car too)",
+				int(c.psSlowFix), int(c.crashHurt), c.crashHurt ? "hurt" : "don't hurt");
 			Log("settings: v2.5: ground rays %.1f m up / %.1f m down from the level; walls %d (scan %.2f m up, lines %.2f m apart, %.2f ms a frame); props %d "
 			    "(within %.0f m, push x%.2f, bump x%.2f, big ones solid %d); dents %d (%.0f a second); BeamNG gravity x%.2f while GTA drives",
 				c.worldUpM, c.worldDownM, int(c.worldWalls), c.worldWallProbeM, c.worldWallStepM, c.worldWallMs, int(c.props), c.propRangeM, c.propPush, c.propBump,
@@ -10344,11 +10358,17 @@ namespace
 	}
 
 	// hard crashes hurt you: the car's speed changing faster than any brake can
+	std::atomic<int> g_crashHurtOn{ -1 };  // v2.78/2.81: -1 = the ini's CrashHurt (Ctrl+F9 switches it)
+	bool CrashHurtOn()
+	{
+		if (g_crashHurtOn.load() < 0) g_crashHurtOn.store(g_cfg.crashHurt ? 1 : 0);
+		return g_crashHurtOn.load() == 1;
+	}
 	void WeaponsCrash(double now)
 	{
 		WeaponState& W = g_wpn;
 		DriveState&  d = g_drv;
-		if (now < d.fallGraceT) {  // (put back after a fall or repaired: no crash)
+		if (!CrashHurtOn() || now < d.fallGraceT) {  // (v2.81: crash damage off; put back after a fall or repaired: no crash)
 			W.vh.clear();
 			return;
 		}
@@ -11296,6 +11316,62 @@ namespace
 
 	void TireFxStopAll();
 	void PsOff(const char* why, bool ghost);  // v2.77
+	// v2.81: after a drive with PuppetNoMap, GTA's map collision must be back on the car (R*'s scripts set SET_DISABLE_MAP_COLLISION
+	// every frame, so it should end by itself; UNVERIFIED): 1.5 s after it is back on GTA's ground, is it still on it? If it fell
+	// under GTA's ground it is put back where it landed and frozen (you'd fall through the world in it)
+	struct NoMapCheck
+	{
+		int    veh = 0, stage = 0;  // 1 waiting for the landing, 2 landed
+		double t = 0, z = 0;
+	} g_nmCheck;
+	bool g_noMapUsed = false;  // this drive used it (PsEngage)
+	void NoMapCheckArm(int veh)
+	{
+		g_nmCheck = NoMapCheck{ veh, 1, 0, 0 };
+		g_noMapUsed = false;
+	}
+	void NoMapCheckTick()
+	{
+		NoMapCheck& c = g_nmCheck;
+		if (!c.stage) return;
+		if (g_drv.state != 0 || !Call<int>(N::DOES_ENTITY_EXIST, c.veh)) {
+			c = NoMapCheck{};
+			return;
+		}
+		const double now = NowSeconds();
+		if (c.stage == 1) {
+			if (g_land.on) return;
+			c.stage = 2;
+			c.t = now;
+			c.z = Call<NVec3>(N::GET_ENTITY_COORDS, c.veh, 0).z;
+			return;
+		}
+		if (now - c.t < 1.5) return;
+		const NVec3  p = Call<NVec3>(N::GET_ENTITY_COORDS, c.veh, 0), v = Call<NVec3>(N::GET_ENTITY_VELOCITY, c.veh);
+		const double bottom = p.z + g_tgt.dmin.z;
+		double       gz = -1e9;  // GTA's ground above where it landed (a map-only ray down from there)
+		const int    h = Call<int>(N::START_EXPENSIVE_SYNCHRONOUS_SHAPE_TEST_LOS_PROBE, p.x, p.y, float(c.z + 2.0), p.x, p.y, float(c.z - 40.0), 1, c.veh, 7);
+		if (h) {
+			int   hit = 0, ent = 0;
+			NVec3 end{}, nrm{};
+			if (Call<int>(N::GET_SHAPE_TEST_RESULT, h, &hit, &end, &nrm, &ent) == 2 && hit) gz = end.z;
+		}
+		const bool fell = gz > -1e8 && bottom < gz - 1.0;
+		if (!fell)
+			Log("PuppetNoMap (v2.81): F10 off: 1.5 s after landing the GTA car is %+.2f m from where it landed, its bottom %+.2f m from GTA's ground: GTA's map collision is "
+			    "back on it",
+				p.z - c.z, gz > -1e8 ? bottom - gz : 0.0);
+		else {
+			CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, c.veh, p.x, p.y, float(c.z), 0, 0, 0);
+			CallVoid(N::SET_ENTITY_VELOCITY, c.veh, 0.0f, 0.0f, 0.0f);
+			CallVoid(N::FREEZE_ENTITY_POSITION, c.veh, 1);
+			Log("PuppetNoMap (v2.81): F10 off: the GTA car FELL %.1f m under GTA's ground (%.0f km/h down): GTA's map collision did NOT come back "
+			    "(SET_DISABLE_MAP_COLLISION lasts): put back where it landed and frozen. Set PuppetNoMap=0 until it's fixed",
+				gz - bottom, -v.z * 3.6);
+			Notify("GTA car fell through the ground after F10 off: put back, frozen. Use another car; set PuppetNoMap=0 (send the log).");
+		}
+		c = NoMapCheck{};
+	}
 	void DriveStop(const char* why, bool notify)
 	{
 		DriveState& d = g_drv;
@@ -11376,6 +11452,7 @@ namespace
 				g_radioAfter.until = NowSeconds() + 4.0;
 			}
 			LandTick();  // usually right away (GTA has its collision around the player); else it waits, frozen
+			if (g_noMapUsed) NoMapCheckArm(d.veh);  // v2.81
 		}
 		g_driveHide = false;
 		if (g_tgt.mode == 1 && g_tgt.veh == d.veh && d.veh) {
@@ -12297,6 +12374,20 @@ namespace
 		// session (log lines)
 		uint32_t snapLogs = 0, hitLogs = 0, mapLogs = 0, touchLogs = 0;
 		std::map<int, double> touched;  // entity -> the last tick it touched the hidden car (a touch after 2 s apart is a new one)
+		// v2.81 PuppetNoMap and the contact log
+		bool     noMap = false;               // the hidden car ignores GTA's map now (SET_DISABLE_MAP_COLLISION every tick)
+		uint32_t noMapTicks = 0, inAir = 0, slowTicks = 0, contactsGta = 0, contactsBeam = 0;  // (10 s)
+		std::set<int> postsOff;               // BeamNG's solid posts the hidden car ignores (10 s)
+		std::deque<std::pair<double, std::array<double, 3>>> vHist;  // BeamNG's car's speed (GTA world), the last 0.3 s
+		double   beamHitT = -10;
+		uint32_t contactLogs = 0;
+		struct Bend
+		{
+			bool        on = false;
+			double      t = 0, most = 0;
+			int         moved = 0;
+			std::string what;
+		} bend;                               // 1.5 s after a contact: did BeamNG's car bend (its dents)
 	} g_ps;
 	const char* kVehClassName[23] = { "compact", "sedan", "SUV", "coupe", "muscle", "sports classic", "sports", "super", "motorcycle", "off-road", "industrial",
 		                              "utility", "van", "cycle", "boat", "helicopter", "plane", "service", "emergency", "military", "commercial", "train", "open wheel" };
@@ -12341,6 +12432,12 @@ namespace
 		CallVoid(N::SET_ENTITY_COLLISION, d.veh, 1, 1);
 		PsProofs(true);
 		S.on = true;
+		S.noMap = g_cfg.psNoMap;  // v2.81
+		if (S.noMap) {
+			CallVoid(N::SET_ENTITY_HAS_GRAVITY, d.veh, 0);  // (no GTA ground under it now: its height is BeamNG's car's, by the speed spring)
+			CallVoid(N::SET_DISABLE_MAP_COLLISION, d.veh);
+			g_noMapUsed = true;
+		}
 		S.haveSet = S.lastHold = S.wOk = false;
 		S.holdUntil = 0;
 		S.ease[0] = S.ease[1] = S.ease[2] = 0;
@@ -12354,6 +12451,9 @@ namespace
 		    "off on it and you, windscreen exit off; the plugin's traffic / people / prop reactions off",
 			why, S.engages, d.veh, g_tgt.name, S.cls, kVehClassName[S.cls], S.mass, S.beamMass, g_tgt.dmax.x - g_tgt.dmin.x, g_tgt.dmax.y - g_tgt.dmin.y, g_tgt.dmax.z - g_tgt.dmin.z,
 			g_modelSize[0].load(), g_modelSize[1].load(), g_modelSize[2].load());
+		if (S.noMap)
+			Log("PuppetNoMap (v2.81): ON: the hidden car ignores GTA's map (walls, kerbs, ground: SET_DISABLE_MAP_COLLISION every tick) and BeamNG's solid posts "
+			    "(SET_ENTITY_NO_COLLISION_ENTITY); gravity off, its height is BeamNG's car's: BeamNG alone hits walls, kerbs and posts; GTA's cars, people and props still hit it");
 	}
 	// ghost: back to v2.76's ghost while the drive goes on (BeamNG's car put back after a fall); else the caller sets collision
 	void PsOff(const char* why, bool ghost)
@@ -12363,6 +12463,9 @@ namespace
 		if (!S.on) return;
 		S.on = S.haveSet = S.lastHold = S.wOk = false;
 		S.holdUntil = 0;
+		S.noMap = false;  // v2.81 (it isn't set again: GTA's map collision comes back by itself; F10 off checks)
+		S.bend.on = false;
+		S.vHist.clear();
 		if (ghost && d.veh && Call<int>(N::DOES_ENTITY_EXIST, d.veh)) {
 			CallVoid(N::SET_ENTITY_COLLISION, d.veh, 0, 1);
 			CallVoid(N::SET_ENTITY_HAS_GRAVITY, d.veh, 0);
@@ -12381,6 +12484,7 @@ namespace
 		double      vn;       // closing speed (m/s), the hidden car's speed before against its own
 		int         cls;
 		const char* name;
+		double      es;       // v2.81: its own speed (level, m/s): a parked car or a moving one
 	};
 	void PsNearAt(std::vector<PsNear>& out, const double P[3], const double Mc[3][3], const double vBase[3])
 	{
@@ -12412,7 +12516,7 @@ namespace
 			const double dl = sqrt(dx * dx + dy * dy);
 			const double n[2] = { dl > 1e-3 ? dx / dl : Mc[0][1], dl > 1e-3 ? dy / dl : Mc[1][1] };
 			const NVec3  ve = Call<NVec3>(N::GET_ENTITY_VELOCITY, e);
-			PsNear       q{ e, kind, touching, { c[0], c[1], c[2] }, (vBase[0] - ve.x) * n[0] + (vBase[1] - ve.y) * n[1], cls, name };
+			PsNear       q{ e, kind, touching, { c[0], c[1], c[2] }, (vBase[0] - ve.x) * n[0] + (vBase[1] - ve.y) * n[1], cls, name, hypot(ve.x, ve.y) };
 			out.push_back(q);
 		};
 		for (int e : T.nearV) {
@@ -12464,6 +12568,108 @@ namespace
 		DrvSend(m);
 	}
 
+	// ---------------------------------------------------------------------------------------
+	// v2.81 PuppetNoMap: one game per contact. BeamNG has GTA's ground, walls and solid posts (tiles, wall boxes, prop boxes) and
+	// hits them with its own soft body; v2.77's solid hidden car hit GTA's map too, so a slow wall hit was met twice (GTA stopped
+	// the hidden car, and the drawn car with it, before BeamNG's bumper got there). Now the hidden car ignores GTA's map
+	// (SET_DISABLE_MAP_COLLISION: "only world/building/fixed world objects ... props, peds, or any other entity still collides"; R*'s
+	// own scripts set it every frame, so it is set every tick) and BeamNG's solid posts (SET_ENTITY_NO_COLLISION_ENTITY); its
+	// gravity is off (no GTA ground under it: its height is BeamNG's car's). GTA's cars, people and props still hit it (v2.77).
+	// UNVERIFIED (his test is the check): that the native lasts no longer than it is set (F10 off checks: NoMapCheckTick); that GTA's
+	// posts are entities it still hits; whether ignoring the map changes GTA's camera (the 10 s line counts "in the air" ticks).
+	// ---------------------------------------------------------------------------------------
+	void PsPostsOff(int veh, const double P[3])
+	{
+		PuppetSolidState& S = g_ps;
+		for (const auto& kv : g_props.live) {
+			const PropLive& L = kv.second;
+			if (!L.sent || hypot(L.c[0] - P[0], L.c[1] - P[1]) > 15.0) continue;  // (sent: BeamNG has its box)
+			auto mi = g_props.models.find(L.model);
+			if (mi == g_props.models.end() || mi->second.kind != kPropSolid || !Call<int>(N::DOES_ENTITY_EXIST, kv.first)) continue;
+			CallVoid(N::SET_ENTITY_NO_COLLISION_ENTITY, kv.first, veh, 1);  // (this frame; the post first: UNVERIFIED that the order matters)
+			S.postsOff.insert(kv.first);
+		}
+	}
+	// v2.81 contact log: 1.5 s after a contact, whether BeamNG's car bent (its dents: nodes moved, the most-moved one)
+	void PsBendStart(const char* what, double now)
+	{
+		PuppetSolidState& S = g_ps;
+		if (S.bend.on) return;
+		S.bend.on = true;
+		S.bend.t = now;
+		S.bend.most = g_dent.mostNow;
+		S.bend.moved = g_dent.any ? g_dent.movedNow : 0;
+		S.bend.what = what;
+	}
+	void PsBendTick(double now, double el)
+	{
+		PuppetSolidState& S = g_ps;
+		if (!S.bend.on || now - S.bend.t < 1.5) return;
+		S.bend.on = false;
+		const int    moved = g_dent.any ? g_dent.movedNow : 0;
+		const double most = g_dent.any ? g_dent.mostNow : 0.0;
+		const bool   bent = moved > S.bend.moved + 3 || most > S.bend.most + 0.005;
+		if (S.contactLogs++ < 120)
+			Log("contact (v2.81): 1.5 s after %s: BeamNG's car %s: %d nodes moved (%d before), the most %.1f cm (%.1f before); the hidden car %.2f m from BeamNG's car now",
+				S.bend.what.c_str(), bent ? "BENT" : "not bent", moved, S.bend.moved, most * 100.0, S.bend.most * 100.0, el);
+	}
+	// v2.81 contact log: a hit BeamNG's car took with no GTA car, person or prop at the hidden car: its speed dropped faster than any
+	// brake does (> 1 m/s within 0.1 s) or it was jolted up or down (> 1.5 m/s). What BeamNG has at its front says what it was
+	void PsBeamContact(const double V[3], double el, double now)
+	{
+		PuppetSolidState& S = g_ps;
+		DriveState&       d = g_drv;
+		S.vHist.push_back({ now, { V[0], V[1], V[2] } });
+		while (!S.vHist.empty() && now - S.vHist.front().first > 0.3) S.vHist.pop_front();
+		if (now - S.beamHitT < 1.0) return;
+		double loss = 0, jolt = 0, s0 = 0, dir[2] = { d.carF[0], d.carF[1] };
+		for (const auto& h : S.vHist) {
+			if (now - h.first > 0.1 || now - h.first < 0.03) continue;
+			jolt = std::max(jolt, fabs(V[2] - h.second[2]));
+			const double sp = hypot(h.second[0], h.second[1]);
+			if (sp < 0.3) continue;
+			const double l = sp - (V[0] * h.second[0] + V[1] * h.second[1]) / sp;  // (speed lost along the way it went)
+			if (l > loss) loss = l, s0 = sp, dir[0] = h.second[0] / sp, dir[1] = h.second[1] / sp;
+		}
+		if (loss <= 1.0 && jolt <= 1.5) return;
+		S.beamHitT = now;
+		++S.contactsBeam;
+		// the drawn car's side towards where it went (as PsSendTc), bumper high
+		const double fl = hypot(dir[0], dir[1]);
+		const double n[2] = { fl > 1e-6 ? dir[0] / fl : 1.0, fl > 1e-6 ? dir[1] / fl : 0.0 };
+		const double w = std::max(1.0f, g_modelSize[0].load()), l = std::max(2.0f, g_modelSize[1].load()), h = std::max(0.8f, g_modelSize[2].load());
+		const double fr = hypot(d.carR[0], d.carR[1]), ff = hypot(d.carF[0], d.carF[1]);
+		const double ar = fr > 1e-6 ? fabs((d.carR[0] * n[0] + d.carR[1] * n[1]) / fr) : 0, af = ff > 1e-6 ? fabs((d.carF[0] * n[0] + d.carF[1] * n[1]) / ff) : 1;
+		const double ex = std::min(ar > 1e-6 ? w * 0.5 / ar : 1e9, af > 1e-6 ? l * 0.5 / af : 1e9);
+		const double cx = d.carO[0] + d.carU[0] * h * 0.5, cy = d.carO[1] + d.carU[1] * h * 0.5;
+		const double P[3] = { cx + n[0] * ex, cy + n[1] * ex, d.carO[2] + std::min(0.6, h * 0.4) };
+		// BeamNG's nearest wall box and solid post to that spot
+		double wallD = 1e9, postD = 1e9;
+		for (const auto& kv : g_world.tiles)
+			for (const WTile::Wall& wl : kv.second.walls) {
+				if (P[2] < wl.z0 - 0.5 || P[2] > wl.z1 + 0.5 || fabs(wl.cx - P[0]) > 15.0 || fabs(wl.cy - P[1]) > 15.0) continue;
+				const double rx = P[0] - wl.cx, ry = P[1] - wl.cy;
+				const double a = std::max(0.0, fabs(rx * wl.dx + ry * wl.dy) - wl.len * 0.5), b = std::max(0.0, fabs(-rx * wl.dy + ry * wl.dx) - wl.thick * 0.5);
+				wallD = std::min(wallD, hypot(a, b));
+			}
+		for (const auto& kv : g_props.live) {
+			const PropLive& L = kv.second;
+			auto            mi = g_props.models.find(L.model);
+			if (!L.sent || mi == g_props.models.end() || mi->second.kind != kPropSolid) continue;
+			postD = std::min(postD, std::max(0.0, hypot(L.c[0] - P[0], L.c[1] - P[1]) - std::max(L.he[0], L.he[1])));
+		}
+		const char* what = wallD <= 0.8 && wallD <= postD ? "a wall"
+		                 : postD <= 0.8                   ? "a solid post"
+		                 : jolt > 1.5                     ? "a kerb / bump"
+		                                                  : "nothing BeamNG has at its front (hard braking?)";
+		if (S.contactLogs++ < 120)
+			Log("contact (v2.81): %s at %.0f km/h: BeamNG's car lost %.1f km/h within 0.1 s (jolt %.1f km/h up/down); resolved by %s; BeamNG's nearest wall box %.2f m, "
+			    "solid post %.2f m from its side that hit; the hidden car %.2f m from BeamNG's car",
+				what, s0 * 3.6, loss * 3.6, jolt * 3.6, S.noMap ? "BeamNG alone (the hidden car ignores GTA's map)" : "BeamNG, and GTA's map on the hidden car too (v2.77)",
+				wallD > 1e8 ? -1.0 : wallD, postD > 1e8 ? -1.0 : postD, el);
+		PsBendStart(what, now);
+	}
+
 	// one tick of drive mode with PuppetSolid on (instead of DrvSetPuppet). O: the drawn car's origin (GTA world) now; R0 F0 U0 its axes
 	// now; R F U where GTA's step ends; V its speed (GTA world); ft GTA's step; now: the clock
 	void PsTick(const double O[3], const double R0[3], const double F0[3], const double U0[3], const double R[3], const double F[3], const double U[3], const double V[3], double ft,
@@ -12491,6 +12697,12 @@ namespace
 		const double Mc[3][3] = { { rt.x, fw.x, up.x }, { rt.y, fw.y, up.y }, { rt.z, fw.z, up.z } };
 		const double P[3] = { ps.x, ps.y, ps.z }, Vr[3] = { vr.x, vr.y, vr.z };
 		const double rx = E[0] - P[0], ry = E[1] - P[1], rz = E[2] - P[2], eh = hypot(rx, ry), el = sqrt(rx * rx + ry * ry + rz * rz), ez = rz;
+		if (S.noMap) {  // v2.81: GTA's map and BeamNG's solid posts don't stop it (BeamNG alone hits them)
+			CallVoid(N::SET_DISABLE_MAP_COLLISION, veh);
+			PsPostsOff(veh, P);
+			++S.noMapTicks;
+			if (Call<int>(N::IS_ENTITY_IN_AIR, veh)) ++S.inAir;
+		}
 		// (the pull goes to BeamNG's car + what's left of the ease after a crash)
 		const double ek = exp(-std::clamp(gft, 0.0, 0.1) / 0.5);
 		for (double& x : S.ease) x *= ek;
@@ -12536,12 +12748,18 @@ namespace
 		// who touches it (GTA's own contact), for the log and the crash
 		std::vector<PsNear> nr;
 		PsNearAt(nr, P, Mc, S.haveSet ? base : Vr);
+		std::vector<const PsNear*> fresh;  // v2.81: new touches this tick (the contact log)
+		bool                       touchingAny = false;
+		int                        sentE = 0;
+		double                     sentKmh = 0;
 		for (const PsNear& q : nr) {
 			if (!q.touching) continue;
+			touchingAny = true;
 			auto       it = S.touched.find(q.e);
-			const bool fresh = it == S.touched.end() || now - it->second > 2.0;
+			const bool isNew = it == S.touched.end() || now - it->second > 2.0;
 			S.touched[q.e] = now;
-			if (!fresh) continue;
+			if (!isNew) continue;
+			fresh.push_back(&q);
 			(q.kind == 0 ? S.touchCar : q.kind == 1 ? S.touchPed : S.touchProp) += 1;
 			if (S.touchLogs++ < 60)
 				Log("PuppetSolid: GTA: the hidden car touches %s (%d) at %.0f km/h, closing %.0f km/h; its speed changed %.1f km/h this tick (level)", q.name, q.e,
@@ -12571,6 +12789,8 @@ namespace
 				const double vn = std::max(0.0, best->vn);
 				const double dent = best->kind == 1 || vn <= 3.0 ? 0.0 : std::min(T.dentMax, T.dentPerMs * vn * (best->kind == 0 ? std::min(1.0, mE / std::max(1.0, T.beamMass)) : 0.5));
 				PsSendTc(dvB, n, dent, best->name);
+				sentE = best->e;
+				sentKmh = PsLen(dvB) * 3.6;
 				(best->kind == 0 ? S.hitCar : best->kind == 1 ? S.hitPed : S.hitProp) += 1;
 				++S.sent;
 				S.sentSum += PsLen(dvB);
@@ -12584,6 +12804,25 @@ namespace
 						dv[2] * 3.6, spd * 3.6, PsLen(dvB) * 3.6, k, S.mass, S.beamMass, dent * 1000, holdS * 1000);
 			}
 		}
+		// v2.81 contact log: GTA's contacts (each new touch: what, who resolved it, what BeamNG got, the hidden car's distance); else
+		// BeamNG's own (a sudden stop or jolt with nothing of GTA's at the hidden car)
+		for (const PsNear* q : fresh) {
+			++S.contactsGta;
+			char what[64];
+			if (q->kind == 0)
+				snprintf(what, sizeof(what), "%s %s", q->es < 0.5 ? "a parked" : "a moving", q->cls == 8 ? "motorcycle" : q->cls == 13 ? "bicycle" : "GTA car");
+			else
+				snprintf(what, sizeof(what), "%s", q->name);
+			if (S.contactLogs++ < 120)
+				Log("contact (v2.81): %s (%d, %.0f km/h) at %.0f km/h, closing %.0f km/h: resolved by GTA (its physics on the hidden car); BeamNG's car got %s; the hidden car "
+				    "%.2f m from BeamNG's car",
+					what, q->e, q->es * 3.6, PsLen(V) * 3.6, q->vn * 3.6,
+					sentE == q->e ? (std::string("a push of ") + std::to_string(int(sentKmh + 0.5)) + " km/h").c_str() : "nothing yet (GTA changed the hidden car's speed less than PuppetHitMs)",
+					el);
+			PsBendStart(what, now);
+		}
+		if (!touchingAny) PsBeamContact(V, el, now);
+		PsBendTick(now, el);
 		const bool hold = now < S.holdUntil;
 		if (S.lastHold && !hold) {
 			S.ease[0] = rx, S.ease[1] = ry, S.ease[2] = rz;  // (GTA's crash is over: from here, eased out)
@@ -12631,7 +12870,15 @@ namespace
 			const double cl = hypot(cx, cy);
 			if (cl > 8.0) cx *= 8.0 / cl, cy *= 8.0 / cl;
 			const double cz = std::clamp(double(g_cfg.psGainZ) * ezp, -3.0, 3.0);
-			const double vs[3] = { V[0] + wxo[0] + cx, V[1] + wxo[1] + cy, V[2] + wxo[2] + cz };
+			double vs[3] = { V[0] + wxo[0] + cx, V[1] + wxo[1] + cy, V[2] + wxo[2] + cz };
+			// v2.81 PuppetSlowMoFix (v2.78's): GTA in slow motion (dying, the weapon wheel): its step is shorter than the real one BeamNG's
+			// car moved in; the speed scaled so it keeps up (your v2.77 log: 24 snaps in a row at 160 km/h after "wasted")
+			if (g_cfg.psSlowFix && gft > 0.0005 && ft > gft * 1.3) {
+				const double ts = std::min(10.0, ft / gft);
+				for (double& x : vs) x *= ts;
+				for (double& x : w) x *= ts;
+				++S.slowTicks;
+			}
 			CallVoid(N::SET_ENTITY_VELOCITY, veh, float(vs[0]), float(vs[1]), float(vs[2]));
 			double raw[3] = { w[0], w[1], w[2] };
 			if (S.angFrame == 1)
@@ -12662,6 +12909,10 @@ namespace
 				S.dN ? S.dSum / S.dN : 0.0, S.dMax, S.hMax, S.zMax, S.aMax, S.snaps, S.setTicks, S.holdTicks, S.holds, g_cfg.psHitMs, S.hitCar, S.hitPed, S.hitProp, S.sent,
 				S.sentSum * 3.6, S.hitMap, S.mapDvMax * 3.6, S.touchCar, S.touchPed, S.touchProp, S.angFrame < 0 ? "not known yet: world" : S.angFrame ? "car" : "world",
 				S.angN, eng, fix ? " (set back to 1000)" : "");
+			Log("PuppetSolid (v2.81): 10 s: PuppetNoMap %s: GTA's map off %u ticks (GTA says in the air %u), %zu solid posts ignored; contacts: %u by GTA, %u by BeamNG alone; "
+			    "%u slow-motion ticks scaled", S.noMap ? "ON" : "off", S.noMapTicks, S.inAir, S.postsOff.size(), S.contactsGta, S.contactsBeam, S.slowTicks);
+			S.noMapTicks = S.inAir = S.slowTicks = S.contactsGta = S.contactsBeam = 0;
+			S.postsOff.clear();
 			S.logT = now;
 			S.dSum = S.dMax = S.hMax = S.zMax = S.aMax = S.mapDvMax = S.sentSum = 0;
 			S.dN = S.snaps = S.setTicks = S.holdTicks = S.holds = S.hitCar = S.hitPed = S.hitProp = S.hitMap = S.sent = S.touchCar = S.touchPed = S.touchProp = 0;
@@ -14242,6 +14493,7 @@ namespace
 		DriveTick(c, paused);  // v2.0: after reading the GTA car back, before pairing (moves it for the next tick)
 		g_holdOn.store(g_drv.state != 0 ? 1 : 0);
 		LandTick();            // v2.41: GTA's car back on GTA's ground after F10 off (waits for GTA's collision)
+		NoMapCheckTick();      // v2.81: then GTA's map collision back on it?
 		RadioAfterTick();      // v2.41: the car's radio follows what played in drive mode
 		WorldTick();           // v2.4: GTA's ground for BeamNG (rays out are collected even when not driving)
 		PropsTick(paused);     // v2.5: GTA's props and BeamNG's car
@@ -14299,6 +14551,17 @@ namespace
 			Notify("D1 view: %s | %s", ViewModeName(m), status);
 		}
 		viewKeyWas = viewKeyNow;
+		// v2.81 (from v2.79): Ctrl+F9 = crash damage to you on / off (CrashHurt in the ini: how it starts; Ctrl+Shift+F9 is Menyoo's)
+		static bool hurtKeyWas = false;
+		const bool  hurtKeyNow = (GetAsyncKeyState(VK_F9) & 0x8000) && (GetAsyncKeyState(VK_CONTROL) & 0x8000) && !(GetAsyncKeyState(VK_SHIFT) & 0x8000) &&
+		                        !(GetAsyncKeyState(VK_MENU) & 0x8000);
+		if (hurtKeyNow && !hurtKeyWas && GtaFocused()) {
+			const bool on = !CrashHurtOn();
+			g_crashHurtOn.store(on ? 1 : 0);
+			Log("crash damage to you: %s (Ctrl+F9)", on ? "ON" : "OFF");
+			Notify("Crash damage to you: %s (Ctrl+F9)", on ? "ON" : "OFF");
+		}
+		hurtKeyWas = hurtKeyNow;
 		// v2.0: drive mode key (no modifiers)
 		static bool driveKeyWas = false;
 		const bool  driveKeyNow = (GetAsyncKeyState(g_cfg.driveKey) & 0x8000) != 0;

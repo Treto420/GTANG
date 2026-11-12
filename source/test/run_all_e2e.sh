@@ -103,4 +103,4 @@ r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1 FAKE_TWIN_STALE=3; python3 .
 r script_world.txt 90 FAKE_RAYCAP=12 FAKE_TRAFFIC=1 FAKE_PED=1 FAKE_PEDNEAR=1; python3 ../check_v275.py pedout | tail -1
 r script_props_fixed.txt 150 FAKE_RAYCAP=12 FAKE_PROPS=1 FAKE_PROPSTUCK=1 FAKE_PROPREAD=1; python3 ../check_v275.py propread | tail -1
 # v2.77: PuppetSolid (code paths against the fake GTA only; GTA's physics is checked in game)
-cd $W/test && sh run_v277.sh; cd $W/test/run
+cd $W/test && sh run_v277.sh && sh run_v281.sh; cd $W/test/run

@@ -27,6 +27,7 @@ GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both 
 | **F10** | Drive mode on/off: BeamNG's physics drive the car |
 | **Shift+F10** | On-screen drive check (what goes to BeamNG and back) |
 | **Ctrl+Shift+F10** | Seat adjust in drive mode: arrow keys and Page Up / Page Down, press again to save |
+| **Ctrl+F9** | Crash damage to you on/off (off by default, 2.81) |
 | **Ctrl+F10** | Timing recording (only for bug reports) |
 | **Ctrl+F11** | Re-read the ini and json files without restarting |
 | **Ctrl+Shift+F11** | Show cars: park the BeamNG car on a GTA car and keep it there (up to 4) |
@@ -44,7 +45,7 @@ Driving uses your own BeamNG controls and bindings (gears, clutch, drive modes).
 
 ## What works
 - **Your BeamNG car in GTA,** drawn with its paint, materials, glass and lights, in GTA's light, shadows and reflections.
-- **BeamNG's physics.** GTA's streets, hills, walls and ground surfaces are built in BeamNG, so the car grips, crumples and breaks the BeamNG way.
+- **BeamNG's physics.** GTA's streets, hills, walls and ground surfaces are built in BeamNG, so the car grips, crumples and breaks the BeamNG way. Since 2.81 (`PuppetNoMap=1`) only BeamNG meets walls, kerbs and solid posts, so slow wall hits bend the bumper too.
 - **GTA's world reacts the vanilla way** (`PuppetSolid=1`, new in 2.77). GTA's cars get pushed and dented, people ragdoll, lamp posts break and bins fly, and your BeamNG car takes the hit.
 - **Real damage on the car.** BeamNG's dents, broken glass, lost bumpers and wheels show in GTA.
 - **GTA's guns.** Bullets dent the car, leave holes, pop tyres and break windows. Explosions push it and set it on fire; a car that blows up becomes a charred wreck.
@@ -56,7 +57,7 @@ Driving uses your own BeamNG controls and bindings (gears, clutch, drive modes).
 - With `PuppetSolid=1` you sit in the GTA car's seat in first person, not BeamNG's.
 - Some hillsides and bridge decks can have holes or show up a few seconds late.
 - The camera can lag a little at low speed.
-- Hard crashes hurt you and can kill you. To turn that off, set `"crashMinDv": 100` in `GtaBeamD1_weapons.json` (Ctrl+F11 reloads it).
+- Crashes don't hurt you by default (2.81). Ctrl+F9 or `CrashHurt=1` turns it on; `crashMinDv` in `GtaBeamD1_weapons.json` sets how hard a crash must be.
 - Show cars stand still and can look flat-lit or show through the car you drive.
 - Door glass is missing on some cars. Tyre smoke is off (`TireSmoke=1` to try it).
 - Other mods' extra objects on the car in BeamNG (like a DARS driver) aren't brought into GTA.
@@ -64,6 +65,8 @@ Driving uses your own BeamNG controls and bindings (gears, clutch, drive modes).
 ## Settings
 Everything is in `GtaBeamD1.ini`, with comments. The ones you're most likely to want:
 - `PuppetSolid=1` (default): GTA's world reacts to your car with GTA's own physics. `0` goes back to the 2.76 way (traffic you touch vanishes, set by `TrafficMode`).
+- `PuppetNoMap=1` (default, 2.81): GTA's hidden car ignores GTA's map and BeamNG's solid posts; BeamNG alone hits them. `0`: the 2.77 way.
+- `CrashHurt=0` (default, 2.81): crashes don't hurt you. `1`: they do (Ctrl+F9 switches it in game).
 - `Weapons=0` turns off weapon damage on the car.
 - `DriveGravity` sets how heavy the car feels (1.1).
 - `ShowCarsMax` (4) is how many show cars you can park; each one uses video memory.
