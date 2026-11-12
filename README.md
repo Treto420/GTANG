@@ -82,6 +82,7 @@ The source is in `source\`.
 - Linux/CI: `zig c++ -target x86_64-windows-gnu` (see `source\test\build_all.sh`). That folder also has the tests, with a fake Script Hook V and a fake BeamNG for runs under Wine. They test the code, not GTA's physics.
 
 ## Credits and licences
+- **GTA x Beam** by Treto420, [MIT licence](LICENSE): use, change and share the code freely, including in your own mods, as long as you keep the licence and credit (Treto420). Third-party parts below keep their own licences.
 - [Script Hook V](http://www.dev-c.com/gtav/scripthookv/) by Alexander Blade.
 - [cgltf](https://github.com/jkuhlmann/cgltf) (MIT), [stb_image](https://github.com/nothings/stb) (MIT / public domain), [bcdec](https://github.com/iOrange/bcdec) (MIT / Unlicense).
 - Inspired by [SkyCraft](https://github.com/chasmlol/SkyCraft) (Skyrim x Minecraft passthrough).
