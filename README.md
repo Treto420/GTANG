@@ -76,6 +76,28 @@ Please attach both logs:
 - `GtaBeamD1.log` (GTA V folder)
 - `gtabridge_log.txt` (`%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\gtabridge\`)
 
+## Roadmap
+Planned, in rough order. No dates, and things may change with your feedback.
+
+**Next update (2.81, in progress)**
+- Low-speed crashes: your BeamNG car crumples against walls, kerbs and posts at any speed.
+- Crash damage on/off key (Ctrl+F9), off by default.
+- Fix for slow motion (Wasted, weapon wheel) making the car jump.
+
+**Planned**
+- Better soft-body hits from GTA's traffic, people and props: your car crumples where it's hit.
+- The hidden GTA car picked automatically to match your BeamNG car's size.
+- Tyre smoke and screech when the wheels spin.
+- No more holes on hills and bridges.
+- Smoother camera at low speed.
+- UI: BeamNG's menus and apps usable from inside GTA.
+- A launcher: one click starts BeamNG (Grid, Small, Pure) and then GTA.
+- Show cars with proper lighting; door glass on every car.
+- Steering wheel and force feedback support.
+- Motorcycles.
+- A second BeamNG car on the road (AI chases, trailers).
+- GTA V Enhanced edition support.
+
 ## Building from source
 The source is in `source\`.
 - Windows with Visual Studio 2022: run `source\build_vs2022.bat` (needs the Script Hook V SDK's `ScriptHookV.lib`).
