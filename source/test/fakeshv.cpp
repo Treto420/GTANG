@@ -50,6 +50,10 @@ static bool   g_wSet = false, g_psKicked = false;
 // v2.81 (sandbox only): SET_DISABLE_MAP_COLLISION lasts one frame (as R*'s scripts use it); FAKE_PSMAP=1: GTA's "map" (a kerb every
 // 25 m from the start) takes 3 m/s off a solid car whose map collision is on that frame
 static bool   g_noMapFrame = false;
+// v2.82 (sandbox only, a guess at GTA, NOT its physics): FAKE_PSKICK_MS=<m/s>: the size of FAKE_PSKICK's crash (4); FAKE_TCVANISH=1:
+// the traffic car 9001 is removed when the car is teleported within 6 m of it after that crash, unless the two were set not to
+// collide this frame (SET_ENTITY_NO_COLLISION_ENTITY)
+static bool   g_passFrame = false;
 static int    g_noMapCalls = 0, g_mapSeg = -1, g_noCollPairs = 0;
 static double g_physT = 0;
 static double g_frameT = 0.016;  // v2.0: the real time between script ticks (like GTA's frame time)
@@ -644,6 +648,7 @@ void scriptWait(DWORD)
 		g_mapSeg = seg;
 	}
 	g_noMapFrame = false;
+	g_passFrame = false;
 	if (g_wSet && !g_frozen && dt > 0) {   // v2.77: M = Rot(w dt) M (Rodrigues), the columns kept orthonormal
 		const double wl = sqrt(g_w[0] * g_w[0] + g_w[1] * g_w[1] + g_w[2] * g_w[2]), a = wl * dt * g_timeScale;
 		if (a > 1e-9) {
@@ -810,7 +815,13 @@ PUINT64 nativeCall()
 			if (fp->poses <= 3 || fp->poses % 20 == 0) { printf("FAKE: prop %d posed %.2f %.2f %.2f (%d, frozen %d)\n", Shown(fp), fp->x, fp->y, fp->z, fp->poses, int(fp->frozen)); fflush(stdout); }
 			break;
 		}
-		g_pos[0] = F(1); g_pos[1] = F(2); g_pos[2] = F(3); PuppetLog("coords"); break;
+		g_pos[0] = F(1); g_pos[1] = F(2); g_pos[2] = F(3); PuppetLog("coords");
+		if (Env("FAKE_TCVANISH") && g_psKicked && g_tcPlaced && !g_tcGone && hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1]) < 6.0) {   // v2.82
+			printf("FAKE: the car teleported to %.1f m from traffic car 9001, %s\n", hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1]), g_passFrame ? "not colliding with it: it stays" : "solid: 9001 removed");
+			fflush(stdout);
+			if (!g_passFrame) g_tcGone = true;
+		}
+		break;
 	case 0x8524A8B0171D5E07:                                  // SET_ENTITY_ROTATION (v2.52: props too)
 		if (int(g_args[0]) == 9001) { g_tcYaw = F(3); break; }   // v2.71
 		if (FakeProp* fp = PropOf(int(g_args[0]))) {
@@ -857,9 +868,11 @@ PUINT64 nativeCall()
 			double v[3] = { g_vel[0], g_vel[1], g_vel[2] };
 			if (Env("FAKE_PSKICK") && g_tcPlaced && !g_tcGone && !g_psKicked && hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1]) < 4.0) {
 				g_psKicked = true;
-				for (int k = 0; k < 3; ++k) v[k] -= g_rot[k][1] * 4.0;
+				char   ke[16];
+				const double kick = GetEnvironmentVariableA("FAKE_PSKICK_MS", ke, sizeof ke) ? atof(ke) : 4.0;   // v2.82
+				for (int k = 0; k < 3; ++k) v[k] -= g_rot[k][1] * kick;
 				for (int k = 0; k < 3; ++k) g_vel[k] = v[k];
-				printf("FAKE: GTA crash: the car's speed reads back 4 m/s slower (traffic car 9001 at %.1f m)\n", hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1])); fflush(stdout);
+				printf("FAKE: GTA crash: the car's speed reads back %.0f m/s slower (traffic car 9001 at %.1f m)\n", kick, hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1])); fflush(stdout);
 			}
 			RetV(float(v[0]), float(v[1]), float(v[2]));
 		}
@@ -883,6 +896,7 @@ PUINT64 nativeCall()
 		}
 		break;
 	case 0xA53ED5520C07654A:   // SET_ENTITY_NO_COLLISION_ENTITY (v2.81)
+		if ((int(g_args[0]) == 100 && int(g_args[1]) == 9001) || (int(g_args[0]) == 9001 && int(g_args[1]) == 100)) g_passFrame = true;   // v2.82
 		if (g_noCollPairs++ % 200 == 0) { printf("FAKE: no collision %d with %d (this frame %d; %d calls)\n", int(g_args[0]), int(g_args[1]), int(g_args[2]), g_noCollPairs); fflush(stdout); }
 		break;
 	case 0x3E8C8727991A8A0B: printf("FAKE: vehicle %d strong %d\n", int(g_args[0]), int(g_args[1])); fflush(stdout); break;   // SET_VEHICLE_STRONG (v2.77)
