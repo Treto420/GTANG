@@ -77,7 +77,7 @@
 --   gtaBridge.soundSession(false) -- v2.4: switch the sound "session" mode off (the GTA plugin's BeamNGSoundWake=session sets it)
 
 local M = {}
-M.version = '2.83'
+M.version = '2.84'
 local logTag = 'gtaBridge'
 
 -- ---------------------------------------------------------------- config
@@ -5820,7 +5820,7 @@ handlers.twp = function(m)
   if same then
     for _, e in pairs(T.pool) do
       if e.state == 'live' then T.park(e) end
-      if e.state == 'park' then T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3] }) end
+      if e.state == 'park' then T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3], kg = e.kg }) end
     end
     logI('traffic twins: GTA asked for the same ' .. #m.m .. ': kept from before')
     return
@@ -5908,9 +5908,11 @@ world.tw.measure = function(e)
     if a and b then axles[#axles + 1] = { v3(veh:getNodePosition(a)), v3(veh:getNodePosition(b)), (tonumber(w.radius) or 0.35) + 0.1 } end
   end
   local all, mn, mx = {}, { 1e9, 1e9, 1e9 }, { -1e9, -1e9, -1e9 }
+  local kg = 0   -- v2.84: its weight as BeamNG built it (a truck's box: the jbeam's limit was 5 t before 2.84)
   for cid, nd in pairs(vdata.nodes) do
     local c = type(nd) == 'table' and (nd.cid or cid)
     if c then
+      kg = kg + (tonumber(nd.nodeWeight) or 0)
       local p = v3(veh:getNodePosition(c))
       local q = { dot(p, r), dot(p, f), dot(p, u) }
       for i = 1, 3 do mn[i] = math.min(mn[i], q[i]); mx[i] = math.max(mx[i], q[i]) end
@@ -5926,6 +5928,7 @@ world.tw.measure = function(e)
     end
   end
   if #all < 8 then return false end
+  e.kg = kg > 0 and kg or nil
   e.o = { (mn[1] + mx[1]) * 0.5, (mn[2] + mx[2]) * 0.5, mn[3] }
   e.size = { mx[1] - mn[1], mx[2] - mn[2], mx[3] - mn[3] }
   local step = math.max(1, math.floor(#all / 300))
@@ -6116,7 +6119,7 @@ world.tw.tick = function()
             e.k, e.size[1], e.size[2], e.size[3], e.o[1], e.o[2], e.o[3], e.box[1], e.box[2], e.box[3]))
           e.size, e.o, e.cids, e.rest, e.guess = { e.box[1], e.box[2], e.box[3] }, { -e.box[1] * 0.5, -e.box[2] * 0.5, 0 }, {}, {}, true
           T.park(e)
-          if e.state == 'park' then T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3] }) end
+          if e.state == 'park' then T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3], kg = e.kg }) end
         end
       elseif ok and good then
         T.park(e)
@@ -6124,9 +6127,10 @@ world.tw.tick = function()
         if e.box then
           logI(string.format('proxy boxes: box %d ready: %.2f x %.2f x %.2f m, %d kg asked; it measures %.2f x %.2f x %.2f m, its bottom middle %.2f %.2f %.2f from its position (spawned in %.0f ms)',
             e.k, e.box[1], e.box[2], e.box[3], e.box[4], e.size[1], e.size[2], e.size[3], e.o[1], e.o[2], e.o[3], e.ms or 0))
+          logI(string.format('proxy boxes (v2.84): box %d weighs %s kg in BeamNG (%d asked)', e.k, e.kg and string.format('%.0f', e.kg) or '?', e.box[4]))
         end
         logI(string.format('traffic twins: twin %d is a %s (%.1f x %.1f x %.1f m, %d body nodes watched; spawned in %.0f ms)', e.k, e.model, e.size[1], e.size[2], e.size[3], #e.cids, e.ms or 0))
-        T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3] })
+        T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3], kg = e.kg })
       elseif t - e.t0 > 3 then
         e.state = 'fail'
         logE('traffic twins: twin ' .. e.k .. ' (' .. e.model .. ') could not be measured: ' .. tostring(ok and 'no nodes' or good))

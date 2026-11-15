@@ -23,5 +23,7 @@
   "twinDentMaxM": 0.35,
   "twinStillS": 2.0,
   "proxyAbout": "v2.83 (TrafficProxies in the ini: how many): boxes in BeamNG that take a GTA car's place just before it meets yours while PuppetSolid is on, so BeamNG resolves that crash and your car really crumples. Each entry: box:width:length:height:kg (m). The GTA car gets the free box closest to it in length. twinLeadS, twinStillS and TwinMaxLengthM are used for them too.",
-  "proxyPool": ["box:1.9:4.7:1.45:1500", "box:1.8:4.1:1.45:1250", "box:2.05:5.2:1.8:2200", "box:1.9:4.7:1.45:1500"]
+  "proxyPool": ["box:1.9:4.7:1.45:1500", "box:1.8:4.1:1.45:1250", "box:2.05:5.2:1.8:2200", "box:1.9:4.7:1.45:1500"],
+  "truckAbout": "v2.84 (TruckProxies in the ini: how many): truck-size boxes for trucks and buses up to TruckMaxLengthM. Same entries as proxyPool. A truck's box only goes to a vehicle within 35% of the box's length, and a vehicle longer than TwinMaxLengthM only takes a box that close to its own (cars and their boxes: as before). Kept 2.6 m high: a taller box tips over more easily than a truck.",
+  "truckPool": ["box:2.7:8.2:2.6:9000", "box:3.0:10.5:2.6:12000", "box:2.9:13.0:2.6:13000"]
 }

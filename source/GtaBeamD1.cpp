@@ -116,7 +116,7 @@
 #include "carmodel.h"
 #include "shv.h"
 
-#define D1_VERSION "2.83"
+#define D1_VERSION "2.84"
 
 namespace
 {
@@ -218,6 +218,7 @@ namespace
 		constexpr UINT64 SET_ENTITY_QUATERNION = 0x77B21BE7AC540F07;        // entity, x, y, z, w
 		constexpr UINT64 SET_ENTITY_VELOCITY = 0x1C99BB7B6E96D16F;
 		constexpr UINT64 GET_VEHICLE_CLASS = 0x29439776AAA00A62;          // v2.7
+		constexpr UINT64 GET_VEHICLE_TRAILER_VEHICLE = 0x1CDD6BADC297830D; // v2.84: vehicle, Vehicle* trailer (logged only)
 		constexpr UINT64 SET_PED_TO_RAGDOLL = 0xAE99FB955581844A;         // v2.7: ped, time1, time2, type, p4, p5, p6
 		constexpr UINT64 KNOCK_PED_OFF_VEHICLE = 0x45BBCBA77C29A841;      // v2.7
 		constexpr UINT64 SET_VEHICLE_DAMAGE = 0xA1DD317EA8FD4F29;         // v2.7: veh, x y z offset, damage, radius, focusOnModel
@@ -605,6 +606,8 @@ namespace
 		// v2.81 (PuppetNoMap=0, PuppetSlowMoFix=0, CrashHurt=1 = exactly v2.77)
 		bool        psNoMap = false;          // PuppetNoMap: the hidden car ignores GTA's map (walls, kerbs, ground) and BeamNG's solid posts: BeamNG alone hits them
 		int         trafficProxies = 0;       // TrafficProxies: (v2.83) boxes in BeamNG that take a GTA car's place for a crash while PuppetSolid is on (0: v2.82)
+		int         truckProxies = 0;         // TruckProxies: (v2.84) that many truck-size boxes more, for trucks and buses up to TruckMaxLengthM (0: v2.83)
+		float       truckMaxLen = 16.0f;      // TruckMaxLengthM: (v2.84) longer GTA vehicles still get GTA's own crash
 		bool        psPassCar = false;        // PuppetPassCar: (v2.82) teleported into the GTA car it just hit: it doesn't collide with that car until they're apart
 		bool        psSlowFix = false;        // PuppetSlowMoFix: (v2.78) GTA in slow motion: the hidden car's speed scaled so it keeps up with BeamNG's car
 		bool        crashHurt = true;         // CrashHurt: (v2.78) crashes hurt you; Ctrl+F9 switches it in game
@@ -1035,6 +1038,8 @@ namespace
 			c.psSlowFix = GetPrivateProfileIntA(kSec, "PuppetSlowMoFix", 0, path) != 0;
 			c.psPassCar = GetPrivateProfileIntA(kSec, "PuppetPassCar", 0, path) != 0;  // v2.82
 			c.trafficProxies = std::clamp(int(GetPrivateProfileIntA(kSec, "TrafficProxies", 0, path)), 0, 8);  // v2.83
+			c.truckProxies = std::clamp(int(GetPrivateProfileIntA(kSec, "TruckProxies", 0, path)), 0, std::min(4, 8 - c.trafficProxies));  // v2.84 (the mod keeps 8 at most)
+			c.truckMaxLen = std::clamp(IniFloat(path, "TruckMaxLengthM", 16.0f), 7.5f, 30.0f);
 			c.crashHurt = GetPrivateProfileIntA(kSec, "CrashHurt", 1, path) != 0;
 			Log("settings: v2.77: PuppetSolid %d%s (gain %.1f/s level, %.1f/s up/down, %.1f/s turn; snap past %.1f m; a crash = GTA changed its speed > %.1f m/s)", int(c.puppetSolid),
 				c.puppetSolid ? ": GTA's hidden car is solid, moved by its speed; the scripted traffic / people / prop reactions are off" : " (v2.76: the hidden car is a ghost)",
@@ -1050,6 +1055,10 @@ namespace
 				c.trafficProxies == 0 ? " (v2.82: GTA resolves every crash with its cars)"
 				: c.puppetSolid       ? " (boxes in BeamNG: a GTA car about to meet yours gets one, BeamNG resolves that crash, GTA's car copies its box, the hidden car ignores that GTA car)"
 				                      : " (does nothing: needs PuppetSolid=1)");
+			Log("settings: v2.84: TruckProxies %d%s", c.truckProxies,
+				c.truckProxies == 0                             ? " (v2.83: trucks and buses get GTA's own crash)"
+				: c.puppetSolid && c.trafficProxies > 0 ? " (truck-size boxes in BeamNG: a truck or bus about to meet yours gets one, BeamNG resolves that crash)"
+				                                        : " (does nothing: needs PuppetSolid=1 and TrafficProxies above 0)");
 			Log("settings: v2.5: ground rays %.1f m up / %.1f m down from the level; walls %d (scan %.2f m up, lines %.2f m apart, %.2f ms a frame); props %d "
 			    "(within %.0f m, push x%.2f, bump x%.2f, big ones solid %d); dents %d (%.0f a second); BeamNG gravity x%.2f while GTA drives",
 				c.worldUpM, c.worldDownM, int(c.worldWalls), c.worldWallProbeM, c.worldWallStepM, c.worldWallMs, int(c.props), c.propRangeM, c.propPush, c.propBump,
@@ -10448,7 +10457,9 @@ namespace
   "twinDentMaxM": 0.35,
   "twinStillS": 2.0,
   "proxyAbout": "v2.83 (TrafficProxies in the ini: how many): boxes in BeamNG that take a GTA car's place just before it meets yours while PuppetSolid is on, so BeamNG resolves that crash and your car really crumples. Each entry: box:width:length:height:kg (m). The GTA car gets the free box closest to it in length. twinLeadS, twinStillS and TwinMaxLengthM are used for them too.",
-  "proxyPool": ["box:1.9:4.7:1.45:1500", "box:1.8:4.1:1.45:1250", "box:2.05:5.2:1.8:2200", "box:1.9:4.7:1.45:1500"]
+  "proxyPool": ["box:1.9:4.7:1.45:1500", "box:1.8:4.1:1.45:1250", "box:2.05:5.2:1.8:2200", "box:1.9:4.7:1.45:1500"],
+  "truckAbout": "v2.84 (TruckProxies in the ini: how many): truck-size boxes for trucks and buses up to TruckMaxLengthM. Same entries as proxyPool. A truck's box only goes to a vehicle within 35% of the box's length, and a vehicle longer than TwinMaxLengthM only takes a box that close to its own (cars and their boxes: as before). Kept 2.6 m high: a taller box tips over more easily than a truck.",
+  "truckPool": ["box:2.7:8.2:2.6:9000", "box:3.0:10.5:2.6:12000", "box:2.9:13.0:2.6:13000"]
 }
 )JSON";
 	struct TrafficState
@@ -10481,6 +10492,10 @@ namespace
 			double      tFirst = 0, hitT = 0, hitDv = 0;
 			uint32_t    settle = 0;
 			bool        hit = false, meet = false;  // meet: its GTA car's box and BeamNG's car's touch now, or will within twinLeadS
+			bool        truck = false;              // v2.84: a truck-size box (asked for after the TrafficProxies ones)
+			double      kg = 0;                     // v2.84: its weight as BeamNG built it (0: an older mod doesn't say)
+			int         pal = 0;                    // v2.84: its GTA vehicle's trailer, or the cab pulling it (0: none)
+			double      palD = 0;                   // (how far apart the two were when the box came)
 			// v2.74: its poses (GTA's world) on BeamNG's clock: drawn at the same moment as your car (your v2.73 test: twinned cars
 			// "get the old camera lag glitch": each pose was set as it came in, then GTA moved the car on, then the next one snapped it back)
 			struct Pose
@@ -10492,9 +10507,12 @@ namespace
 		std::vector<Twin>       twins;
 		bool                    twAsked = false;
 		double                  twAskT = 0;
-		std::string             twPool[8], twFb[3], pxPool[8];
-		int                     twPoolN = 0, twFbN = 0, pxPoolN = 0;
+		std::string             twPool[8], twFb[3], pxPool[8], tkPool[4];
+		int                     twPoolN = 0, twFbN = 0, pxPoolN = 0, tkPoolN = 0;
+		int                     tkN = 0;  // v2.84: truck-size boxes asked for (0: TruckProxies off: exactly v2.83)
 		uint32_t                pxHits = 0, pxSettle = 0;  // (10 s)
+		uint32_t                tkActs = 0, tkHits = 0, tkNone = 0;  // v2.84 (10 s): long vehicles that got a box, were hit, had none free
+		std::map<int, double>   tkSaid;  // (no box for it: said once)
 		double                  twLead = 0.5, twStill = 2.0, twDentScale = 1.0, twDentMax = 0.35;
 		struct GtaDent
 		{
@@ -10584,6 +10602,8 @@ namespace
 		num("twinStillS", T.twStill, 0.5, 20);
 		T.pxPoolN = std::max(0, JsonStrs(js, "proxyPool", T.pxPool, 8));  // v2.83 (an older file without them: the built-in boxes)
 		if (T.pxPoolN == 0) T.pxPoolN = std::max(0, JsonStrs(kTrafficDefault, "proxyPool", T.pxPool, 8));
+		T.tkPoolN = std::max(0, JsonStrs(js, "truckPool", T.tkPool, 4));  // v2.84 (the same way)
+		if (T.tkPoolN == 0) T.tkPoolN = std::max(0, JsonStrs(kTrafficDefault, "truckPool", T.tkPool, 4));
 		T.cfgLoaded = true;
 		Log("traffic (v2.7): %s; range %.0f m, BeamNG's car taken as %.0f kg, pushes x%.1f (GTA) / x%.1f (BeamNG), dents %.1f mm per m/s (max %.0f mm)%s", T.cfgSource.c_str(), T.rangeM,
 			T.beamMass, T.pushGta, T.pushBeam, T.dentPerMs * 1000, T.dentMax * 1000, g_cfg.trafficCollision ? "" : "; TrafficCollision=0: off");
@@ -10605,6 +10625,7 @@ namespace
 			if (tw.state == 2 && tw.ent == e) return true;
 		return false;
 	}
+	extern const char* kVehClassName[23];  // (with PuppetSolid, below)
 	void TwinRelease(TrafficState& T, int k, const char* why)
 	{
 		TrafficState::Twin& tw = T.twins[k];
@@ -10626,6 +10647,17 @@ namespace
 					why, NowSeconds() - tw.tA, k + 1,
 					tw.hit ? (std::string("was hit by BeamNG's car (its speed changed ") + std::to_string(int(tw.hitDv * 3.6 + 0.5)) + " km/h in all)").c_str() : "was not hit", tw.poses,
 					tw.settle, tw.ent ? Call<int>(N::DOES_ENTITY_EXIST, tw.ent) : 0);
+			if (tw.gl > g_cfg.twinMaxLen && T.tkN > 0) {
+				const bool ex = tw.ent && Call<int>(N::DOES_ENTITY_EXIST, tw.ent), exP = tw.pal && Call<int>(N::DOES_ENTITY_EXIST, tw.pal);
+				double     dNow = -1;
+				if (ex && exP) {
+					const NVec3 a = Call<NVec3>(N::GET_ENTITY_COORDS, tw.ent, 0), b = Call<NVec3>(N::GET_ENTITY_COORDS, tw.pal, 0);
+					dNow = sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
+				}
+				char pal[160] = "no trailer or cab with it";
+				if (tw.pal) snprintf(pal, sizeof(pal), "its trailer / cab %d exists %d, %.1f m from it now (%.1f m when the box came)", tw.pal, int(exP), dNow, tw.palD);
+				Log("proxy (v2.84): GTA truck %d back to GTA after %.1f s: exists %d, %s", tw.ent, NowSeconds() - tw.tA, int(ex), pal);
+			}
 		} else if (T.logs++ < 80)
 			Log("traffic twins: GTA car %d back to GTA (%s; after %.1f s, %u poses copied, its twin dented up to %.0f mm)", tw.ent, why, NowSeconds() - tw.tA, tw.poses, tw.dmax * 1000);
 		tw.state = 1;
@@ -10638,6 +10670,8 @@ namespace
 		tw.tFirst = tw.hitT = tw.hitDv = 0;
 		tw.settle = 0;
 		tw.hit = tw.meet = false;
+		tw.pal = 0;
+		tw.palD = 0;
 		++T.twRel;
 	}
 	void TwinsEnd(TrafficState& T, const char* why)
@@ -10667,15 +10701,26 @@ namespace
 		const std::string* pool = px ? T.pxPool : T.twPool;
 		const int          poolN = px ? T.pxPoolN : T.twPoolN, n = px ? g_cfg.trafficProxies : g_cfg.trafficTwins;
 		if (poolN <= 0) return;
+		// v2.84 TruckProxies: truck-size boxes after those (the mod's box could not weigh over 5 t before 2.84)
+		T.tkN = px && T.tkPoolN > 0 ? g_cfg.truckProxies : 0;
+		if (T.tkN > 0 && g_drv.modV < std::string("2.84")) {
+			T.tkN = 0;
+			Log("proxy (v2.84): the BeamNG mod is %s, not 2.84: NO truck boxes (trucks and buses get GTA's own crash, as v2.83). Copy the 2.84 mod and restart BeamNG", g_drv.modV.c_str());
+			Notify("BeamNG mod %s is old: the truck boxes need 2.84 (restart BeamNG)", g_drv.modV.c_str());
+		}
 		T.twAsked = true;
 		T.twAskT = NowSeconds();
-		T.twins.assign(size_t(n), TrafficState::Twin{});
+		T.twins.assign(size_t(n + T.tkN), TrafficState::Twin{});
 		std::string m = "{\"t\":\"twp\",\"m\":[", fb;
 		for (int k = 0; k < n; ++k) m += std::string(k ? "," : "") + "\"" + pool[k % poolN] + "\"";
+		for (int k = 0; k < T.tkN; ++k) m += ",\"" + T.tkPool[k % T.tkPoolN] + "\"", T.twins[size_t(n + k)].truck = true;
 		for (int k = 0; k < T.twFbN && !px; ++k) fb += std::string(k ? "," : "") + "\"" + T.twFb[k] + "\"";  // (boxes: no BeamNG car instead)
 		m += "],\"fb\":[" + fb + "]}";
 		DrvSend(m.c_str());
 		Log("%s: asked BeamNG for %d %s (%s)", px ? "proxy (v2.83)" : "traffic twins", n, px ? "boxes" : "twins", m.c_str());
+		if (T.tkN > 0)
+			Log("proxy (v2.84): TruckProxies ON: %d truck-size boxes asked for too (boxes %d to %d) for GTA vehicles up to %.1f m long; a truck's box and its vehicle must be within 35%% of each other's length",
+				T.tkN, n + 1, n + T.tkN, g_cfg.truckMaxLen);
 	}
 	void TwinsMsgs(TrafficState& T);
 	// still being spawned (the start waits for them, at most 25 s)
@@ -10918,6 +10963,13 @@ namespace
 					tw.h = JsonNum(s, "h", 0);
 					if (tw.state == 0) tw.state = 1;
 					Log("%s %d ready: a %s (%.2f x %.2f x %.2f m)", PxOn() ? "proxy (v2.83): box" : "traffic twins: twin", k + 1, tw.model.c_str(), tw.w, tw.l, tw.h);
+					if (tw.truck) {
+						// v2.84: the weight BeamNG really built (its jbeam's limit was 5 t before 2.84: a truck's box must not come out a car's weight)
+						tw.kg = JsonNum(s, "kg", 0);
+						const double  askKg = atof(tw.model.substr(tw.model.rfind(':') + 1).c_str());
+						Log("proxy (v2.84): truck box %d ready: %.2f x %.2f x %.2f m, %.0f kg in BeamNG (%.0f asked)%s", k + 1, tw.w, tw.l, tw.h, tw.kg, askKg,
+							tw.kg <= 0 ? ": BeamNG didn't say its weight" : tw.kg < 0.9 * askKg ? ": LIGHTER than asked (BeamNG capped it)" : "");
+					}
 				} else {
 					std::string why;
 					JsonStr(s, "why", why);
@@ -11123,7 +11175,9 @@ namespace
 			for (int k = 0; k < 3; ++k) c[k] = pp[k] + ax[0][k] * mc[0] + ax[1][k] * mc[1] + ax[2][k] * mc[2];
 			// v2.74: your v2.73 notes: semis "clip through" (the twin was a car-size BeamNG car): no twin longer than TwinMaxLengthM
 			// (v2.75: they get v2.7's push); show cars are never twinned or taken away
-			const bool big = 2.0 * he[1] > g_cfg.twinMaxLen;
+			// v2.84 TruckProxies: with truck-size boxes in the pool the limit is TruckMaxLengthM
+			const bool longV = 2.0 * he[1] > g_cfg.twinMaxLen, tkOn = px && T.tkN > 0;
+			const bool big = tkOn ? 2.0 * he[1] > g_cfg.truckMaxLen : longV;
 			const bool show = g_showVeh.count(e) != 0;
 			if (!px && g_cfg.trafficMode == 2) {
 				double n[2], vn = 0;
@@ -11165,8 +11219,24 @@ namespace
 				auto dn = T.twDone.find(e);
 				if (twK >= 0 || (dn != T.twDone.end() && now - dn->second < 2.0)) continue;
 				int best = -1;
+				// (v2.84: a truck's box, or a long vehicle: only within 35% of its length: a car never takes a truck's box, a truck never
+				// a car's. Cars and car boxes: as v2.83)
 				for (size_t k = 0; meetT >= 0 && k < T.twins.size(); ++k)
-					if (T.twins[k].state == 1 && (best < 0 || fabs(T.twins[k].l - 2 * he[1]) < fabs(T.twins[best].l - 2 * he[1]))) best = int(k);
+					if (T.twins[k].state == 1 && ((!T.twins[k].truck && !longV) || !tkOn || fabs(T.twins[k].l - 2 * he[1]) <= 0.35 * 2 * he[1]) &&
+					    (best < 0 || fabs(T.twins[k].l - 2 * he[1]) < fabs(T.twins[best].l - 2 * he[1])))
+						best = int(k);
+				if (tkOn && longV && meetT >= 0 && best < 0) {
+					auto sd = T.tkSaid.find(e);
+					if (sd == T.tkSaid.end() || now - sd->second > 5.0) {
+						T.tkSaid[e] = now;
+						++T.tkNone;
+						int freeN = 0;
+						for (const auto& o : T.twins) freeN += o.state == 1;
+						if (T.logs++ < 200)
+							Log("proxy (v2.84): GTA truck %d (class %s, %.1f x %.1f m) meets the car in %.2f s but gets NO box: none of the %d free boxes is within 35%% of its length: GTA's own crash (v2.82) for it",
+								e, kVehClassName[cls], 2 * he[0], 2 * he[1], meetT, freeN);
+					}
+				}
 				// v2.72: the twin (its own size) must fit where GTA's car is: not into your car or another twin (your v2.71 test: GTA cars
 				// crushed "by your presence": a twin put half inside your car is torn apart by BeamNG). Too late to fit: v2.7's push
 				if (best >= 0) {
@@ -11222,6 +11292,26 @@ namespace
 					tw.gl = mx.y - mn.y;
 					tw.gh = mx.z - mn.z;
 					++T.twActs;
+					if (tkOn && longV) {
+						// v2.84: a semi is two GTA vehicles (cab and trailer): which one this is, logged (each gets its own box when it meets the car)
+						++T.tkActs;
+						int tr = 0;
+						tw.pal = Call<int>(N::GET_VEHICLE_TRAILER_VEHICLE, e, &tr) && tr ? tr : 0;
+						const char* role = tw.pal ? "pulls trailer" : "trailer of";
+						for (size_t q = 0; !tw.pal && q < T.nearV.size(); ++q) {
+							int t2 = 0;
+							if (T.nearV[q] != e && Call<int>(N::DOES_ENTITY_EXIST, T.nearV[q]) && Call<int>(N::GET_VEHICLE_TRAILER_VEHICLE, T.nearV[q], &t2) && t2 == e) tw.pal = T.nearV[q];
+						}
+						if (tw.pal) {
+							const NVec3 b = Call<NVec3>(N::GET_ENTITY_COORDS, tw.pal, 0);
+							tw.palD = sqrt((pp[0] - b.x) * (pp[0] - b.x) + (pp[1] - b.y) * (pp[1] - b.y) + (pp[2] - b.z) * (pp[2] - b.z));
+						}
+						char pal[96] = "no trailer";
+						if (tw.pal) snprintf(pal, sizeof(pal), "%s %d, %.1f m from it", role, tw.pal, tw.palD);
+						if (T.logs++ < 200)
+							Log("proxy (v2.84): GTA truck %d (class %s, %.1f x %.1f x %.1f m, %.0f km/h, %s) meets the car in %.2f s: truck box %d (%s, %.0f kg in BeamNG) takes its place", e,
+								kVehClassName[cls], tw.gw, tw.gl, tw.gh, spd * 3.6, pal, meetT, best + 1, tw.model.c_str(), tw.kg);
+					}
 					if (T.logs++ < (px ? 200u : 80u))
 						Log("%s: GTA car %d (class %d, %.1f m long, %.0f km/h%s) meets the car in %.2f s: %s %d (%s, %.1f m) takes its place", px ? "proxy (v2.83)" : "traffic twins", e, cls,
 							tw.gl, spd * 3.6, pk ? ", parked" : "", meetT, px ? "box" : "twin", best + 1, tw.model.c_str(), tw.l);
@@ -11370,6 +11460,13 @@ namespace
 				Log("proxy (v2.83): 10 s: TrafficProxies ON: %u GTA cars got a box, %u hit by BeamNG's car, %u back to GTA (%u thrown), %u poses copied, %u not taken while settling, %u "
 				    "failed; now %d boxes ready, %d on GTA cars, %zu GTA cars near", T.twActs, T.pxHits, T.twRel, T.twThrown, T.twPoses, T.pxSettle, T.twFails, ready, on, T.nearV.size());
 				T.twActs = T.twRel = T.twPoses = T.twDents = T.twFails = T.twThrown = T.pxHits = T.pxSettle = 0;
+				if (T.tkN > 0) {
+					int tkReady = 0, tkBusy = 0;
+					for (const auto& tw : T.twins) tkReady += tw.truck && tw.state == 1, tkBusy += tw.truck && tw.state == 2;
+					Log("proxy (v2.84): 10 s: TruckProxies ON: %u trucks / buses got a box, %u hit by BeamNG's car, %u met the car with no box free; now %d truck boxes ready, %d on GTA vehicles",
+						T.tkActs, T.tkHits, T.tkNone, tkReady, tkBusy);
+					T.tkActs = T.tkHits = T.tkNone = 0;
+				}
 			} else if (T.twActs + T.twRel + T.twFails > 0) {
 				int ready = 0, on = 0;
 				for (const auto& tw : T.twins) ready += tw.state == 1, on += tw.state == 2;
@@ -12793,9 +12890,14 @@ namespace
 		const TrafficState::Twin& tw = T.twins[k];
 		const double              now = NowSeconds();
 		char                      what[64];
-		snprintf(what, sizeof(what), "a GTA car (BeamNG's box %d)", k + 1);
+		snprintf(what, sizeof(what), "a GTA %s (BeamNG's box %d)", T.tkN > 0 && tw.gl > g_cfg.twinMaxLen ? "truck" : "car", k + 1);
 		++S.contactsBeam;
-		if (S.contactLogs++ < 120)
+		const bool truck = T.tkN > 0 && tw.gl > g_cfg.twinMaxLen;  // v2.84
+		if (truck) ++T.tkHits;
+		if (truck && S.contactLogs++ < 120)
+			Log("contact (v2.84): a GTA truck (%d, %.1f m long) at %.0f km/h: resolved by BeamNG (its box %d, a %s, put there %.2f s before); GTA's truck copies the box, the hidden car "
+			    "ignores that truck; the hidden car %.2f m from BeamNG's car", tw.ent, tw.gl, PsLen(g_drv.carV) * 3.6, k + 1, tw.model.c_str(), now - tw.tA, S.lastEl);
+		else if (!truck && S.contactLogs++ < 120)
 			Log("contact (v2.83): a GTA car (%d, %.1f m long) at %.0f km/h: resolved by BeamNG (its box %d, a %s, put there %.2f s before); GTA's car copies the box, the hidden car "
 			    "ignores that GTA car; the hidden car %.2f m from BeamNG's car", tw.ent, tw.gl, PsLen(g_drv.carV) * 3.6, k + 1, tw.model.c_str(), now - tw.tA, S.lastEl);
 		PsBendStart(what, now);

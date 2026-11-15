@@ -12,7 +12,7 @@
       ["$gx", "range", "m", "GTA prop", 0.5, 0.05, 20, "Width", "Size along x"],
       ["$gy", "range", "m", "GTA prop", 0.5, 0.05, 20, "Depth", "Size along y"],
       ["$gz", "range", "m", "GTA prop", 1.0, 0.05, 20, "Height", "Size along z"],
-      ["$gm", "range", "kg", "GTA prop", 20, 1, 5000, "Mass", "Total mass"],
+      ["$gm", "range", "kg", "GTA prop", 20, 1, 40000, "Mass", "Total mass"],
       ["$gb", "range", "N", "GTA prop", 30000, 1, 10000000, "Anchor strength", "Force at which its ground beams snap"]
     ],
     "refNodes": [

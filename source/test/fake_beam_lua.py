@@ -484,6 +484,7 @@ ge.execute('''
       if BOX_DEFAULT then gx, gy, gz = 0.5, 0.5, 1.0 end   -- (the jbeam variables not passed)
       for _, z in ipairs({ 0, gz }) do for _, y in ipairs({ 0, -gy }) do for _, x in ipairs({ 0, -gx }) do t.nodes[#t.nodes + 1] = { x, y, z } end end end
       t.box, t.ctr, t.hw, t.hl = true, { -gx / 2, -gy / 2 }, gx / 2, gy / 2
+      t.kgNode = math.min(box['$gm'], GM_MAX) / 8   -- v2.84: its weight, capped by the real jbeam's $gm limit as BeamNG would
     else
     for _, x in ipairs({ -0.9, 0, 0.9 }) do for _, y in ipairs({ -2.3, -1.2, 0, 1.2, 2.3 }) do for _, z in ipairs({ -0.2, 0.9 }) do t.nodes[#t.nodes + 1] = { x, y, z } end end end
     for w, wp in ipairs({ { 0.8, 1.4 }, { -0.8, 1.4 }, { 0.8, -1.4 }, { -0.8, -1.4 } }) do
@@ -562,7 +563,7 @@ ge.execute('''
     for _, t in ipairs(TWINS) do
       if t.id == id then
         local nodes = {}
-        for c = 1, #t.nodes do nodes[c - 1] = { cid = c - 1, name = 't' .. (c - 1) } end
+        for c = 1, #t.nodes do nodes[c - 1] = { cid = c - 1, name = 't' .. (c - 1), nodeWeight = t.kgNode } end
         return { vdata = { nodes = nodes, wheels = t.wheels } }
       end
     end
@@ -592,6 +593,11 @@ g.TWIN_STALE = int(os.environ.get('FAKE_TWIN_STALE', '0'))
 # frame, 6 frames after a teleport, the twin's speed reads 9000 m/s (a guess at his v2.75 log's "thrown at the 2nd pose", NOT verified in BeamNG)
 g.BOX_SIZE = float(os.environ.get('FAKE_BOX_SIZE', '1'))
 g.BOX_DEFAULT = os.environ.get('FAKE_BOX_DEFAULT') == '1'
+# v2.84: the box's weight limit read from the real gtab_prop.jbeam next to gtaBridge.lua (FAKE_GM_MAX overrides: an old jbeam)
+import re as _re
+_jb = os.path.join(os.path.dirname(os.path.abspath(SRC)), 'gtab_prop.jbeam')
+_m = _re.search(r'\["\$gm",\s*"range",\s*"kg",\s*"[^"]*",\s*[\d.]+,\s*[\d.]+,\s*([\d.]+)', open(_jb).read()) if os.path.exists(_jb) else None
+g.GM_MAX = float(os.environ.get('FAKE_GM_MAX') or (_m.group(1) if _m else 5000))
 g.BOX_MIDDLE = os.environ.get('FAKE_BOX_MIDDLE') == '1'   # v2.83: setPositionRotation places a box's bottom middle (the jbeam's origin), not its position (a corner)
 g.TWIN_VJUMP = int(os.environ.get('FAKE_TWIN_VJUMP', '0'))
 def proplog(name, anch, gx, gy, gz, gm):
