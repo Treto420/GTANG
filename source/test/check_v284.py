@@ -20,7 +20,7 @@ log, host, ev, blog = rd('GtaBeamD1.log'), rd('host_out.txt'), rd('fake_beam_eve
 gtaCrash = "GTA's crash: a GTA car (9001" in log
 ready = len(re.findall(r'proxy \(v2\.83\): box \d ready: a box:', log))
 tk = re.findall(r'proxy \(v2\.84\): truck box (\d) ready: ([\d.]+) x ([\d.]+) x ([\d.]+) m, (\d+) kg in BeamNG \((\d+) asked\)(.*)', log)
-check('GtaBeamD1 2.84 ' in log, 'the plugin is 2.84')
+check(re.search(r'GtaBeamD1 2\.(8[4-9]|9\d) ', log) is not None, 'the plugin is 2.84 or newer')
 if mode in ('truck', 'car', 'oldjbeam'):
     check('settings: v2.84: TruckProxies 2 (truck-size boxes in BeamNG' in log, 'setting read')
     check('proxy (v2.83): asked BeamNG for 4 boxes' in log and 'proxy (v2.84): TruckProxies ON: 2 truck-size boxes asked for too (boxes 5 to 6) for GTA vehicles up to 16.0 m long' in log, '4 + 2 boxes asked for')

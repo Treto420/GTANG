@@ -1,4 +1,5 @@
 // GTA bridge v2.52: a weighted box for GTA's props (sized and weighted per prop by the bridge's jbeam variables)
+// v2.85: the ground beams are one break group (gtab_tie): they all go together
 {
   "gtab_prop": {
     "information": {"authors": "GTA bridge", "name": "GTA prop (GTA bridge)", "value": 0},
@@ -105,6 +106,7 @@
       ["id1:", "id2:"],
       {"beamSpring": "$=$gm*15000+20000", "beamDamp": "$=$gm*8+50"},
       {"beamDeform": "FLT_MAX", "beamStrength": "$gb"},
+      {"breakGroup": "gtab_tie"},
       ["g0", "a0"],
       ["g0", "a1"],
       ["g0", "a2"],

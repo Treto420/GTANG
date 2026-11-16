@@ -460,6 +460,7 @@ ge.execute('''
     if TWIN_STALE > 0 then self.oldpos, self.staleN = self.pos, TWIN_STALE end
     self.vjN = TWIN_VJUMP > 0 and 7 or 0   -- (6 frames after the teleport: a box's poses go to GTA from its 4th frame)
     self.pos = { x = x, y = y, z = z }
+    if self.tied and NOTIES then self.pos.z = z - 1.0 end   -- v2.85 FAKE_NOTIES=1: a tied box's ties don't come along with a teleport: it falls
     if self.box and BOX_MIDDLE then
       local co = trot(self, { self.ctr[1], self.ctr[2], 0 })
       self.pos = { x = x - co.x, y = y - co.y, z = z }
@@ -470,7 +471,12 @@ ge.execute('''
     TWINLOG(string.format('%s teleported to %.2f %.2f %.2f heading %.1f', self.name, x, y, z, math.deg(math.atan2(self.f.y, self.f.x))))
   end
   function TV:applyClusterVelocityScaleAdd(c, sc, ax, ay, az) self.vel = { x = self.vel.x * sc + ax, y = self.vel.y * sc + ay, z = self.vel.z * sc + az } end
-  function TV:queueLuaCommand(s) end
+  function TV:queueLuaCommand(s)   -- v2.85: the tie-cutting script (the box's own Lua isn't run here): said, and reported as the box would
+    if tostring(s):find('gtab_tie', 1, true) then
+      TWINLOG(self.name .. ' TIECUT')
+      if gtaBridge and gtaBridge.tieCut then gtaBridge.tieCut(self.id, 12, 12) end
+    end
+  end
   function TV:delete() self.alive = false end
   local function spawnTwin(model, o, box)
     local t = setmetatable({ id = 3000 + #TWINS, alive = true, active = true, name = o.vehicleName, model = model, pos = { x = o.pos.x, y = o.pos.y, z = o.pos.z },
@@ -484,6 +490,8 @@ ge.execute('''
       if BOX_DEFAULT then gx, gy, gz = 0.5, 0.5, 1.0 end   -- (the jbeam variables not passed)
       for _, z in ipairs({ 0, gz }) do for _, y in ipairs({ 0, -gy }) do for _, x in ipairs({ 0, -gx }) do t.nodes[#t.nodes + 1] = { x, y, z } end end end
       t.box, t.ctr, t.hw, t.hl = true, { -gx / 2, -gy / 2 }, gx / 2, gy / 2
+      t.tied = o.config.parts.gtab_prop_anchor ~= nil   -- v2.85: a pole box
+      if t.tied then TWINLOG(string.format('%s is TIED (%.2f x %.2f x %.2f m, ties %s N)', t.name, gx, gy, gz, tostring(box['$gb']))) end
       t.kgNode = math.min(box['$gm'], GM_MAX) / 8   -- v2.84: its weight, capped by the real jbeam's $gm limit as BeamNG would
     else
     for _, x in ipairs({ -0.9, 0, 0.9 }) do for _, y in ipairs({ -2.3, -1.2, 0, 1.2, 2.3 }) do for _, z in ipairs({ -0.2, 0.9 }) do t.nodes[#t.nodes + 1] = { x, y, z } end end end
@@ -589,6 +597,7 @@ def twinlog(m):
     ev.write('%.3f TWIN %s\n' % (st, m)); ev.flush()
 g.TWINLOG = twinlog
 g.TWIN_STALE = int(os.environ.get('FAKE_TWIN_STALE', '0'))
+g.NOTIES = os.environ.get('FAKE_NOTIES') == '1'   # v2.85
 # v2.83: FAKE_BOX_SIZE=<x>: a proxy box's nodes read x times as far apart as they are while it is measured; FAKE_TWIN_VJUMP=1: one
 # frame, 6 frames after a teleport, the twin's speed reads 9000 m/s (a guess at his v2.75 log's "thrown at the 2nd pose", NOT verified in BeamNG)
 g.BOX_SIZE = float(os.environ.get('FAKE_BOX_SIZE', '1'))

@@ -116,7 +116,7 @@
 #include "carmodel.h"
 #include "shv.h"
 
-#define D1_VERSION "2.84"
+#define D1_VERSION "2.85"
 
 namespace
 {
@@ -606,6 +606,7 @@ namespace
 		// v2.81 (PuppetNoMap=0, PuppetSlowMoFix=0, CrashHurt=1 = exactly v2.77)
 		bool        psNoMap = false;          // PuppetNoMap: the hidden car ignores GTA's map (walls, kerbs, ground) and BeamNG's solid posts: BeamNG alone hits them
 		int         trafficProxies = 0;       // TrafficProxies: (v2.83) boxes in BeamNG that take a GTA car's place for a crash while PuppetSolid is on (0: v2.82)
+		int         propProxies = 0;          // PropProxies: (v2.85) that many pole boxes more: tied boxes in BeamNG where GTA's poles stand (0: v2.84)
 		int         truckProxies = 0;         // TruckProxies: (v2.84) that many truck-size boxes more, for trucks and buses up to TruckMaxLengthM (0: v2.83)
 		float       truckMaxLen = 16.0f;      // TruckMaxLengthM: (v2.84) longer GTA vehicles still get GTA's own crash
 		bool        psPassCar = false;        // PuppetPassCar: (v2.82) teleported into the GTA car it just hit: it doesn't collide with that car until they're apart
@@ -1040,6 +1041,7 @@ namespace
 			c.trafficProxies = std::clamp(int(GetPrivateProfileIntA(kSec, "TrafficProxies", 0, path)), 0, 8);  // v2.83
 			c.truckProxies = std::clamp(int(GetPrivateProfileIntA(kSec, "TruckProxies", 0, path)), 0, std::min(4, 8 - c.trafficProxies));  // v2.84 (the mod keeps 8 at most)
 			c.truckMaxLen = std::clamp(IniFloat(path, "TruckMaxLengthM", 16.0f), 7.5f, 30.0f);
+			c.propProxies = std::clamp(int(GetPrivateProfileIntA(kSec, "PropProxies", 0, path)), 0, 4);  // v2.85 (the mod keeps 12 boxes at most)
 			c.crashHurt = GetPrivateProfileIntA(kSec, "CrashHurt", 1, path) != 0;
 			Log("settings: v2.77: PuppetSolid %d%s (gain %.1f/s level, %.1f/s up/down, %.1f/s turn; snap past %.1f m; a crash = GTA changed its speed > %.1f m/s)", int(c.puppetSolid),
 				c.puppetSolid ? ": GTA's hidden car is solid, moved by its speed; the scripted traffic / people / prop reactions are off" : " (v2.76: the hidden car is a ghost)",
@@ -1058,6 +1060,11 @@ namespace
 			Log("settings: v2.84: TruckProxies %d%s", c.truckProxies,
 				c.truckProxies == 0                             ? " (v2.83: trucks and buses get GTA's own crash)"
 				: c.puppetSolid && c.trafficProxies > 0 ? " (truck-size boxes in BeamNG: a truck or bus about to meet yours gets one, BeamNG resolves that crash)"
+				                                        : " (does nothing: needs PuppetSolid=1 and TrafficProxies above 0)");
+			Log("settings: v2.85: PropProxies %d%s", c.propProxies,
+				c.propProxies == 0                      ? " (v2.84: GTA's poles are GTA's alone; BeamNG's car gets GTA's push)"
+				: c.puppetSolid && c.trafficProxies > 0 ? " (pole boxes in BeamNG: BeamNG's car really hits a tied box where GTA's pole stands; GTA's physics moves GTA's pole; the box's "
+				                                          "ties are cut when GTA's pole breaks, then the box follows GTA's falling pole)"
 				                                        : " (does nothing: needs PuppetSolid=1 and TrafficProxies above 0)");
 			Log("settings: v2.5: ground rays %.1f m up / %.1f m down from the level; walls %d (scan %.2f m up, lines %.2f m apart, %.2f ms a frame); props %d "
 			    "(within %.0f m, push x%.2f, bump x%.2f, big ones solid %d); dents %d (%.0f a second); BeamNG gravity x%.2f while GTA drives",
@@ -10459,7 +10466,9 @@ namespace
   "proxyAbout": "v2.83 (TrafficProxies in the ini: how many): boxes in BeamNG that take a GTA car's place just before it meets yours while PuppetSolid is on, so BeamNG resolves that crash and your car really crumples. Each entry: box:width:length:height:kg (m). The GTA car gets the free box closest to it in length. twinLeadS, twinStillS and TwinMaxLengthM are used for them too.",
   "proxyPool": ["box:1.9:4.7:1.45:1500", "box:1.8:4.1:1.45:1250", "box:2.05:5.2:1.8:2200", "box:1.9:4.7:1.45:1500"],
   "truckAbout": "v2.84 (TruckProxies in the ini: how many): truck-size boxes for trucks and buses up to TruckMaxLengthM. Same entries as proxyPool. A truck's box only goes to a vehicle within 35% of the box's length, and a vehicle longer than TwinMaxLengthM only takes a box that close to its own (cars and their boxes: as before). Kept 2.6 m high: a taller box tips over more easily than a truck.",
-  "truckPool": ["box:2.7:8.2:2.6:9000", "box:3.0:10.5:2.6:12000", "box:2.9:13.0:2.6:13000"]
+  "truckPool": ["box:2.7:8.2:2.6:9000", "box:3.0:10.5:2.6:12000", "box:2.9:13.0:2.6:13000"],
+  "poleAbout": "v2.85 (PropProxies in the ini: how many): boxes tied to the ground where GTA's poles stand (traffic lights, street lamps: breakable props 4 m or taller with a trunk up to 0.8 m thick). Your BeamNG car really hits the box: that is its damage. GTA's physics alone moves GTA's pole. Each entry: pole:width:depth:height:kg:newtons (the force at which its ties snap by themselves; they are also cut when GTA's pole breaks). A pole gets the free box closest to it in height.",
+  "polePool": ["pole:0.3:0.3:9.5:350:150000", "pole:0.3:0.3:9.5:350:150000", "pole:0.3:0.3:6:220:150000"]
 }
 )JSON";
 	struct TrafficState
@@ -10507,8 +10516,8 @@ namespace
 		std::vector<Twin>       twins;
 		bool                    twAsked = false;
 		double                  twAskT = 0;
-		std::string             twPool[8], twFb[3], pxPool[8], tkPool[4];
-		int                     twPoolN = 0, twFbN = 0, pxPoolN = 0, tkPoolN = 0;
+		std::string             twPool[8], twFb[3], pxPool[8], tkPool[4], ppPool[4];
+		int                     twPoolN = 0, twFbN = 0, pxPoolN = 0, tkPoolN = 0, ppPoolN = 0;
 		int                     tkN = 0;  // v2.84: truck-size boxes asked for (0: TruckProxies off: exactly v2.83)
 		uint32_t                pxHits = 0, pxSettle = 0;  // (10 s)
 		uint32_t                tkActs = 0, tkHits = 0, tkNone = 0;  // v2.84 (10 s): long vehicles that got a box, were hit, had none free
@@ -10604,6 +10613,8 @@ namespace
 		if (T.pxPoolN == 0) T.pxPoolN = std::max(0, JsonStrs(kTrafficDefault, "proxyPool", T.pxPool, 8));
 		T.tkPoolN = std::max(0, JsonStrs(js, "truckPool", T.tkPool, 4));  // v2.84 (the same way)
 		if (T.tkPoolN == 0) T.tkPoolN = std::max(0, JsonStrs(kTrafficDefault, "truckPool", T.tkPool, 4));
+		T.ppPoolN = std::max(0, JsonStrs(js, "polePool", T.ppPool, 4));  // v2.85 (the same way)
+		if (T.ppPoolN == 0) T.ppPoolN = std::max(0, JsonStrs(kTrafficDefault, "polePool", T.ppPool, 4));
 		T.cfgLoaded = true;
 		Log("traffic (v2.7): %s; range %.0f m, BeamNG's car taken as %.0f kg, pushes x%.1f (GTA) / x%.1f (BeamNG), dents %.1f mm per m/s (max %.0f mm)%s", T.cfgSource.c_str(), T.rangeM,
 			T.beamMass, T.pushGta, T.pushBeam, T.dentPerMs * 1000, T.dentMax * 1000, g_cfg.trafficCollision ? "" : "; TrafficCollision=0: off");
@@ -10619,6 +10630,12 @@ namespace
 	// ---------------------------------------------------------------------------------------
 	// v2.83 TrafficProxies: the twins are boxes and work with PuppetSolid (the hidden car ignores a GTA car that has one)
 	inline bool PxOn() { return g_cfg.puppetSolid && g_cfg.trafficProxies > 0; }
+	// v2.85 PropProxies (with PsTick, below): BeamNG's pool holds the pole boxes after the traffic and truck boxes
+	void PolesAsk(TrafficState& T, std::string& m, int base);
+	void PoleMsg(int k, const std::string& ty, const std::string& s);
+	void PoleTwu(int k, const std::array<double, 13>& v);
+	bool PolesWaiting();
+	void PolesEnd(const char* why);
 	inline bool PxHas(const TrafficState& T, int e)
 	{
 		for (const auto& tw : T.twins)
@@ -10677,6 +10694,7 @@ namespace
 	void TwinsEnd(TrafficState& T, const char* why)
 	{
 		for (size_t k = 0; k < T.twins.size(); ++k) TwinRelease(T, int(k), why);
+		PolesEnd(why);  // v2.85
 		T.twins.clear();
 		T.twAsked = false;
 	}
@@ -10714,6 +10732,7 @@ namespace
 		std::string m = "{\"t\":\"twp\",\"m\":[", fb;
 		for (int k = 0; k < n; ++k) m += std::string(k ? "," : "") + "\"" + pool[k % poolN] + "\"";
 		for (int k = 0; k < T.tkN; ++k) m += ",\"" + T.tkPool[k % T.tkPoolN] + "\"", T.twins[size_t(n + k)].truck = true;
+		PolesAsk(T, m, n + T.tkN);  // v2.85
 		for (int k = 0; k < T.twFbN && !px; ++k) fb += std::string(k ? "," : "") + "\"" + T.twFb[k] + "\"";  // (boxes: no BeamNG car instead)
 		m += "],\"fb\":[" + fb + "]}";
 		DrvSend(m.c_str());
@@ -10730,7 +10749,8 @@ namespace
 		TwinsMsgs(T);
 		bool waiting = false;
 		for (const auto& tw : T.twins) waiting = waiting || tw.state == 0;
-		return waiting && NowSeconds() - T.twAskT < 25.0;
+		waiting = waiting || PolesWaiting();  // v2.85 (about 2 s each)
+		return waiting && NowSeconds() - T.twAskT < 35.0;
 	}
 	// v2.72: GTA's own dent at a spot of its car (model frame), as deep as its twin's there. v2.71 called SET_VEHICLE_DAMAGE once
 	// with a 0.5-1.5 radius: nothing showed (your test). It is stepped now, one call per car per tick, damage = radius from 50 up by
@@ -10875,6 +10895,7 @@ namespace
 					}
 					if (n < 13) break;
 					const int k = int(v[0]) - 1;
+					if (k >= int(T.twins.size())) PoleTwu(k - int(T.twins.size()), v);  // v2.85
 					if (k < 0 || k >= int(T.twins.size())) continue;
 					last[k] = v, have[k] = true;
 					TrafficState::Twin& tw = T.twins[k];
@@ -10953,6 +10974,7 @@ namespace
 				continue;
 			}
 			const int k = int(JsonNum(s, "k", 0)) - 1;
+			if (k >= int(T.twins.size())) PoleMsg(k - int(T.twins.size()), ty, s);  // v2.85
 			if (k < 0 || k >= int(T.twins.size())) continue;
 			TrafficState::Twin& tw = T.twins[k];
 			if (ty == "twi") {
@@ -12509,7 +12531,7 @@ namespace
 			static double twNoteT = 0;
 			if (now - twNoteT > 30.0) {
 				twNoteT = now;
-				Notify("Drive: BeamNG is loading the traffic twins (first F10 only, about 10 s)...");
+				Notify("Drive: BeamNG is loading the traffic twins (first F10 only, about 20 s)...");
 			}
 			d.tpFirstT = std::max(d.tpFirstT, now - 6.0);  // (the 8 s ground wait starts again after them)
 			return;
@@ -12973,6 +12995,353 @@ namespace
 
 	// one tick of drive mode with PuppetSolid on (instead of DrvSetPuppet). O: the drawn car's origin (GTA world) now; R0 F0 U0 its axes
 	// now; R F U where GTA's step ends; V its speed (GTA world); ft GTA's step; now: the clock
+	// ---------------------------------------------------------------------------------------
+	// v2.85 PropProxies (the only change of this build; PropProxies=0 is exactly v2.84). His words: the pole "should damage the car but
+	// react off of GTA's physics engine ... we never create our own physics scripts". Each game does its own side of the contact:
+	//  - BeamNG: a pole box (0.3 m thick, tied to the ground; GtaBeamD1_traffic.json "polePool") stands where GTA's pole's trunk
+	//    does. BeamNG's car really hits it: that is the car's damage.
+	//  - GTA: the hidden car still hits GTA's own pole (as before): GTA's physics alone snaps it and makes it fall.
+	//  - the bridge passes results only. GTA's pole broke -> the box's ties are cut ("twc"). From then the loose box is put back on
+	//    GTA's falling pole, with its speed, whenever the two are 0.5 m apart ("twa" with cut), but never while the pole is at
+	//    BeamNG's car: there BeamNG resolves it (the pole landing on the car). GTA's push from a pole that has a box is not sent.
+	// UNVERIFIED (his test is the check; the log says): a tied box's ties after a teleport (the mod's hang test); whether GTA's
+	// broken pole stays its own entity (if it stands still, the falling part is looked for among GTA's props of that model).
+	// ---------------------------------------------------------------------------------------
+	struct PoleBox
+	{
+		int         state = 0;  // 0 asked for, 1 ready (parked in BeamNG), 2 on a GTA pole, -1 failed
+		std::string model;
+		double      w = 0, l = 0, h = 0, kg = 0;
+		bool        ties = false;                     // the mod's hang test: its ties came along with a teleport
+		int         ent = 0;
+		uint32_t    gModel = 0;
+		double      gSize[3] = {};
+		double      off[3] = {}, P0[3] = {};          // the trunk's foot in the prop's frame; where it stood (GTA world)
+		double      tA = 0, tFirst = 0, tTouch = 0, tBroke = 0, tHit = 0, tPut = 0;
+		double      P[3] = {}, U[3] = { 0, 0, 1 };    // the box now (GTA world): its foot, its up
+		double      B0[3] = {}, Ub0[3] = { 0, 0, 1 }, Ug0[3] = { 0, 0, 1 };  // the box's first pose there (foot, up); GTA's pole's up then
+		int         puts = 0;
+		bool        said = false, stood = false, mismatch = false, landSaid = false;
+	};
+	struct PoleState
+	{
+		std::vector<PoleBox>  box;
+		int                   base = 0;  // BeamNG's pool index of the first one (after the traffic and truck boxes)
+		uint32_t              acts = 0, hits = 0, cuts = 0, snaps = 0, puts = 0, notSent = 0;  // (10 s)
+		uint32_t              logs = 0;                                                         // (session)
+		double                logT = 0;
+		std::map<int, double> said;  // a pole with no box: said once
+	} g_pole;
+	inline double PoleDist(const double a[3], const double b[3]) { return sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2])); }
+	bool PoleHas(int e)
+	{
+		for (const PoleBox& b : g_pole.box)
+			if (b.state == 2 && b.ent == e) return true;
+		return false;
+	}
+	bool PolesWaiting()
+	{
+		for (const PoleBox& b : g_pole.box)
+			if (b.state == 0) return true;
+		return false;
+	}
+	void PolesAsk(TrafficState& T, std::string& m, int base)
+	{
+		PoleState& Q = g_pole;
+		Q.box.clear();
+		Q.base = base;
+		if (g_cfg.propProxies <= 0 || !PxOn() || T.ppPoolN <= 0) return;
+		if (g_drv.modV < std::string("2.85")) {
+			Log("pole boxes (v2.85): the BeamNG mod is %s, not 2.85: NO pole boxes (poles as v2.84). Copy the 2.85 mod and restart BeamNG", g_drv.modV.c_str());
+			Notify("BeamNG mod %s is old: the pole boxes need 2.85 (restart BeamNG)", g_drv.modV.c_str());
+			return;
+		}
+		Q.box.assign(size_t(g_cfg.propProxies), PoleBox{});
+		for (int k = 0; k < g_cfg.propProxies; ++k) m += ",\"" + T.ppPool[k % T.ppPoolN] + "\"";
+		Log("pole boxes (v2.85): PropProxies ON: %d pole boxes asked for too (boxes %d to %d): tied boxes in BeamNG where GTA's poles stand (breakable props 4 m or taller, trunk up "
+		    "to 0.8 m). BeamNG = your car's damage; GTA = the pole's reaction; the box's ties are cut when GTA's pole breaks, then the box follows GTA's falling pole",
+			g_cfg.propProxies, base + 1, base + g_cfg.propProxies);
+	}
+	void PoleMsg(int k, const std::string& ty, const std::string& s)
+	{
+		PoleState& Q = g_pole;
+		if (k < 0 || k >= int(Q.box.size())) return;
+		PoleBox& b = Q.box[k];
+		if (ty == "twi") {
+			if (JsonNum(s, "ok", 0) > 0.5) {
+				JsonStr(s, "model", b.model);
+				b.w = JsonNum(s, "w", 0), b.l = JsonNum(s, "l", 0), b.h = JsonNum(s, "h", 0), b.kg = JsonNum(s, "kg", 0);
+				b.ties = JsonNum(s, "ties", 0) > 0.5;
+				if (b.state == 0) b.state = 1;
+				Log("pole boxes (v2.85): box %d ready: a %s (%.2f x %.2f x %.2f m, %.0f kg in BeamNG); its ties after a teleport: %s", Q.base + k + 1, b.model.c_str(), b.w, b.l, b.h, b.kg,
+					b.ties ? "HOLD (it hung in the air where it was put)" : "DID NOT HOLD (it fell): NOT USED (a loose 9 m box falls over by itself): poles as v2.84");
+			} else {
+				std::string why;
+				JsonStr(s, "why", why);
+				b.state = -1;
+				Log("pole boxes (v2.85): box %d failed in BeamNG (%s): not used", Q.base + k + 1, why.c_str());
+			}
+		} else if (ty == "twf" && b.state == 2) {
+			std::string why;
+			JsonStr(s, "why", why);
+			Log("pole boxes (v2.85): box %d could not be put on GTA's pole %d (%s)", Q.base + k + 1, b.ent, why.c_str());
+			b.state = 1, b.ent = 0;
+		}
+	}
+	// its pose from BeamNG ("twu": none comes until the box reads where it was asked 3 frames in a row: the mod's boxCheck)
+	void PoleTwu(int k, const std::array<double, 13>& v)
+	{
+		PoleState& Q = g_pole;
+		if (k < 0 || k >= int(Q.box.size()) || Q.box[k].state != 2) return;
+		PoleBox&     b = Q.box[k];
+		const double Pb[3] = { v[1], v[2], v[3] }, Ub[3] = { v[7], v[8], v[9] };
+		DrvMapPoint(Pb, b.P);
+		DrvMapDir(Ub, b.U);
+		if (b.tFirst <= 0) {
+			b.tFirst = NowSeconds();
+			memcpy(b.B0, b.P, sizeof(b.B0));
+			memcpy(b.Ub0, b.U, sizeof(b.Ub0));
+		}
+	}
+	void PolePut(int k, const double G[3], const double F[3], const double U[3], const double V[3], bool cut)
+	{
+		double Pb[3], Fb[3], Ub[3], Vb[3];
+		DrvUnmapPoint(G, Pb);
+		DrvUnmapDir(F, Fb);
+		DrvUnmapDir(U, Ub);
+		DrvUnmapDir(V, Vb);
+		char m[440];
+		snprintf(m, sizeof(m), "{\"t\":\"twa\",\"k\":%d,\"id\":%d,\"p\":[%.3f,%.3f,%.3f],\"f\":[%.5f,%.5f,%.5f],\"u\":[%.5f,%.5f,%.5f],\"v\":[%.3f,%.3f,%.3f],\"pk\":0,\"cut\":%d}",
+			g_pole.base + k + 1, g_pole.box[k].ent, Pb[0], Pb[1], Pb[2], Fb[0], Fb[1], Fb[2], Ub[0], Ub[1], Ub[2], Vb[0], Vb[1], Vb[2], cut ? 1 : 0);
+		DrvSend(m);
+	}
+	void PoleRelease(int k, const char* why)
+	{
+		PoleState& Q = g_pole;
+		PoleBox&   b = Q.box[k];
+		if (b.state != 2) return;
+		char m[160];
+		snprintf(m, sizeof(m), "{\"t\":\"twr\",\"k\":%d,\"why\":\"%s\"}", Q.base + k + 1, why);
+		DrvSend(m);
+		if ((b.tHit > 0 || b.tBroke > 0 || b.tTouch > 0) && Q.logs++ < 300)
+			Log("pole boxes (v2.85): box %d back from GTA's pole %d after %.1f s (%s): BeamNG's car %s; GTA's pole %s; put back on the falling pole %d times", Q.base + k + 1, b.ent,
+				NowSeconds() - b.tA, why, b.tHit > 0 ? "moved it" : "did not move it", b.tBroke > 0 ? "broke" : "did not break", b.puts);
+		b.state = 1;
+		b.ent = 0;
+	}
+	void PolesEnd(const char* why)
+	{
+		for (int k = 0; k < int(g_pole.box.size()); ++k) PoleRelease(k, why);
+		g_pole.box.clear();
+	}
+	void PolesTick(bool paused)
+	{
+		PoleState&  Q = g_pole;
+		DriveState& d = g_drv;
+		if (Q.box.empty() || paused || d.state != 2 || !g_ps.on) return;
+		const double now = NowSeconds();
+		if (d.foot) {
+			for (int k = 0; k < int(Q.box.size()); ++k) PoleRelease(k, "you are on foot");
+			return;
+		}
+		const int    veh = d.veh;
+		const double spd = PsLen(d.carV), el = g_ps.lastEl;
+		const double cc[3] = { d.carO[0] + d.carU[0] * 0.7, d.carO[1] + d.carU[1] * 0.7, d.carO[2] + d.carU[2] * 0.7 };  // BeamNG's car's middle
+		double       dir[2] = { d.carF[0], d.carF[1] };
+		if (spd > 3.0) dir[0] = d.carV[0], dir[1] = d.carV[1];
+		const double dl = std::max(1e-6, hypot(dir[0], dir[1]));
+		dir[0] /= dl, dir[1] /= dl;
+		int freeN = 0;
+		// ---- the boxes on GTA's poles
+		for (int k = 0; k < int(Q.box.size()); ++k) {
+			PoleBox& b = Q.box[k];
+			freeN += b.state == 1 && b.ties;  // (one whose ties didn't hold in the mod's hang test is not used)
+			if (b.state != 2) continue;
+			if (!Call<int>(N::DOES_ENTITY_EXIST, b.ent)) {
+				PoleRelease(k, "GTA's pole is gone");
+				continue;
+			}
+			NVec3 fw{}, rt{}, up{}, ps{};
+			CallVoid(N::GET_ENTITY_MATRIX, b.ent, &fw, &rt, &up, &ps);
+			const double R[3] = { rt.x, rt.y, rt.z }, F[3] = { fw.x, fw.y, fw.z }, U[3] = { up.x, up.y, up.z }, O[3] = { ps.x, ps.y, ps.z };
+			double       G[3], top[3], btop[3];  // GTA's trunk's foot and top now; the box's top
+			for (int i = 0; i < 3; ++i) {
+				G[i] = O[i] + R[i] * b.off[0] + F[i] * b.off[1] + U[i] * b.off[2];
+				top[i] = G[i] + U[i] * b.h;
+				btop[i] = b.P[i] + b.U[i] * b.h;
+			}
+			const bool   gMoved = PoleDist(G, b.P0) > 0.3 || Dot3(U, b.Ug0) < 0.985;  // (0.985: tilted 10 degrees)
+			const bool   gBroke = gMoved || Call<int>(N::HAS_OBJECT_BEEN_BROKEN, b.ent, 0) != 0;
+			const double dCar = hypot(G[0] - d.carO[0], G[1] - d.carO[1]);
+			const double along = (G[0] - d.carO[0]) * dir[0] + (G[1] - d.carO[1]) * dir[1];
+			const bool   touch = Call<int>(N::IS_ENTITY_TOUCHING_ENTITY, veh, b.ent) != 0;
+			if (touch && b.tTouch <= 0) b.tTouch = now;
+			// BeamNG's car moved the box (nothing else there does): 0.3 m from where it was put, or tilted 10 degrees
+			const bool bMoved = b.tFirst > 0 && b.puts == 0 && (PoleDist(b.P, b.B0) > 0.3 || Dot3(b.U, b.Ub0) < 0.985);
+			if (b.tFirst > 0 && !b.stood && !bMoved && Q.logs++ < 300) {
+				b.stood = true;
+				Log("pole boxes (v2.85): box %d stands at GTA's pole %d (%.2f m from where it was asked, upright %.2f) %.0f ms after it was sent, the pole %.1f m from the car", Q.base + k + 1,
+					b.ent, PoleDist(b.P, b.P0), b.U[2], (now - b.tA) * 1000, dCar);
+			}
+			if (bMoved && b.tHit <= 0) {
+				b.tHit = now;
+				++Q.hits;
+				if (b.tBroke <= 0) ++Q.snaps;
+				if (b.tBroke <= 0 && Q.logs++ < 300)
+					Log("pole (v2.85): box %d's ties SNAPPED by BeamNG's car (BeamNG's own force) before GTA's pole %d broke: the box moved %.2f m, upright %.2f; GTA's hidden car %s the pole",
+						Q.base + k + 1, b.ent, PoleDist(b.P, b.B0), b.U[2], b.tTouch > 0 ? "touched" : "has not touched");
+			}
+			// the contact line: once per pole, when GTA's hidden car touches GTA's pole or BeamNG's car moves the box
+			if (!b.said && (b.tTouch > 0 || b.tHit > 0)) {
+				b.said = true;
+				++g_ps.contactsBeam;
+				char what[64];
+				snprintf(what, sizeof(what), "a pole (BeamNG's box %d)", Q.base + k + 1);
+				if (Q.logs++ < 300)
+					Log("contact (v2.85): a pole (%d, model 0x%08X, %.1f x %.1f x %.1f m) at %.0f km/h: your car's damage by BeamNG (its box %d, a %s, %s, put there %.2f s before), the "
+					    "pole's reaction by GTA (its physics on the hidden car); first seen by %s; the hidden car %.2f m from BeamNG's car",
+						b.ent, b.gModel, b.gSize[0], b.gSize[1], b.gSize[2], spd * 3.6, Q.base + k + 1, b.model.c_str(), b.ties ? "tied" : "loose", now - b.tA,
+						b.tHit > 0 ? "BeamNG (the box moved)" : "GTA (the hidden car touches the pole)", el);
+				PsBendStart(what, now);
+			}
+			// GTA's result: its pole broke -> the box's ties are cut
+			if (gBroke && b.tBroke <= 0) {
+				b.tBroke = now;
+				++Q.cuts;
+				char m[64];
+				snprintf(m, sizeof(m), "{\"t\":\"twc\",\"k\":%d}", Q.base + k + 1);
+				DrvSend(m);
+				if (Q.logs++ < 300)
+					Log("pole (v2.85): GTA's pole %d BROKE (GTA's physics: moved %.2f m, upright %.2f, broken %d) %s: BeamNG told to cut box %d's ties%s; the hidden car %.2f m from BeamNG's car",
+						b.ent, PoleDist(G, b.P0), U[2], Call<int>(N::HAS_OBJECT_BEEN_BROKEN, b.ent, 0),
+						b.tTouch > 0 ? (std::to_string(int((now - b.tTouch) * 1000)) + " ms after the hidden car touched it").c_str() : "with no touch seen",
+						Q.base + k + 1, b.tHit > 0 ? (" (they had snapped " + std::to_string(int((now - b.tHit) * 1000)) + " ms before)").c_str() : "", el);
+			}
+			// the box moved in BeamNG, GTA's pole still stands 1.5 s later: the two games disagree (said once; the json's newtons tune it)
+			if (b.tHit > 0 && b.tBroke <= 0 && !b.mismatch && now - b.tHit > 1.5) {
+				b.mismatch = true;
+				if (Q.logs++ < 300)
+					Log("pole (v2.85): MISMATCH: box %d snapped in BeamNG but GTA's pole %d still stands 1.5 s later: raise the pole boxes' newtons in GtaBeamD1_traffic.json (\"polePool\")",
+						Q.base + k + 1, b.ent);
+			}
+			// GTA's fallen pole touches the hidden car (it landed on it, or the car drove into it): how far BeamNG's box is from it then
+			if (b.tBroke > 0 && touch && !b.landSaid && Dot3(U, b.Ug0) < 0.7 && now - b.tBroke > 0.3) {
+				b.landSaid = true;
+				if (Q.logs++ < 300)
+					Log("pole (v2.85): GTA's fallen pole %d (upright %.2f) touches the hidden car %.1f s after it broke: BeamNG's box %d is %.2f m from it at the foot, %.2f m at the top "
+					    "(under 1 m: BeamNG's car meets the box there too)", b.ent, U[2], now - b.tBroke, Q.base + k + 1, PoleDist(G, b.P), PoleDist(top, btop));
+			}
+			// after the break the box follows GTA's falling pole: put back on it, with its speed, when the two are 0.5 m apart, but
+			// never while the pole is at BeamNG's car (BeamNG resolves that: the pole landing on the car)
+			if (b.tBroke > 0 && b.tFirst > 0) {
+				if (!gMoved && now - b.tBroke > 0.25 && now - b.tBroke < 2.0) {
+					// its own entity stands still: the falling part may be another GTA object of this model (looked for among the props near)
+					for (const auto& kv : g_props.live) {
+						const PropLive& L = kv.second;
+						if (L.model != b.gModel || kv.first == b.ent || L.isCopy || PoleHas(kv.first) || PoleDist(L.ps, O) > 12.0 || L.ax[2][2] >= 0.985) continue;
+						if (!Call<int>(N::DOES_ENTITY_EXIST, kv.first)) continue;
+						if (Q.logs++ < 300)
+							Log("pole (v2.85): GTA's broken pole %d stands still; another GTA object of its model (%d, upright %.2f, %.1f m away) is the falling part: the box follows that one",
+								b.ent, kv.first, L.ax[2][2], PoleDist(L.ps, O));
+						b.ent = kv.first;
+						break;
+					}
+				} else if (gMoved) {
+					// how far BeamNG's car's middle is from the pole's axis (foot to top)
+					double ax[3] = { top[0] - G[0], top[1] - G[1], top[2] - G[2] }, t = 0;
+					for (int i = 0; i < 3; ++i) t += (cc[i] - G[i]) * ax[i];
+					t = std::clamp(t / std::max(1e-6, Dot3(ax, ax)), 0.0, 1.0);
+					const double axP[3] = { G[0] + ax[0] * t, G[1] + ax[1] * t, G[2] + ax[2] * t };
+					const double atCar = PoleDist(cc, axP), apart = std::max(PoleDist(G, b.P), PoleDist(top, btop));
+					if (apart > 0.5 && atCar > 3.0 && now - b.tPut > 0.15 && b.puts < 60) {
+						const NVec3  gv = Call<NVec3>(N::GET_ENTITY_VELOCITY, b.ent);
+						const double V[3] = { gv.x, gv.y, gv.z };
+						PolePut(k, G, F, U, V, true);
+						b.tPut = now;
+						++b.puts;
+						++Q.puts;
+						if (b.puts <= 3 && Q.logs++ < 300)
+							Log("pole (v2.85): box %d put back on GTA's falling pole %d (they were %.2f m apart; the pole: %.1f m/s, upright %.2f, %.1f m from BeamNG's car); time %d", Q.base + k + 1,
+								b.ent, apart, PsLen(V), U[2], atCar, b.puts);
+					}
+				}
+			}
+			// back to the pool
+			if (dCar > 45.0) PoleRelease(k, "far");
+			else if (b.tTouch <= 0 && b.tHit <= 0 && b.tBroke <= 0 && spd > 3.0 && along < -12.0) PoleRelease(k, "passed");
+			else if (b.tBroke > 0 && now - b.tBroke > 6.0 && dCar > 10.0) PoleRelease(k, "GTA's pole fell 6 s ago, the car is away");
+			else if (b.tBroke > 0 && now - b.tBroke > 15.0) PoleRelease(k, "GTA's pole fell 15 s ago");
+			else if (b.tHit > 0 && b.tBroke <= 0 && now - b.tHit > 4.0 && dCar > 10.0) PoleRelease(k, "moved in BeamNG only");
+		}
+		// ---- a free box -> the nearest pole ahead that has none (one a tick)
+		const double reach = std::clamp(10.0 + 1.5 * spd, 15.0, 40.0);
+		int          bestE = 0, nearN = 0;
+		double       bestD = 1e9;
+		for (auto& kv : g_props.live) {
+			const PropLive& L = kv.second;
+			auto            mi = g_props.models.find(L.model);
+			if (mi == g_props.models.end() || mi->second.kind != kPropBreak || L.isCopy || mi->second.mx[2] - mi->second.mn[2] < 4.0 || L.ax[2][2] < 0.985) continue;
+			const double dx = L.ps[0] - d.carO[0], dy = L.ps[1] - d.carO[1], dd = hypot(dx, dy), al = dx * dir[0] + dy * dir[1];
+			if (dd > reach || al < -2.0 || fabs(dx * dir[1] - dy * dir[0]) > 10.0) continue;
+			++nearN;
+			if (PoleHas(kv.first) || Q.said.count(kv.first)) continue;
+			if (dd < bestD) bestD = dd, bestE = kv.first;
+		}
+		if (bestE && freeN > 0) {
+			PropLive&   L = g_props.live[bestE];
+			PropModel&  m = g_props.models[L.model];
+			PropPhysBox pb{};
+			const char* no = nullptr;
+			const double sz = m.mx[2] - m.mn[2];
+			if (!Call<int>(N::DOES_ENTITY_EXIST, bestE)) no = "it is gone";
+			else if (!PropPhysShape(m, L, true, pb)) no = m.meas ? "its parts are over 3 m apart at bumper height (a gantry)" : nullptr;  // (not measured yet: tried again)
+			else if (std::max(pb.x1 - pb.x0, pb.y1 - pb.y0) > 0.8) no = "its trunk is over 0.8 m thick (not a pole)";
+			else if (Call<int>(N::HAS_OBJECT_BEEN_BROKEN, bestE, 0)) no = "GTA has broken it already";
+			else if (bestD < 3.5) no = "it is already too close for a box to be put there";
+			if (no) {
+				Q.said[bestE] = now;
+				if (Q.logs++ < 300) Log("pole boxes (v2.85): no box for GTA's pole %d (model 0x%08X, %.1f m tall, %.1f m away): %s: GTA's own, as v2.84", bestE, L.model, sz, bestD, no);
+			} else if (pb.x1 > pb.x0) {
+				int k = -1;
+				for (int q = 0; q < int(Q.box.size()); ++q)
+					if (Q.box[q].state == 1 && Q.box[q].ties && (k < 0 || fabs(Q.box[q].h - sz) < fabs(Q.box[k].h - sz))) k = q;
+				if (k < 0) return;
+				PoleBox&          b = Q.box[k];
+				const std::string model = b.model;
+				const double      bw = b.w, bl = b.l, bh = b.h, bkg = b.kg;
+				const bool        ties = b.ties;
+				b = PoleBox{};
+				b.model = model, b.w = bw, b.l = bl, b.h = bh, b.kg = bkg, b.ties = ties;
+				b.state = 2;
+				b.ent = bestE;
+				b.gModel = L.model;
+				for (int i = 0; i < 3; ++i) b.gSize[i] = m.mx[i] - m.mn[i];
+				b.off[0] = (pb.x0 + pb.x1) * 0.5, b.off[1] = (pb.y0 + pb.y1) * 0.5, b.off[2] = m.mn[2];
+				for (int i = 0; i < 3; ++i) b.P0[i] = L.ps[i] + L.ax[0][i] * b.off[0] + L.ax[1][i] * b.off[1] + L.ax[2][i] * b.off[2];
+				memcpy(b.P, b.P0, sizeof(b.P));
+				memcpy(b.Ug0, L.ax[2], sizeof(b.Ug0));
+				b.tA = now;
+				const double zero[3] = { 0, 0, 0 };
+				PolePut(k, b.P0, L.ax[1], L.ax[2], zero, false);
+				++Q.acts;
+				if (Q.logs++ < 300)
+					Log("pole boxes (v2.85): GTA's pole %d (model 0x%08X %s, %.1f x %.1f x %.1f m, trunk %.2f x %.2f m at bumper height) %.1f m ahead at %.0f km/h gets box %d (a %s, %s)",
+						bestE, L.model, m.name.empty() ? "" : m.name.c_str(), b.gSize[0], b.gSize[1], b.gSize[2], pb.x1 - pb.x0, pb.y1 - pb.y0, bestD, spd * 3.6, Q.base + k + 1,
+						b.model.c_str(), b.ties ? "tied" : "loose");
+			}
+		}
+		for (auto it = Q.said.begin(); it != Q.said.end();) it = now - it->second > 30.0 ? Q.said.erase(it) : std::next(it);
+		if (now - Q.logT >= 10.0) {
+			Q.logT = now;
+			int ready = 0, on = 0;
+			for (const PoleBox& b : Q.box) ready += b.state == 1, on += b.state == 2;
+			Log("pole (v2.85): 10 s: PropProxies ON: %u poles got a box, %u boxes moved by BeamNG's car (%u of them before GTA's pole broke), %u ties cut because GTA's pole broke, %u "
+			    "times put back on a falling pole, GTA's push at a boxed pole not sent %u times; now %d boxes ready, %d on poles, %d poles ahead",
+				Q.acts, Q.hits, Q.snaps, Q.cuts, Q.puts, Q.notSent, ready, on, nearN);
+			Q.acts = Q.hits = Q.cuts = Q.snaps = Q.puts = Q.notSent = 0;
+		}
+	}
+
 	void PsTick(const double O[3], const double R0[3], const double F0[3], const double U0[3], const double R[3], const double F[3], const double U[3], const double V[3], double ft,
 		double now)
 	{
@@ -13101,6 +13470,13 @@ namespace
 				if (S.pxLogs++ < 30)
 					Log("proxy (v2.83): CONFLICT: GTA changed the hidden car's speed by %.1f km/h (level) with GTA car %d, which has a box, %.1f m away: BOTH games resolved it (the "
 					    "no-collision call didn't hold); not sent to BeamNG; the hidden car %.2f m from BeamNG's car (conflict %u this session)", dvh * 3.6, pxE, pxD, el, S.pxConflicts);
+			} else if (best && best->kind == 2 && PoleHas(best->e)) {
+				// v2.85: a pole that has a box: BeamNG has the real hit. GTA's push is not sent and no crash is played out (the speed
+				// spring takes the hidden car back to BeamNG's car)
+				++g_pole.notSent;
+				if (g_pole.logs++ < 300)
+					Log("pole (v2.85): GTA changed the hidden car's speed by %.1f km/h (level) at GTA's pole %d, which has a box: NOT sent to BeamNG (it has the real hit); the "
+					    "hidden car %.2f m from BeamNG's car", dvh * 3.6, best->e, el);
 			} else if (!best) {
 				++S.hitMap;
 				S.mapDvMax = std::max(S.mapDvMax, dvh);
@@ -13151,6 +13527,7 @@ namespace
 		// v2.81 contact log: GTA's contacts (each new touch: what, who resolved it, what BeamNG got, the hidden car's distance); else
 		// BeamNG's own (a sudden stop or jolt with nothing of GTA's at the hidden car)
 		for (const PsNear* q : fresh) {
+			if (q->kind == 2 && PoleHas(q->e)) continue;  // (v2.85: its own contact line: PolesTick)
 			++S.contactsGta;
 			char what[64];
 			if (q->kind == 0)
@@ -14861,6 +15238,7 @@ namespace
 		PropsTick(paused);     // v2.5: GTA's props and BeamNG's car
 		WeaponsTick(paused);   // v2.6: GTA's bullets and explosions on BeamNG's car, its fire, you hurt
 		TrafficTick(paused);   // v2.7: GTA's cars and people against BeamNG's car
+		PolesTick(paused);     // v2.85: pole boxes
 		DentsTick();           // v2.5: BeamNG's dents on the drawn car
 		DriveHud(paused);      // v2.01
 		DriveGauge(paused);    // v2.1

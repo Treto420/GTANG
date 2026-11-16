@@ -250,7 +250,7 @@ static bool FakeHRay(double x0, double y0, double z0, double x1, double y1, doub
 // 20 m (breakable, 0.4 x 0.4 x 8 m), a bin ON the line at s 45 (0.6 x 0.6 x 1 m), a lamp post ON it at s 80, a container 7 m
 // left at s 100 (6 x 2.4 x 2.6 m: solid), a can (tiny: ignored) and one attached to something (skipped)
 struct FakeProp { int h; double x, y, yaw; unsigned model; bool frag, attached, pushed; bool posed = false, frozen = false; double z = 0, R[3][3] = {}; int poses = 0;
-                  int src = 0; bool hidden = false; };  // v2.71: a script's copy of map prop src (map props don't move for a script, copies do); hidden by a model hide
+                  int src = 0; bool hidden = false; double brokeT = 0; };  // v2.85 brokeT: FAKE_POLEFALL: GTA broke it then (it falls over the car's way)  // v2.71: a script's copy of map prop src (map props don't move for a script, copies do); hidden by a model hide
 static int Shown(const FakeProp* fp) { return fp->src ? fp->src : fp->h; }  // (the prints name the map prop a copy stands for)
 static int g_copyNext = 9500;
 struct FakeDent { int veh; double x, y, z, depth; };
@@ -332,6 +332,10 @@ static bool FakeObjRay(const double a[3], const double b[3], int* ent, double p[
 }
 struct FakeObjHit { int h; bool hit; int ent; double p[3]; };
 static std::vector<FakeObjHit> g_objRays;
+// v2.85 (sandbox only, a guess at GTA, NOT its physics): FAKE_POLEFALL=1: a breakable prop the car comes within 3 m of is broken
+// and tips over the car's way (90 degrees in about 0.9 s). How far it is tipped now (rad)
+static double NowS();
+static double PoleTilt(const FakeProp* fp) { const double t = fp->brokeT > 0 ? NowS() - fp->brokeT : 0.0; return std::min(1.5707963, 2.0 * t * t); }
 static FakeProp* PropOf(int h)
 {
 	InitProps();
@@ -739,6 +743,13 @@ PUINT64 nativeCall()
 			const double a = fp->yaw * 3.14159265358979 / 180.0;
 			bool gh; unsigned m;
 			*fw = NV{ float(-sin(a)), float(cos(a)), 0 }; *rt = NV{ float(cos(a)), float(sin(a)), 0 }; *up = NV{ 0, 0, 1 };
+			if (fp->brokeT > 0) {   // v2.85: tipped about the level axis across the car's way (Rodrigues)
+				const double th = PoleTilt(fp), c = cos(th), sn = sin(th), kx = -0.93969, ky = -0.34202;
+				for (NV* v : { fw, rt, up }) {
+					const double x = v->x, y = v->y, z = v->z, kd = kx * x + ky * y;
+					*v = NV{ float(x * c + ky * z * sn + kx * kd * (1 - c)), float(y * c - kx * z * sn + ky * kd * (1 - c)), float(z * c + (kx * y - ky * x) * sn) };
+				}
+			}
 			*ps = NV{ float(fp->x), float(fp->y), float(FakeGround(fp->x, fp->y, &gh, &m)) };
 		} else if (int(g_args[0]) == 100) {   // v2.77: the car itself
 			*rt = NV{ float(g_rot[0][0]), float(g_rot[1][0]), float(g_rot[2][0]) }; *fw = NV{ float(g_rot[0][1]), float(g_rot[1][1]), float(g_rot[2][1]) };
@@ -864,7 +875,10 @@ PUINT64 nativeCall()
 		g_vel[0] = F(1); g_vel[1] = F(2); g_vel[2] = F(3); g_velSet = true; break;
 	case 0x4805D2B1D8CF94A9:   // GET_ENTITY_VELOCITY (v2.7: the traffic car; v2.72: a pushed prop's copy)
 		if (int(g_args[0]) == 9001) RetV(float(g_tcV[0]), float(g_tcV[1]), float(g_tcV[2]));
-		else if (FakeProp* fp = PropOf(int(g_args[0]))) RetV(0.0f, 0.0f, fp->pushed ? 5.0f : 0.0f);
+		else if (FakeProp* fp = PropOf(int(g_args[0]))) {
+			if (fp->brokeT > 0 && PoleTilt(fp) < 1.57) RetV(-0.342f * 4.0f, 0.940f * 4.0f, -2.0f);   // v2.85: falling
+			else RetV(0.0f, 0.0f, fp->pushed ? 5.0f : 0.0f);
+		}
 		else if (int(g_args[0]) == 100 && g_velSet) {   // v2.77: the car's own speed reads back (FAKE_PSKICK: one "crash")
 			double v[3] = { g_vel[0], g_vel[1], g_vel[2] };
 			if (Env("FAKE_PSKICK") && g_tcPlaced && !g_tcGone && !g_psKicked && !g_passStep && hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1]) < 4.0) {   // (v2.83: not a pair set not to collide)
@@ -886,7 +900,14 @@ PUINT64 nativeCall()
 			g_wSet = true;
 		}
 		break;
+	case 0x8ABFB70C49CC43E2: { FakeProp* fp = PropOf(int(g_args[0])); RetI(fp && fp->brokeT > 0 ? 1 : 0); break; }   // HAS_OBJECT_BEEN_BROKEN (v2.85)
 	case 0x17FFC1B2BA35A494:   // IS_ENTITY_TOUCHING_ENTITY (v2.77): the car and the parked traffic car within 4 m (FAKE_PSKICK)
+		if (FakeProp* fp = PropOf(int(g_args[1]))) {   // v2.85: FAKE_POLEFALL
+			const bool at = Env("FAKE_POLEFALL") && int(g_args[0]) == 100 && fp->frag && !fp->src && hypot(g_pos[0] - fp->x, g_pos[1] - fp->y) < 3.0;
+			if (at && fp->brokeT <= 0) fp->brokeT = NowS();
+			RetI(at ? 1 : 0);
+			break;
+		}
 		RetI(Env("FAKE_PSKICK") && int(g_args[0]) == 100 && int(g_args[1]) == 9001 && g_tcPlaced && !g_tcGone && hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1]) < 4.0 ? 1 : 0);
 		break;
 	case 0xC45D23BAF168AAB8: RetF(1000.0f); break;   // GET_VEHICLE_ENGINE_HEALTH (v2.77)

@@ -77,7 +77,7 @@
 --   gtaBridge.soundSession(false) -- v2.4: switch the sound "session" mode off (the GTA plugin's BeamNGSoundWake=session sets it)
 
 local M = {}
-M.version = '2.84'
+M.version = '2.85'
 local logTag = 'gtaBridge'
 
 -- ---------------------------------------------------------------- config
@@ -5814,24 +5814,27 @@ handlers.twp = function(m)
   local same = #m.m > 0
   for k, model in ipairs(m.m) do
     local e = T.pool[k]
-    if not (e and (e.want == model or e.model == model) and (e.state == 'want' or e.state == 'init' or ((e.state == 'park' or e.state == 'live') and T.alive(e)))) then same = false end
+    if not (e and (e.want == model or e.model == model) and (e.state == 'want' or e.state == 'init' or e.state == 'hang' or ((e.state == 'park' or e.state == 'live') and T.alive(e)))) then same = false end
   end
   for k in pairs(T.pool) do if k > #m.m then same = false end end
   if same then
     for _, e in pairs(T.pool) do
       if e.state == 'live' then T.park(e) end
-      if e.state == 'park' then T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3], kg = e.kg }) end
+      if e.state == 'park' then T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3], kg = e.kg, ties = e.tie and (e.ties and 1 or 0) or nil }) end
     end
     logI('traffic twins: GTA asked for the same ' .. #m.m .. ': kept from before')
     return
   end
   T.clear('a new pool')
   for k, model in ipairs(m.m) do
-    if k <= 8 and type(model) == 'string' and model ~= '' then
+    if k <= 12 and type(model) == 'string' and model ~= '' then   -- (v2.85: 8 traffic boxes and up to 4 pole boxes)
       T.pool[k] = { k = k, model = model, want = model, state = 'want' }
       -- v2.83: "box:width:length:height:kg": a proxy box (the mod's own gtab_prop, sized and weighted by its jbeam variables), not a BeamNG car
       local bw, bl, bh, bm = model:match('^box:([%d.]+):([%d.]+):([%d.]+):([%d.]+)$')
       if bw then T.pool[k].box = { tonumber(bw), tonumber(bl), tonumber(bh), tonumber(bm) } end
+      -- v2.85: "pole:width:depth:height:kg:newtons": a box tied to the ground (part gtab_prop_anchor); its ties snap at that force, or when GTA's pole breaks ("twc")
+      local pw, pl, ph, pm, pn = model:match('^pole:([%d.]+):([%d.]+):([%d.]+):([%d.]+):([%d.]+)$')
+      if pw then T.pool[k].box, T.pool[k].tie = { tonumber(pw), tonumber(pl), tonumber(ph), tonumber(pm) }, tonumber(pn) end
     end
   end
   T.fallback = type(m.fb) == 'table' and m.fb or { 'fullsize', 'pickup', 'covet' }
@@ -5851,7 +5854,9 @@ world.tw.spawnOne = function(e)
     if old then old:delete() end
   end)
   if e.box then   -- v2.83 (spawned the way the physics props are: world.phys.spawnOne)
-    local cfgT = { format = 2, model = 'gtab_prop', parts = {}, vars = { ['$gx'] = e.box[1], ['$gy'] = e.box[2], ['$gz'] = e.box[3], ['$gm'] = e.box[4] } }
+    local cfgT = { format = 2, model = 'gtab_prop', parts = e.tie and { gtab_prop_anchor = 'gtab_prop_anchor' } or {},
+                   vars = { ['$gx'] = e.box[1], ['$gy'] = e.box[2], ['$gz'] = e.box[3], ['$gm'] = e.box[4], ['$gb'] = e.tie } }
+    e.z0 = pos.z
     local opts = { config = cfgT, pos = pos, rot = quat(0, 0, 0, 1), autoEnterVehicle = false, cling = false, vehicleName = 'gtab_twin_' .. e.k }
     local t0 = os.clock()
     for _, way in ipairs({ world.phys.how or 'core_vehicles', 'spawn' }) do
@@ -5910,7 +5915,7 @@ world.tw.measure = function(e)
   local all, mn, mx = {}, { 1e9, 1e9, 1e9 }, { -1e9, -1e9, -1e9 }
   local kg = 0   -- v2.84: its weight as BeamNG built it (a truck's box: the jbeam's limit was 5 t before 2.84)
   for cid, nd in pairs(vdata.nodes) do
-    local c = type(nd) == 'table' and (nd.cid or cid)
+    local c = type(nd) == 'table' and not (e.tie and tostring(nd.name):match('^a%d$')) and (nd.cid or cid)   -- (v2.85: not a pole box's ground nodes)
     if c then
       kg = kg + (tonumber(nd.nodeWeight) or 0)
       local p = v3(veh:getNodePosition(c))
@@ -5996,6 +6001,7 @@ handlers.twa = function(m)
   e.state, e.gid, e.tA, e.vel, e.velDone, e.frames, e.dmax = 'live', m.id, now(), v, false, 0, 0
   e.rest = nil   -- (taken again 3 frames after the teleport: its shape here, repaired, upright)
   e.pk = tonumber(m.pk) == 1
+  e.cut = tonumber(m.cut) == 1   -- v2.85
   T.acts = T.acts + 1
   if not e.box then pcall(function() e.veh:queueLuaCommand(string.format("input.event('throttle',0,2) input.event('brake',0,2) input.event('steering',0,2) input.event('parkingbrake',%d,2)", e.pk and 1 or 0)) end) end
   if T.acts <= 30 then
@@ -6075,6 +6081,35 @@ function M.eyeFromCar(e, how)
     logI('drive: no driver seat from BeamNG (' .. tostring(how) .. '): GTA keeps its own (Ctrl+Shift+F10 in GTA sets it by hand)')
   end
 end
+-- v2.85: GTA's pole broke (GTA's physics on the hidden car): its box's ties are cut: GTA's result. BeamNG moves the loose box from
+-- here. In the box's own Lua (the way the weapons break parts): the break group, else beam by beam; it says how many are broken
+world.tw.CUT = [[local n, tot = 0, 0
+pcall(function() beamstate.breakBreakGroup('gtab_tie') end)
+for _, b in pairs(v.data.beams or {}) do
+  if b.breakGroup == 'gtab_tie' then
+    tot = tot + 1
+    local okB, br = pcall(function() return obj:beamIsBroken(b.cid) end)
+    if not (okB and br) then pcall(function() obj:breakBeam(b.cid) end) end
+    okB, br = pcall(function() return obj:beamIsBroken(b.cid) end)
+    if okB and br then n = n + 1 end
+  end
+end
+obj:queueGameEngineLua(string.format('if gtaBridge and gtaBridge.tieCut then gtaBridge.tieCut(%d, %d, %d) end', obj:getID(), n, tot))]]
+handlers.twc = function(m)
+  local e = world.tw.pool[tonumber(m.k) or -1]
+  if not (e and e.state == 'live' and e.tie) then return end
+  e.cut = true
+  pcall(function() e.veh:queueLuaCommand(world.tw.CUT) end)
+end
+function M.tieCut(vid, n, tot)
+  local T = world.tw
+  for _, e in pairs(T.pool) do
+    if e.vid == vid then
+      T.cuts = (T.cuts or 0) + 1
+      if T.cuts <= 40 then logI(string.format('pole boxes (v2.85): box %d: its ties were cut (%d of %d ground beams broken now)', e.k, n, tot)) end
+    end
+  end
+end
 handlers.twr = function(m)
   local e = world.tw.pool[tonumber(m.k) or -1]
   if e and e.state == 'live' then
@@ -6121,21 +6156,38 @@ world.tw.tick = function()
           T.park(e)
           if e.state == 'park' then T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3], kg = e.kg }) end
         end
+      elseif ok and good and e.tie and not e.hung and T.tiesOk == nil then
+        -- v2.85: do a tied box's ties come along with a teleport? (not documented.) It was spawned in the air: tied, it hangs. Moved
+        -- 3 m up: tied still, it hangs there; if it falls, GTA doesn't use the pole boxes (told: "ties"). The first one says for all
+        e.hung = true
+        local p = v3(e.veh:getPosition())
+        e.fell0 = (e.z0 or p[3]) - p[3]
+        pcall(function() e.veh:setPositionRotation(p[1], p[2], p[3] + 3, 0, 0, 0, 1) end)
+        e.state, e.t0, e.zH = 'hang', t, p[3] + 3
       elseif ok and good then
         T.park(e)
         if e.state ~= 'park' then goto nextTwin end
+        if e.tie and e.ties == nil then e.ties = T.tiesOk end
         if e.box then
           logI(string.format('proxy boxes: box %d ready: %.2f x %.2f x %.2f m, %d kg asked; it measures %.2f x %.2f x %.2f m, its bottom middle %.2f %.2f %.2f from its position (spawned in %.0f ms)',
             e.k, e.box[1], e.box[2], e.box[3], e.box[4], e.size[1], e.size[2], e.size[3], e.o[1], e.o[2], e.o[3], e.ms or 0))
           logI(string.format('proxy boxes (v2.84): box %d weighs %s kg in BeamNG (%d asked)', e.k, e.kg and string.format('%.0f', e.kg) or '?', e.box[4]))
         end
         logI(string.format('traffic twins: twin %d is a %s (%.1f x %.1f x %.1f m, %d body nodes watched; spawned in %.0f ms)', e.k, e.model, e.size[1], e.size[2], e.size[3], #e.cids, e.ms or 0))
-        T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3], kg = e.kg })
+        T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3], kg = e.kg, ties = e.tie and (e.ties and 1 or 0) or nil })
       elseif t - e.t0 > 3 then
         e.state = 'fail'
         logE('traffic twins: twin ' .. e.k .. ' (' .. e.model .. ') could not be measured: ' .. tostring(ok and 'no nodes' or good))
         T.say({ t = 'twi', k = e.k, ok = 0, why = 'not measured' })
       end
+    elseif e.state == 'hang' and t - e.t0 > 0.5 then
+      local okP, p = pcall(function() return v3(e.veh:getPosition()) end)
+      local drop = okP and p and (e.zH - p[3]) or 99
+      e.ties = drop < 0.15
+      T.tiesOk = e.ties
+      logI(string.format('pole boxes (v2.85): box %d is tied to the ground: it fell %.2f m in its first 0.3 s in the air, and %.2f m in 0.5 s after a teleport 3 m up: %s', e.k, e.fell0 or -1, drop,
+        e.ties and 'its ties CAME ALONG with the teleport (it hangs there)' or 'its ties did NOT come along (it falls): GTA does not use the pole boxes'))
+      e.state, e.t0 = 'init', t - 1
     elseif e.state == 'live' then
       e.frames = e.frames + 1
       local veh = e.veh
@@ -6156,6 +6208,7 @@ world.tw.tick = function()
       if not e.velDone and e.frames >= 1 and (not e.box or e.boxOk) then
         e.velDone = true
         local v = e.vel
+        if e.tie and e.cut then pcall(function() veh:queueLuaCommand(T.CUT) end) end   -- v2.85 (first: a teleport repairs the ties)
         pcall(function() veh:applyClusterVelocityScaleAdd(veh:getRefNodeId(), 1, v[1], v[2], v[3]) end)
       end
       local okP = (e.box and not e.boxOk) or pcall(function()   -- (v2.83: a box: no pose until it is where it was asked)
